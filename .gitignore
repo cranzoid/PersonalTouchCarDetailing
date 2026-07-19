@@ -1,0 +1,20 @@
+node_modules/
+.next/
+out/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# env & secrets — never commit
+.env
+.env.*
+!.env.example
+
+# local uploads (customer files are private; prod uses object storage)
+var/
+
+# misc
+.DS_Store
+*.pem
+npm-debug.log*
+coverage/

@@ -1,0 +1,35 @@
+@import "tailwindcss";
+
+@theme {
+  /* Brand palette — deep charcoal + amber accent, premium detailing look */
+  --color-ink-950: #0a0e13;
+  --color-ink-900: #10161d;
+  --color-ink-800: #1a222c;
+  --color-ink-700: #27313d;
+  --color-ink-600: #3b4754;
+  --color-ink-400: #7a8794;
+  --color-ink-300: #a3aeb9;
+  --color-ink-200: #cdd4db;
+  --color-ink-100: #e8ebee;
+  --color-ink-50: #f5f6f8;
+  --color-accent-300: #ffd166;
+  --color-accent-400: #f6b93b;
+  --color-accent-500: #e8a020;
+  --color-accent-600: #c97f0a;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  @apply bg-ink-950 text-ink-100 antialiased;
+}
+
+/* Light surfaces for admin app */
+.admin-surface {
+  @apply bg-ink-50 text-ink-900;
+}
