@@ -22,6 +22,10 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   serverExternalPackages: ["pg", "bcryptjs", "pdfkit"],
   outputFileTracingRoot: resolve(process.cwd()),
+  experimental: {
+    // Staff can upload up to 20 10 MB inspection photos in one server action.
+    serverActions: { bodySizeLimit: "210mb" },
+  },
   async headers() {
     return [
       {

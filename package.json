@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "start:azure": "npm run db:migrate && npm run db:seed && npm run start",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:seed": "tsx src/db/seed.ts",
@@ -13,9 +14,11 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@azure/identity": "^4.13.1",
+    "@azure/storage-blob": "^12.33.0",
     "bcryptjs": "^3.0.2",
-    "drizzle-orm": "^0.44.2",
-    "next": "^15.3.4",
+    "drizzle-orm": "^0.45.2",
+    "next": "^15.5.21",
     "pdfkit": "^0.19.1",
     "pg": "^8.16.0",
     "react": "^19.1.0",
@@ -40,6 +43,12 @@
     "esbuild@0.18.20": true,
     "esbuild@0.25.12": true,
     "esbuild@0.28.1": true,
-    "sharp@0.34.5": true
+    "sharp@0.35.3": true
+  },
+  "overrides": {
+    "next": {
+      "postcss": "8.5.22",
+      "sharp": "0.35.3"
+    }
   }
 }

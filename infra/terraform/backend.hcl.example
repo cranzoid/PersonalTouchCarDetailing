@@ -1,0 +1,5 @@
+resource_group_name  = "pt-tfstate-iox0ny"
+storage_account_name = "pttfiox0ny"
+container_name       = "tfstate"
+key                  = "personal-touch-car-detailing-prod.tfstate"
+use_azuread_auth     = true

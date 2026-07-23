@@ -1,10 +1,12 @@
 import "server-only";
 
+import { DefaultAzureCredential } from "@azure/identity";
+import { BlobServiceClient, ContainerClient } from "@azure/storage-blob";
 import { createHash, createHmac } from "crypto";
 import { mkdir, readFile, writeFile } from "fs/promises";
 import { dirname, relative, resolve } from "path";
 
-type StorageConfig = {
+type S3StorageConfig = {
   endpoint: string;
   bucket: string;
   region: string;
@@ -12,7 +14,13 @@ type StorageConfig = {
   secretAccessKey: string;
 };
 
-function storageConfig(): StorageConfig | null {
+type AzureStorageConfig = {
+  accountName: string;
+  containerName: string;
+  connectionString?: string;
+};
+
+function s3StorageConfig(): S3StorageConfig | null {
   const endpoint = process.env.OBJECT_STORAGE_ENDPOINT;
   const bucket = process.env.OBJECT_STORAGE_BUCKET;
   const accessKeyId = process.env.OBJECT_STORAGE_ACCESS_KEY_ID;
@@ -25,6 +33,33 @@ function storageConfig(): StorageConfig | null {
     accessKeyId,
     secretAccessKey,
   };
+}
+
+function azureStorageConfig(): AzureStorageConfig | null {
+  const accountName = process.env.AZURE_STORAGE_ACCOUNT_NAME;
+  const containerName = process.env.AZURE_STORAGE_CONTAINER_NAME;
+  if (!accountName || !containerName) return null;
+  return {
+    accountName,
+    containerName,
+    connectionString: process.env.AZURE_STORAGE_CONNECTION_STRING,
+  };
+}
+
+let azureContainerPromise: Promise<ContainerClient> | undefined;
+function azureContainer(config: AzureStorageConfig): Promise<ContainerClient> {
+  if (!azureContainerPromise) {
+    azureContainerPromise = Promise.resolve().then(() => {
+      const service = config.connectionString
+        ? BlobServiceClient.fromConnectionString(config.connectionString)
+        : new BlobServiceClient(
+            `https://${config.accountName}.blob.core.windows.net`,
+            new DefaultAzureCredential(),
+          );
+      return service.getContainerClient(config.containerName);
+    });
+  }
+  return azureContainerPromise;
 }
 
 function safeKey(key: string): string {
@@ -43,7 +78,7 @@ function hmac(key: string | Buffer, value: string): Buffer {
   return createHmac("sha256", key).update(value).digest();
 }
 
-function objectUrl(config: StorageConfig, key: string): URL {
+function objectUrl(config: S3StorageConfig, key: string): URL {
   const url = new URL(config.endpoint);
   const base = url.pathname.replace(/\/$/, "");
   const encodedKey = safeKey(key).split("/").map(encodeURIComponent).join("/");
@@ -57,7 +92,7 @@ async function signedObjectRequest(
   body?: Buffer,
   contentType?: string,
 ): Promise<Response> {
-  const config = storageConfig();
+  const config = s3StorageConfig();
   if (!config) throw new Error("Object storage is not configured");
   const url = objectUrl(config, key);
   const now = new Date();
@@ -109,8 +144,16 @@ function localPath(key: string): string {
 }
 
 export async function putPrivateFile(key: string, data: Buffer, contentType: string): Promise<void> {
-  const config = storageConfig();
-  if (config) {
+  const azureConfig = azureStorageConfig();
+  if (azureConfig) {
+    const container = await azureContainer(azureConfig);
+    await container.getBlockBlobClient(safeKey(key)).uploadData(data, {
+      blobHTTPHeaders: { blobContentType: contentType },
+    });
+    return;
+  }
+  const s3Config = s3StorageConfig();
+  if (s3Config) {
     const response = await signedObjectRequest("PUT", key, data, contentType);
     if (!response.ok) throw new Error(`Object storage upload failed (${response.status})`);
     return;
@@ -124,8 +167,13 @@ export async function putPrivateFile(key: string, data: Buffer, contentType: str
 }
 
 export async function getPrivateFile(key: string): Promise<Buffer> {
-  const config = storageConfig();
-  if (config) {
+  const azureConfig = azureStorageConfig();
+  if (azureConfig) {
+    const container = await azureContainer(azureConfig);
+    return container.getBlockBlobClient(safeKey(key)).downloadToBuffer();
+  }
+  const s3Config = s3StorageConfig();
+  if (s3Config) {
     const response = await signedObjectRequest("GET", key);
     if (!response.ok) throw new Error(`Object storage read failed (${response.status})`);
     return Buffer.from(await response.arrayBuffer());
@@ -135,4 +183,3 @@ export async function getPrivateFile(key: string): Promise<Buffer> {
   }
   return readFile(localPath(key));
 }
-

@@ -18,3 +18,13 @@ var/
 *.pem
 npm-debug.log*
 coverage/
+
+# Terraform local working data and uncommitted variable files. Production
+# state is stored in the Azure Storage backend configured during init.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+*.auto.tfvars
+crash.log

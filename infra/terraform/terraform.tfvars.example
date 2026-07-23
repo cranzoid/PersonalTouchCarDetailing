@@ -1,0 +1,4 @@
+subscription_id  = "00000000-0000-0000-0000-000000000000"
+admin_name       = "Owner"
+admin_email      = "owner@example.com"
+monthly_budget_inr = 4000
