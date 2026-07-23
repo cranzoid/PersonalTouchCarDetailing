@@ -276,6 +276,7 @@ resource "azurerm_linux_web_app" "main" {
     SCM_DO_BUILD_DURING_DEPLOYMENT             = "true"
     ENABLE_ORYX_BUILD                          = "true"
     WEBSITE_NODE_DEFAULT_VERSION               = "~22"
+    WEBSITES_CONTAINER_START_TIME_LIMIT        = "600"
     WEBSITE_START_SCM_ON_SITE_CREATION         = "1"
   }
 }
