@@ -1,10 +1,12 @@
 import { asc } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { ServiceEditor } from "./service-editor";
+import { requirePageStaff } from "@/lib/auth/page";
 
 export const dynamic = "force-dynamic";
 
 export default async function ServicesAdminPage() {
+  await requirePageStaff("manage_services");
   const categories = await db()
     .select()
     .from(schema.serviceCategories)

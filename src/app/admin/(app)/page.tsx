@@ -2,7 +2,7 @@ import Link from "next/link";
 import { and, asc, count, eq, gte, inArray, lt } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { StatusBadge } from "@/components/admin";
-import { getStaff } from "@/lib/auth/session";
+import { requirePageStaff } from "@/lib/auth/page";
 import { getSettings } from "@/lib/settings";
 import { formatCents } from "@/lib/money";
 import { formatInZone, zonedToUtc } from "@/lib/tz";
@@ -10,7 +10,7 @@ import { formatInZone, zonedToUtc } from "@/lib/tz";
 export const dynamic = "force-dynamic";
 
 export default async function AdminDashboard() {
-  const staff = await getStaff();
+  const staff = await requirePageStaff("view_dashboard");
   const settings = await getSettings();
   const tz = settings.timezone;
 
@@ -76,7 +76,7 @@ export default async function AdminDashboard() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-white">Good day, {staff?.name.split(" ")[0]}</h1>
+      <h1 className="text-2xl font-bold text-white">Good day, {staff.name.split(" ")[0]}</h1>
       <p className="mt-1 text-sm text-ink-400">
         {formatInZone(now, tz, { weekday: "long", month: "long", day: "numeric" })}
       </p>

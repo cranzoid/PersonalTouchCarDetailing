@@ -1,165 +1,252 @@
 # WORKFLOW.md — Project State & Handoff
 
-Last updated: 2026-07-19 (session 1 — initial build).
-Read `BUILD.md` first for product scope and architecture; this file records the
-repository's **actual current state** and the exact next action.
+Last updated: 2026-07-23
 
----
+Read `BUILD.md` first for the product specification. This document is the
+authoritative state of the repository and replaces the older session-by-session
+handoff.
 
-## Current phase
+## Current state
 
-**Phase 1 — Foundation + booking vertical: COMPLETE (verified).**
-Next up: Phase 2 — Estimates & approvals (see "Exact next action" below).
+All seven implementation phases in `BUILD.md` are complete. The repository was
+continued from a Phase 5 handoff, then Phase 6, Phase 7, the cross-cutting audit
+findings, and the public/admin brand redesign were completed.
 
-## Completed and verified (this session)
+The implementation now covers the full customer journey:
 
-- **Scaffold**: Next.js 15 + React 19 + TypeScript + Tailwind v4, manual scaffold
-  (create-next-app rejects the capitalized folder name). `npm run build` passes;
-  all 27 routes compile.
-- **Database**: PostgreSQL 14 (local, unix socket `/tmp`), Drizzle ORM.
-  Migration `drizzle/0000_init.sql` applied to `ptcd_dev` and `ptcd_test`.
-  ~30 tables covering identity/sessions/tokens/audit, CRM (customers, vehicles,
-  leads + jsonb attribution), full service catalog, scheduling (bays, hours,
-  blocks, appointments + line snapshots), quotes/estimates, jobs/inspections/QC,
-  invoices/payments/webhook events, communications/templates, settings KV.
-- **Seed** (`npm run db:seed`, idempotent): 6 categories / 24 services from the
-  spec, vehicle-size adjustments, 6 add-ons, 2 bays, business hours, counters,
-  message templates, dev owner login `owner@ptcd.local` / `detailing-dev-2026`
-  (**dev only — replace before production**). All prices/durations are
-  PLACEHOLDERS pending owner confirmation.
-- **Core libraries** (`src/lib/`):
-  - `auth/` — bcrypt passwords, DB-backed sessions (hashed tokens, revocable),
-    `requireStaff(permission)` server gate + role permission map.
-  - `pricing/` — server-authoritative price/duration/tax computation
-    (vehicle-category adjustments, add-on eligibility, HST snapshot, deposits).
-  - `booking/` — pure availability engine (hours, granularity, buffers, notice,
-    window, bay capacity, global/bay blocks) + `createAppointment` transaction
-    that locks bay rows `FOR UPDATE` and re-validates before insert.
-  - `messaging/` — dev transport logging to `communications`; marketing-consent
-    enforcement lives inside `sendMessage` (operational kinds always allowed).
-  - `audit.ts`, `settings.ts` (typed KV with safe defaults), `tz.ts` (DST-safe
-    America/Toronto ↔ UTC), `money.ts` (integer cents), `id.ts` (prefixed ids).
-- **Public site** (dark premium theme, responsive, attribution capture on
-  landing): Home, Services overview + per-service detail, **working booking
-  wizard** (service → vehicle → add-ons → real availability → contact →
-  policies → confirmation; server recomputes price + confirms in a locking
-  transaction), **working quote request** (photos upload to private storage,
-  lead + quote request created, ack message logged), Contact + Fleet (working
-  lead forms), About / FAQ / Gallery / Reviews (no invented history or fake
-  testimonials — placeholders marked), Privacy / Cancellation / Terms (drafts
-  flagged for owner/legal review), Portal entry page (tokened-link model).
-- **Admin app** (`/admin`, session-gated layout + per-action `requireStaff`):
-  Login/logout, Dashboard (today's appointments, new leads/quotes, action
-  counts), Appointments list + detail with audited status transitions
-  (confirm/arrive/cancel(+reason)/no-show/complete), Leads + Quote-request
-  review (private photo viewing via authorized `/api/files/[id]`), Customers
-  list/detail (vehicles, appointment history, communication history),
-  Services editor (price/duration/mode/deposit/active/featured — audited),
-  Business settings editor (identity, HST rate, booking rules — audited).
-- **Tests** (`npm test` — 22 passing):
-  - Money/pricing math incl. HST rounding.
-  - Availability slots: hours, notice, window, closures, bay capacity,
-    unassigned-appointment capacity.
-  - **DB concurrency**: 5 parallel bookings for one slot with 2 bays → exactly
-    2 succeed on distinct bays; 1 bay → exactly 1; overlap rejected, adjacent
-    slot allowed; out-of-hours rejected.
-- **Smoke test**: production server boots; all public routes 200; `/admin`
-  redirects unauthenticated → `/admin/login`.
+```text
+lead / quote / direct booking
+  -> customer + vehicle
+  -> estimate and approval when needed
+  -> staffed appointment and deposit
+  -> check-in, inspection, work approval, job, and QC
+  -> individual or consolidated invoice
+  -> online/manual payment, receipt, and refund
+  -> portal history, review request, and maintenance reminder
+```
 
-## Implemented but not fully verified
+There is no unfinished application phase in the agreed scope. The remaining
+items are production configuration, real-provider acceptance tests, content or
+legal approval, and deployment authorization; these require owner credentials
+or decisions and are listed below.
 
-- Booking wizard and quote form UI flows work through the same server actions
-  the tests exercise, but were **not driven end-to-end in a browser** this
-  session (server-action + DB layers are test-covered; routes render 200).
-- Login UI flow (session creation code is exercised; form not browser-tested).
-- Attribution capture (localStorage first/last-touch) — code reviewed, not
-  browser-tested.
+## Final verification
 
-## In progress / not started
+Verified on 2026-07-23 against the dedicated local `ptcd_test` and seeded
+`ptcd_dev` PostgreSQL databases:
 
-- Estimates builder & customer tokened approval (schema + access_tokens ready).
-- Jobs pipeline UI (check-in, inspections, additional work, QC) — schema ready.
-- Invoicing/payments (schema + idempotency/webhook tables ready; no provider).
-- Automated reminders/scheduled sends; reports; customer portal pages; fleet
-  company accounts.
+- `npm test`: **135/135 tests passed** across 18 files.
+- `./node_modules/.bin/tsc --noEmit`: passed.
+- `npm run build`: passed with Next.js 15.5.20; all application routes built.
+- `npm audit --offline --audit-level=moderate`: 0 known vulnerabilities in the
+  installed/offline advisory data.
+- `git diff --check`: passed.
+- Source sweep found no deferred implementation markers or page-level legacy
+  auth-gate remnants.
+- Runtime smoke test: all public pages, legal pages, login, metadata routes,
+  service details, and brand image assets returned 200; invalid portal and
+  gallery resources returned 404; unauthenticated cron returned 401; and
+  unauthenticated `/admin` returned a clean 307 to `/admin/login` without an
+  auth exception.
+- Security-header smoke test confirmed CSP, `nosniff`, frame denial, COOP,
+  permissions policy, portal/admin no-index rules, private portal caching, and
+  no `X-Powered-By` response header.
 
-## Important decisions (see also DECISIONS.md)
+The local Chrome bridge had no available browser session, so screenshot-based
+responsive/cross-browser QA could not be performed. The frontend was validated
+through compilation, build output, route rendering, semantic/accessibility code
+review, and HTTP smoke tests.
 
-1. Single Next.js app for public site + admin + API; Postgres + Drizzle.
-2. Double-booking safety = `FOR UPDATE` lock on bay rows inside the booking
-   transaction + live re-validation; UI slot lists are advisory only.
-3. Money = integer cents; tax rates = basis points; tax snapshotted onto
-   financial rows at issue time.
-4. Customers need no accounts; customer access will use single-purpose hashed
-   tokens (`access_tokens`), already modelled.
-5. Marketing consent enforced inside the messaging service, not at call sites;
-   review/maintenance reminders classified as marketing-consent-required.
-6. Photos private by default (`files.public_consent_at` is a separate explicit
-   grant); staff-only file serving route.
-7. Seed prices/hours/policies are configurable placeholders, not commitments.
+## Completed implementation
 
-## Files & systems changed
+### Phase 1 — foundation, public intake, and booking
 
-Everything is new this session: see repository tree (`src/`, `drizzle/`,
-`tests/`, `BUILD.md`, `WORKFLOW.md`, `DECISIONS.md`). Databases `ptcd_dev` and
-`ptcd_test` created locally with migration 0000 applied; dev DB seeded.
+- Next.js App Router application, PostgreSQL/Drizzle schema, migrations, seed,
+  staff sessions/RBAC, audit log, settings, and service catalog.
+- Public service discovery, booking wizard, quote request, contact form,
+  attribution capture, policy pages, and supporting marketing routes.
+- Server-authoritative pricing and duration calculation; untrusted client totals
+  are never accepted.
+- Transactional availability and booking with resource locking and overlap
+  revalidation.
+- Durable PostgreSQL rate limiting for public mutation and checkout paths.
 
-## Database / API changes
+### Phase 2 — estimates and approvals
 
-- Migration `drizzle/0000_init.sql` (initial schema).
-- Server actions: booking slots + submit, quote submit, contact submit, admin
-  login/logout, appointment transition, lead/quote status, service update,
-  settings update. Route handler: `GET /api/files/[id]` (staff-only private
-  files).
+- Staff estimate builder, line-item pricing, issue/send/view lifecycle, and
+  tokened customer approve/decline/change-request flow.
+- Approval identity and request context are recorded; stale or cross-customer
+  tokens fail closed.
+- Approved estimates convert atomically into appointments using the same current
+  availability, resource, skill, and staffing rules as direct booking.
 
-## Known limitations
+### Phase 3 — job pipeline
 
-- No rate limiting on public forms yet (spam risk) — add before launch.
-- Uploads stored on local disk `var/uploads/` (fine in dev; use S3-compatible
-  storage in production).
-- Staff skills/schedules modelled but not yet enforced in availability (bay
-  capacity governs; seed services require no skills).
-- Static-rendered public pages (e.g. home) revalidate via `revalidatePath` on
-  service/settings edits; verify revalidation behaviour on the chosen host.
-- `next start` requires Node ≥ 18; built with Node 26. ESLint not configured
-  (deliberate scope cut; add before team development).
-- Admin appointment cancel prompt uses `window.prompt` (fine for staff use;
-  replace with a proper dialog later).
-- Dev seed password is public in this file — rotate/replace before deploy.
+- Appointment arrival/check-in, mobile-oriented inspection, findings, private
+  file uploads, additional-work approval, job state machine, timers, notes,
+  QC checklist, ready-for-pickup, and completion.
+- Photos remain private unless explicit public gallery consent is recorded.
+- S3-compatible SigV4 object storage is implemented for production; local disk
+  is development-only and storage keys reject traversal.
 
-## Business questions requiring confirmation (blocking content, not code)
+### Phase 4 — invoices, deposits, payments, and refunds
 
-1. Real street address, postal code, phone, public email (Settings → currently
-   placeholders; footer/contact render what's configured).
-2. Confirmed service list, prices, durations, deposit rules (seeded values are
-   market-plausible placeholders).
-3. Business hours (seeded Mon–Fri 8–18, Sat 9–17, Sun closed).
-4. Cancellation notice window + deposit forfeiture policy (48h placeholder).
-5. HST registration number for invoices.
-6. Bay count/names (seeded: Bay 1, Bay 2) and staff roster.
-7. Owner-approved About copy; any warranty language for coatings/PPF (none
-   published — new ownership, no inherited claims).
-8. Google Business Profile / review destination link for the Reviews page.
-9. Payment provider choice (Stripe assumed for Phase 4) and deposit amounts.
+- Individual and consolidated invoices, immutable financial history, sequential
+  numbers, tax snapshots, PDF rendering, due dates, overdue automation, manual
+  payment recording, receipts, cancellations, and refunds.
+- Appointment deposit links use hashed, purpose-bound, expiring tokens. Deposit
+  amount, payment ledger, appointment balance, and confirmation move atomically
+  and idempotently.
+- Stripe Checkout sessions embed and validate payment, subject, amount, and
+  currency metadata. Signed webhook delivery is idempotent.
+- Checkout retry handling is provider-authenticated: open sessions resume,
+  delayed paid sessions finalize once, processing/ambiguous sessions remain
+  reserved, and a replacement is allowed only after Stripe confirms expiry.
+  Concurrent retries share one payment reservation and Stripe idempotency key.
+- Stripe refunds reserve the ledger first, call the provider outside database
+  locks, and are finalized from authenticated provider results/webhooks. Manual
+  and provider refund capacity is tracked separately.
+- Fake checkout is available only in development and is refused in production.
 
-## Exact next implementation action
+### Phase 5 — communications and automation
 
-**Phase 2, step 1:** Build the estimate builder in admin
-(`/admin/estimates/new` from a quote request: line items from services +
-custom lines, optional items, discount, tax snapshot, expiry) and the customer
-approval page at `/portal/estimates/[token]` using `access_tokens`
-(purpose `estimate_view`, hashed token, expiry, audit on approve/decline with
-name+IP). Wire "Create estimate" from the quote-request detail page, then a
-"convert approved estimate → appointment" action reusing
-`createAppointment`.
+- Database-backed email/SMS templates with owner/manager editing and channel
+  validation.
+- Resend email and Twilio SMS adapters are implemented. Development has an
+  explicit log transport; production never reports an unconfigured delivery as
+  success.
+- Booking confirmations, estimate/work approvals, invoices, receipts, deposit
+  confirmations, appointment reminders, review requests, and maintenance
+  reminders use recorded delivery outcomes.
+- Marketing messages enforce consent; operational messages remain available.
+- `/api/cron/tick` uses bearer authentication, a PostgreSQL advisory lock, and
+  idempotent sent-at markers. `vercel.json` schedules it hourly.
 
-## How to run
+### Phase 6 — reporting and attribution
+
+- Admin reports cover cash-basis revenue, conversion funnel, appointment/bay
+  utilization, and source-to-revenue attribution.
+- Reporting calculations have dedicated unit tests and do not treat unpaid
+  invoice face value as collected revenue.
+
+### Phase 7 — customer portal and fleet
+
+- Hashed, revocable, expiring portal links provide customer-scoped access to
+  vehicles, appointments, estimates, work approvals/history, invoices, PDFs,
+  and deposits without requiring an account.
+- Business/fleet customer records, vehicle management, per-fleet history, and
+  consolidated multi-job invoicing are available to staff.
+- All portal subject/customer relationships are verified server-side.
+
+### Cross-cutting CRM and scheduling audit
+
+- Staff management is owner-only: create/update/deactivate, role and skill
+  management, password reset, session revocation, and last-active-owner guards.
+- Lead CRM includes assignment, notes, status changes, quote linkage, consent,
+  attribution, and atomic conversion without duplicate customers.
+- Customer records support correction and audited anonymization while preserving
+  required financial history.
+- Staff weekly shifts and normalized skills are editable by owners. Managers and
+  owners can manage whole-business closures, bay maintenance, and staff time off.
+- Availability unions all selected services' required skills, requires complete
+  shift coverage, accounts for staff/resource conflicts and time off, and assigns
+  both resource and staff inside deterministic locks during create/reschedule.
+- Compatibility rule: an installation with zero `staff_schedules` rows uses
+  bay-only availability. As soon as schedules exist, staffing is authoritative.
+- Manual staff bookings, public bookings, approved-estimate conversions, and
+  rescheduling share the same scheduling invariants.
+
+## Brand and frontend redesign
+
+The public site and admin workspace now share a deliberate design system based
+on the owner-provided palette:
+
+- deep navy `#0B2A4A` for primary surfaces and structure;
+- gold `#E0A93B` as a restrained accent;
+- charcoal `#1C2026` for text;
+- cool off-white `#F4F6FA` for supporting surfaces.
+
+The redesign includes responsive public navigation/footer, a new premium home
+page and hero, service and informational pages, booking/quote/contact forms,
+portal screens, legal pages, admin shell/navigation, admin login, consistent
+cards/buttons/status treatments, visible focus states, reduced-motion support,
+44px interactive targets, labels, captions, empty states, and mobile table/form
+handling.
+
+SEO/application assets now include page metadata, Open Graph image, application
+icon, web manifest, robots rules, sitemap, and a branded not-found page. The
+generated hero is stored at `public/images/detailing-studio-hero.png`; its
+Open Graph crop is `public/og.png`.
+
+## Database and migrations
+
+Repository migrations, in order:
+
+1. `drizzle/0000_flaky_freak.sql` — base platform schema.
+2. `drizzle/0001_clammy_mole_man.sql` — automation sent-at timestamps.
+3. `drizzle/0002_absurd_monster_badoon.sql` — consolidated invoice/job links,
+   durable rate-limit buckets, and lead marketing consent.
+
+All three have been applied locally to `ptcd_dev` and `ptcd_test`. Tests refuse
+to run destructive setup unless the URL database name is exactly `ptcd_test`.
+
+## Production launch checklist
+
+These are external acceptance/configuration tasks, not missing application
+features:
+
+1. Choose the production Node host and managed PostgreSQL service. Deployment
+   has not been performed because `BUILD.md` requires an explicit owner decision
+   about cost and credentials.
+2. Configure `DATABASE_URL`, a strong `SESSION_SECRET`, HTTPS `APP_BASE_URL`, and
+   production-only `SEED_ADMIN_NAME`, `SEED_ADMIN_EMAIL`, and
+   `SEED_ADMIN_PASSWORD`; run migrations, then the idempotent seed.
+3. Configure Stripe keys and the `/api/webhooks/stripe` endpoint, then exercise
+   invoice checkout, appointment deposit, delayed webhook reconciliation, and a
+   real Stripe test-mode refund. These paths are code- and test-verified but were
+   not called against the owner's Stripe account.
+4. Configure Resend/`EMAIL_FROM` and Twilio, then verify real email/SMS delivery
+   and sender-domain/number status. No provider credentials were available in
+   this session.
+5. Configure and test the S3-compatible private bucket. Production intentionally
+   refuses local-disk customer uploads.
+6. Configure `CRON_SECRET` and verify the host scheduler calls
+   `POST /api/cron/tick` with `Authorization: Bearer ...`.
+7. Have the owner/counsel approve privacy, terms, cancellation, and the public
+   location-history wording. Confirm the HST registration number, estimated
+   service durations, reminder/review/maintenance cadence defaults, and any
+   service-specific deposit settings.
+8. Populate gallery/review content only from real customer material with the
+   required consent. Run responsive visual QA in current Safari, Chrome, and
+   mobile devices once a browser session is available.
+
+## Local operation
 
 ```bash
-npm install                 # deps (allowScripts already configured)
-createdb -h /tmp ptcd_dev ptcd_test   # if missing
-cp .env.example .env.local  # fill SESSION_SECRET (openssl rand -hex 32)
-npm run db:migrate && npm run db:seed
-npm run dev                 # http://localhost:3000  (admin: /admin/login)
-npm test                    # 22 tests (uses TEST_DATABASE_URL)
+cp .env.example .env.local
+npm install
+npm run db:migrate
+npm run db:seed
+npm run dev
 ```
+
+Quality gate:
+
+```bash
+npm test
+./node_modules/.bin/tsc --noEmit
+npm run build
+npm audit --offline --audit-level=moderate
+```
+
+The development seed creates `owner@ptcd.local` with password
+`detailing-dev-2026` only when no staff exists and `NODE_ENV` is not production.
+Production seeding refuses those defaults.
+
+## Repository handoff note
+
+The completion work is present in the working tree and has not been committed,
+pushed, or deployed. Preserve the current changes when creating the release
+commit. The exact next action is production configuration and external-provider
+acceptance testing, followed by deployment only after the owner supplies the
+required authorization and credentials.

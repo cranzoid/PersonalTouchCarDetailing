@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Container, SectionHeading } from "@/components/ui";
 
 export const metadata = { title: "FAQ" };
@@ -39,17 +40,25 @@ const FAQS: [string, string][] = [
 
 export default function FaqPage() {
   return (
-    <Container className="py-16">
-      <SectionHeading eyebrow="FAQ" title="Frequently asked questions" />
-      <div className="max-w-3xl divide-y divide-ink-800">
+    <Container className="py-20 sm:py-28">
+      <SectionHeading
+        eyebrow="Questions, answered"
+        title="Everything to know before your visit"
+        subtitle="Clear answers about timing, pricing, approvals and how we care for your vehicle."
+      />
+      <div className="grid max-w-4xl gap-3">
         {FAQS.map(([q, a]) => (
-          <details key={q} className="group py-4">
-            <summary className="cursor-pointer list-none text-lg font-medium text-white transition-colors hover:text-accent-300">
-              {q}
+          <details key={q} className="group rounded-2xl border border-white/10 bg-white/[0.035] open:border-accent-400/35 open:bg-white/[0.055]">
+            <summary className="flex min-h-14 cursor-pointer list-none items-center justify-between gap-5 rounded-2xl px-5 py-4 text-base font-semibold text-white transition-colors hover:text-accent-300 sm:px-6">
+              <span>{q}</span>
+              <span aria-hidden="true" className="grid size-8 shrink-0 place-items-center rounded-full border border-white/15 text-accent-300 transition-transform group-open:rotate-45">+</span>
             </summary>
-            <p className="mt-2 text-ink-300">{a}</p>
+            <p className="px-5 pb-5 pr-16 text-sm leading-7 text-ink-300 sm:px-6 sm:pb-6 sm:pr-20">{a}</p>
           </details>
         ))}
+      </div>
+      <div className="mt-12 border-l border-accent-400/60 pl-5 text-sm leading-6 text-ink-300">
+        Still unsure which service fits? <Link href="/contact" className="font-semibold text-accent-300 hover:text-accent-400">Talk with our team</Link> and we&apos;ll point you in the right direction.
       </div>
     </Container>
   );

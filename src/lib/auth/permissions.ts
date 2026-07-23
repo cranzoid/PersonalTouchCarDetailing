@@ -11,12 +11,14 @@ export const PERMISSIONS = {
   manage_services: ["owner", "manager"],
   manage_bookings: ["owner", "manager", "reception"],
   manage_customers: ["owner", "manager", "reception"],
+  anonymize_customers: ["owner", "manager"],
   manage_estimates: ["owner", "manager", "reception"],
   work_jobs: ["owner", "manager", "reception", "technician"],
   manage_invoices: ["owner", "manager", "accountant"],
   record_payments: ["owner", "manager", "reception", "accountant"],
   issue_refunds: ["owner", "manager"],
   view_financial_reports: ["owner", "manager", "accountant"],
+  view_private_files: ["owner", "manager", "reception", "technician"],
   view_dashboard: ["owner", "manager", "reception", "technician", "accountant"],
 } as const satisfies Record<string, readonly StaffRole[]>;
 

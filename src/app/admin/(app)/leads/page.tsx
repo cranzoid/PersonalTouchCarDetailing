@@ -3,6 +3,7 @@ import { desc, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { StatusBadge } from "@/components/admin";
 import { LeadStatusSelect } from "./status-select";
+import { requirePageStaff } from "@/lib/auth/page";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,7 @@ export default async function LeadsPage({
 }: {
   searchParams: Promise<{ tab?: string }>;
 }) {
+  await requirePageStaff("manage_customers");
   const { tab } = await searchParams;
   const activeTab = tab === "quotes" ? "quotes" : "leads";
 
@@ -66,7 +68,9 @@ export default async function LeadsPage({
                 return (
                   <tr key={l.id} className="border-t border-ink-800 align-top hover:bg-ink-900/40">
                     <td className="px-4 py-3">
-                      <p className="font-medium text-white">{l.name}</p>
+                      <Link href={`/admin/leads/${l.id}`} className="font-medium text-white hover:text-accent-300 hover:underline">
+                        {l.name}
+                      </Link>
                       {l.message && <p className="mt-1 max-w-xs truncate text-xs text-ink-500">{l.message}</p>}
                     </td>
                     <td className="px-4 py-3 text-ink-300">

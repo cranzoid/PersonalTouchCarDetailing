@@ -35,6 +35,7 @@ export type IdPrefix =
   | "awr" // additional work request
   | "qc"
   | "inv" // invoice
+  | "ij" // invoice-to-job link
   | "ili" // invoice line item
   | "pay"
   | "whe" // webhook event

@@ -1,35 +1,124 @@
 @import "tailwindcss";
 
 @theme {
-  /* Brand palette — deep charcoal + amber accent, premium detailing look */
-  --color-ink-950: #0a0e13;
-  --color-ink-900: #10161d;
-  --color-ink-800: #1a222c;
-  --color-ink-700: #27313d;
-  --color-ink-600: #3b4754;
-  --color-ink-400: #7a8794;
-  --color-ink-300: #a3aeb9;
-  --color-ink-200: #cdd4db;
-  --color-ink-100: #e8ebee;
-  --color-ink-50: #f5f6f8;
-  --color-accent-300: #ffd166;
-  --color-accent-400: #f6b93b;
-  --color-accent-500: #e8a020;
-  --color-accent-600: #c97f0a;
+  /* Personal Touch palette: logo navy, restrained gold, graphite, and warm ivory. */
+  --color-ink-950: #061a2c;
+  --color-ink-900: #0b2a4a;
+  --color-ink-800: #12385d;
+  --color-ink-700: #234c70;
+  --color-ink-600: #426783;
+  --color-ink-500: #668299;
+  --color-ink-400: #91a6b7;
+  --color-ink-300: #b9c7d2;
+  --color-ink-200: #d9e1e8;
+  --color-ink-100: #eaf0f4;
+  --color-ink-50: #f4f6fa;
+  --color-accent-300: #edc66f;
+  --color-accent-400: #e0a93b;
+  --color-accent-500: #c58d24;
+  --color-accent-600: #a66f12;
 
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-    "Helvetica Neue", Arial, sans-serif;
+  --font-sans: var(--font-manrope), "Avenir Next", Avenir, "Segoe UI", sans-serif;
+  --font-display: var(--font-instrument-serif), "Iowan Old Style", Baskerville, serif;
 }
 
 html {
   scroll-behavior: smooth;
+  background: #061a2c;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 body {
+  min-width: 320px;
   @apply bg-ink-950 text-ink-100 antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: #e0a93b;
+  color: #0b2a4a;
+}
+
+:where(a, button, input, select, textarea, summary):focus-visible {
+  outline: 3px solid #e0a93b;
+  outline-offset: 3px;
+}
+
+summary::-webkit-details-marker {
+  display: none;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.surface-light {
+  background: #f6f2ea;
+  color: #1c2026;
+}
+
+.hairline-gold {
+  background: linear-gradient(90deg, transparent, rgba(224, 169, 59, 0.72), transparent);
 }
 
 /* Light surfaces for admin app */
 .admin-surface {
   @apply bg-ink-50 text-ink-900;
+}
+
+/*
+ * The admin application opts into a light workspace by adding .admin-shell.
+ * Existing ink utility classes remain usable: their palette variables are
+ * remapped locally instead of requiring a risky all-at-once component rewrite.
+ */
+.admin-shell {
+  --color-ink-950: #f4f6fa;
+  --color-ink-900: #ffffff;
+  --color-ink-800: #dce4eb;
+  --color-ink-700: #c7d2dd;
+  --color-ink-600: #a3b3c2;
+  --color-ink-500: #71869a;
+  --color-ink-400: #526b81;
+  --color-ink-300: #38536b;
+  --color-ink-200: #243f58;
+  --color-ink-100: #17344f;
+  --color-ink-50: #0b2a4a;
+  color: #1c2026;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-shell input,
+.admin-shell select,
+.admin-shell textarea {
+  color-scheme: light;
+}
+
+.admin-shell .text-white {
+  color: #0b2a4a;
+}
+
+/* Legacy admin success/error copy was authored for a dark canvas. Keep those
+ * semantic messages readable after the light workspace remap. */
+.admin-shell .text-accent-300,
+.admin-shell .text-accent-400 {
+  color: #805d16;
+}
+
+.admin-shell .text-emerald-300 { color: #047857; }
+.admin-shell .text-red-300 { color: #b91c1c; }
+.admin-shell .text-amber-300 { color: #92400e; }
+.admin-shell .text-sky-300 { color: #0369a1; }
+.admin-shell .text-violet-300 { color: #6d28d9; }
+
+.admin-shell ::selection {
+  background: #e0a93b;
+  color: #0b2a4a;
 }

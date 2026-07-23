@@ -1,141 +1,193 @@
+import Image from "next/image";
 import Link from "next/link";
 import { asc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { Container, ButtonLink, SectionHeading, Card } from "@/components/ui";
 import { formatCents } from "@/lib/money";
+import { getSettings } from "@/lib/settings";
+
+const EXPERIENCE_POINTS = [
+  {
+    number: "01",
+    title: "Choose the right service",
+    body: "Browse clearly structured services, pricing, and vehicle-size guidance before you book.",
+  },
+  {
+    number: "02",
+    title: "Stay informed",
+    body: "Receive appointment details and review any additional work before it is approved.",
+  },
+  {
+    number: "03",
+    title: "Leave with clarity",
+    body: "See an itemized invoice, payment history, and the details tied to your visit.",
+  },
+];
 
 export default async function HomePage() {
-  const featured = await db()
-    .select()
-    .from(schema.services)
-    .where(eq(schema.services.featured, true))
-    .orderBy(asc(schema.services.sort))
-    .limit(3);
-  const categories = await db()
-    .select()
-    .from(schema.serviceCategories)
-    .where(eq(schema.serviceCategories.active, true))
-    .orderBy(asc(schema.serviceCategories.sort));
+  const [featured, categories, settings] = await Promise.all([
+    db()
+      .select()
+      .from(schema.services)
+      .where(eq(schema.services.featured, true))
+      .orderBy(asc(schema.services.sort))
+      .limit(3),
+    db()
+      .select()
+      .from(schema.serviceCategories)
+      .where(eq(schema.serviceCategories.active, true))
+      .orderBy(asc(schema.serviceCategories.sort)),
+    getSettings(),
+  ]);
 
   return (
     <>
-      {/* Hero */}
-      <section className="relative overflow-hidden">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(246,185,59,0.12),transparent_55%)]" />
-        <Container className="relative py-24 sm:py-32">
-          <p className="mb-4 text-sm font-semibold uppercase tracking-widest text-accent-400">
-            Hamilton, Ontario
-          </p>
-          <h1 className="max-w-3xl text-4xl font-bold leading-tight tracking-tight text-white sm:text-6xl">
-            Detailing that treats your car with a{" "}
-            <span className="text-accent-400">personal touch</span>.
-          </h1>
-          <p className="mt-6 max-w-2xl text-lg text-ink-300">
-            Interior and exterior detailing, paint correction, ceramic coating, window tinting and
-            vehicle styling — delivered with meticulous care and honest, up-front pricing.
-          </p>
-          <div className="mt-10 flex flex-wrap gap-3">
-            <ButtonLink href="/book" className="px-7 py-4 text-base">Book an Appointment</ButtonLink>
-            <ButtonLink href="/quote" variant="outline" className="px-7 py-4 text-base">
-              Request a Quote
-            </ButtonLink>
-            <ButtonLink href="/services" variant="ghost" className="px-4 py-4 text-base">
-              View Services →
-            </ButtonLink>
+      <section className="relative isolate min-h-[calc(100svh-5rem)] overflow-hidden bg-ink-950">
+        <Image
+          src="/images/detailing-studio-hero.png"
+          alt="A vehicle receiving careful detailing in a professional studio"
+          fill
+          priority
+          sizes="100vw"
+          className="object-cover object-[68%_center] sm:object-center"
+        />
+        <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(6,26,44,0.98)_0%,rgba(6,26,44,0.91)_37%,rgba(6,26,44,0.42)_68%,rgba(6,26,44,0.15)_100%)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(0deg,rgba(6,26,44,0.98)_0%,transparent_40%,rgba(6,26,44,0.1)_100%)]" />
+
+        <Container className="relative flex min-h-[calc(100svh-5rem)] flex-col justify-center py-20 sm:py-24">
+          <div className="max-w-3xl">
+            <p className="mb-6 flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.24em] text-accent-300">
+              <span className="h-px w-10 bg-accent-400" aria-hidden="true" />
+              Vehicle care in {settings.city}, {settings.province}
+            </p>
+            <h1 className="font-display text-5xl leading-[0.98] tracking-[-0.035em] text-white sm:text-7xl lg:text-[5.5rem]">
+              Precision in every finish.
+              <span className="mt-2 block text-ink-200">Care in every detail.</span>
+            </h1>
+            <p className="mt-7 max-w-xl text-base leading-7 text-ink-200 sm:text-lg sm:leading-8">
+              Thoughtful interior and exterior detailing, correction, protection, tinting, and styling—with straightforward booking and clear communication throughout.
+            </p>
+            <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+              <ButtonLink href="/book" className="px-8 py-3.5 text-base">Book an Appointment</ButtonLink>
+              <ButtonLink href="/quote" variant="outline" className="px-8 py-3.5 text-base">Request a Quote</ButtonLink>
+            </div>
           </div>
-          <div className="mt-14 grid max-w-3xl grid-cols-1 gap-4 sm:grid-cols-3">
+
+          <div className="mt-16 grid max-w-4xl border-y border-white/15 bg-ink-950/30 backdrop-blur-sm sm:grid-cols-3">
             {[
-              ["Book online in minutes", "Real-time availability, instant confirmation."],
-              ["Condition-honest quotes", "Photo-based estimates for correction & coating work."],
-              ["Locally owned & operated", "Serving Hamilton and the surrounding area."],
-            ].map(([title, body]) => (
-              <div key={title} className="rounded-xl border border-ink-800 bg-ink-900/40 p-4">
+              ["Online booking", "See live availability"],
+              ["Photo estimates", "Share vehicle condition"],
+              ["Approval controls", "Review added work first"],
+            ].map(([title, detail], index) => (
+              <div key={title} className={`px-5 py-5 ${index > 0 ? "border-t border-white/15 sm:border-l sm:border-t-0" : ""}`}>
                 <p className="text-sm font-semibold text-white">{title}</p>
-                <p className="mt-1 text-xs text-ink-400">{body}</p>
+                <p className="mt-1 text-xs text-ink-400">{detail}</p>
               </div>
             ))}
           </div>
         </Container>
       </section>
 
-      {/* Featured services */}
-      <section className="border-t border-ink-800/60 py-20">
+      <section className="surface-light py-20 sm:py-28">
         <Container>
-          <SectionHeading
-            eyebrow="Popular services"
-            title="Detailing packages built around your vehicle"
-            subtitle="Transparent pricing that adjusts to your vehicle's size and condition."
-          />
-          <div className="grid gap-6 md:grid-cols-3">
-            {featured.map((svc) => (
-              <Card key={svc.id} className="flex flex-col">
-                <h3 className="text-lg font-semibold text-white">{svc.name}</h3>
-                <p className="mt-2 flex-1 text-sm text-ink-300">{svc.shortDescription}</p>
-                <div className="mt-4 flex items-center justify-between">
-                  <span className="text-accent-300">
-                    {svc.basePriceCents !== null ? `From ${formatCents(svc.basePriceCents)}` : "By quote"}
-                  </span>
-                  <Link href={`/services/${svc.slug}`} className="text-sm text-ink-300 hover:text-accent-300">
-                    Details →
-                  </Link>
-                </div>
-              </Card>
-            ))}
+          <div className="grid gap-12 lg:grid-cols-[0.85fr_1.4fr] lg:gap-20">
+            <SectionHeading
+              eyebrow="Featured services"
+              title="Care tailored to the vehicle in front of us"
+              subtitle="Start with a service that fits your goal. Book directly where pricing is fixed, or request an estimate for condition-dependent work."
+              tone="light"
+            />
+            <div className="grid gap-5 md:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
+              {featured.map((service, index) => (
+                <Card key={service.id} tone="light" className="group flex min-h-64 flex-col overflow-hidden p-0 transition-transform duration-300 hover:-translate-y-1">
+                  <div className="h-1 bg-ink-900 transition-colors group-hover:bg-accent-400" />
+                  <div className="flex flex-1 flex-col p-6">
+                    <p className="text-[0.65rem] font-semibold uppercase tracking-[0.2em] text-accent-600">Service {String(index + 1).padStart(2, "0")}</p>
+                    <h2 className="mt-4 font-display text-2xl leading-tight text-[#1C2026]">{service.name}</h2>
+                    <p className="mt-3 flex-1 text-sm leading-6 text-slate-600">{service.shortDescription}</p>
+                    <div className="mt-6 flex items-end justify-between gap-4 border-t border-slate-200 pt-4">
+                      <span className="text-sm font-semibold text-ink-900">
+                        {service.basePriceCents !== null ? `From ${formatCents(service.basePriceCents)}` : "By quote"}
+                      </span>
+                      <Link href={`/services/${service.slug}`} className="rounded-md text-sm font-semibold text-ink-900 transition-colors hover:text-accent-600">
+                        Explore <span aria-hidden="true">↗</span>
+                      </Link>
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          </div>
+          <div className="mt-12 text-center">
+            <Link href="/services" className="inline-flex rounded-md border-b border-ink-900 pb-1 text-sm font-semibold text-ink-900 transition-colors hover:border-accent-500 hover:text-accent-600">
+              View the complete service menu <span className="ml-2" aria-hidden="true">→</span>
+            </Link>
           </div>
         </Container>
       </section>
 
-      {/* Categories */}
-      <section className="py-20">
-        <Container>
-          <SectionHeading eyebrow="Everything we do" title="From maintenance washes to full transformations" />
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {categories.map((cat) => (
+      <section className="relative overflow-hidden bg-ink-900 py-20 sm:py-28">
+        <div className="pointer-events-none absolute -right-40 top-0 size-[32rem] rounded-full border border-accent-400/10" />
+        <div className="pointer-events-none absolute -right-24 top-16 size-[20rem] rounded-full border border-accent-400/10" />
+        <Container className="relative">
+          <SectionHeading
+            eyebrow="Explore the studio"
+            title="A complete approach to vehicle presentation and protection"
+            subtitle="Choose a category to compare the services currently available."
+          />
+          <div className="grid gap-px overflow-hidden rounded-[1.25rem] border border-white/10 bg-white/10 sm:grid-cols-2 lg:grid-cols-3">
+            {categories.map((category, index) => (
               <Link
-                key={cat.id}
-                href={`/services#${cat.slug}`}
-                className="group rounded-2xl border border-ink-800 bg-ink-900/30 p-6 transition-colors hover:border-accent-500/50"
+                key={category.id}
+                href={`/services#${category.slug}`}
+                className="group min-h-52 bg-ink-900 p-7 transition-colors hover:bg-ink-800"
               >
-                <h3 className="font-semibold text-white group-hover:text-accent-300">{cat.name}</h3>
-                <p className="mt-2 text-sm text-ink-400">{cat.description}</p>
+                <div className="flex items-start justify-between gap-5">
+                  <span className="text-xs font-semibold tracking-[0.18em] text-accent-400">{String(index + 1).padStart(2, "0")}</span>
+                  <span aria-hidden="true" className="text-xl text-ink-500 transition-transform group-hover:translate-x-1 group-hover:text-accent-300">→</span>
+                </div>
+                <h3 className="mt-10 font-display text-2xl text-white">{category.name}</h3>
+                <p className="mt-3 text-sm leading-6 text-ink-400">{category.description}</p>
               </Link>
             ))}
           </div>
         </Container>
       </section>
 
-      {/* How it works */}
-      <section className="border-t border-ink-800/60 py-20">
+      <section className="bg-[#FFFEFB] py-20 text-[#1C2026] sm:py-28">
         <Container>
-          <SectionHeading eyebrow="How it works" title="Three simple steps" />
-          <div className="grid gap-6 md:grid-cols-3">
-            {[
-              ["1. Book or request a quote", "Pick a service and time online, or send photos for condition-dependent work like correction and coating."],
-              ["2. We detail with care", "Your vehicle is checked in, inspected with you, and any extra work is only done with your approval."],
-              ["3. Drive away impressed", "Quality-checked, photographed, and backed by clear aftercare guidance."],
-            ].map(([title, body]) => (
-              <div key={title}>
-                <h3 className="font-semibold text-accent-300">{title}</h3>
-                <p className="mt-2 text-sm text-ink-300">{body}</p>
+          <SectionHeading
+            eyebrow="What to expect"
+            title="A clear process from first click to final invoice"
+            subtitle="The customer experience is designed to keep the work, timing, and price easy to understand."
+            tone="light"
+            align="center"
+          />
+          <div className="grid gap-10 md:grid-cols-3 md:gap-0">
+            {EXPERIENCE_POINTS.map((point, index) => (
+              <div key={point.number} className={`relative px-2 md:px-8 ${index > 0 ? "md:border-l md:border-slate-200" : ""}`}>
+                <p className="font-display text-5xl text-accent-500/70">{point.number}</p>
+                <h3 className="mt-5 text-lg font-semibold text-ink-900">{point.title}</h3>
+                <p className="mt-3 text-sm leading-6 text-slate-600">{point.body}</p>
               </div>
             ))}
           </div>
         </Container>
       </section>
 
-      {/* Fleet strip */}
-      <section className="py-20">
+      <section className="surface-light pb-20 sm:pb-28">
         <Container>
-          <div className="rounded-3xl border border-ink-700 bg-gradient-to-br from-ink-900 to-ink-800 p-10 sm:p-14">
-            <div className="max-w-2xl">
-              <h2 className="text-2xl font-bold text-white sm:text-3xl">
-                Fleet, dealership or rideshare?
-              </h2>
-              <p className="mt-3 text-ink-300">
-                Recurring programs, priority scheduling and consolidated billing for commercial
-                clients across Hamilton.
-              </p>
-              <div className="mt-6">
+          <div className="relative overflow-hidden rounded-[1.25rem] bg-ink-900 px-7 py-12 sm:px-12 sm:py-16 lg:px-16">
+            <div className="absolute inset-y-0 right-0 hidden w-2/5 bg-[linear-gradient(135deg,transparent,rgba(224,169,59,0.12))] lg:block" />
+            <div className="relative grid items-end gap-10 lg:grid-cols-[1.3fr_0.7fr]">
+              <div className="max-w-2xl">
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent-300">Commercial vehicle care</p>
+                <h2 className="mt-5 font-display text-4xl leading-tight text-white sm:text-5xl">A more organized way to care for a working fleet.</h2>
+                <p className="mt-5 max-w-xl text-base leading-7 text-ink-300">
+                  Explore recurring service options, fleet records, priority scheduling, and consolidated invoicing for commercial clients.
+                </p>
+              </div>
+              <div className="lg:text-right">
                 <ButtonLink href="/fleet">Explore Commercial Services</ButtonLink>
               </div>
             </div>
@@ -143,18 +195,15 @@ export default async function HomePage() {
         </Container>
       </section>
 
-      {/* Final CTA */}
-      <section className="border-t border-ink-800/60 py-24 text-center">
+      <section className="relative overflow-hidden border-t border-white/10 bg-ink-950 py-24 text-center sm:py-32">
+        <div className="hairline-gold absolute inset-x-0 top-0 h-px" />
         <Container>
-          <h2 className="text-3xl font-bold text-white sm:text-4xl">Ready when you are.</h2>
-          <p className="mx-auto mt-3 max-w-xl text-ink-300">
-            Book online in minutes, or send us photos for a personalized quote.
-          </p>
-          <div className="mt-8 flex justify-center gap-3">
-            <ButtonLink href="/book" className="px-7 py-4 text-base">Book an Appointment</ButtonLink>
-            <ButtonLink href="/quote" variant="outline" className="px-7 py-4 text-base">
-              Request a Quote
-            </ButtonLink>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-accent-300">Your vehicle, thoughtfully cared for</p>
+          <h2 className="mx-auto mt-5 max-w-3xl font-display text-5xl leading-[1.04] text-white sm:text-6xl">Ready for a cleaner, sharper finish?</h2>
+          <p className="mx-auto mt-5 max-w-xl text-base leading-7 text-ink-300">Book a listed service online or share a few details for a personalized estimate.</p>
+          <div className="mt-9 flex flex-col justify-center gap-3 sm:flex-row">
+            <ButtonLink href="/book" className="px-8 text-base">Book an Appointment</ButtonLink>
+            <ButtonLink href="/quote" variant="outline" className="px-8 text-base">Request a Quote</ButtonLink>
           </div>
         </Container>
       </section>

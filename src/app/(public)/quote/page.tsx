@@ -25,7 +25,7 @@ export default async function QuotePage({
     .orderBy(asc(schema.services.sort));
 
   return (
-    <Container className="py-16">
+    <Container className="py-12 sm:py-16">
       <SectionHeading
         eyebrow="Free quote"
         title="Request a quote"

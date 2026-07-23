@@ -10,10 +10,13 @@ loadEnv();
 /**
  * Idempotent seed: safe to re-run; skips anything that already exists.
  *
- * ALL PRICES AND DURATIONS ARE PLACEHOLDERS pending owner confirmation —
- * they are configurable in Admin → Settings → Services and exist so the
- * booking flow works end-to-end in development. See WORKFLOW.md
- * "Business questions requiring confirmation".
+ * Detailing-package prices come from the owner's current printed flyer
+ * (pictures/WhatsApp Image 2026-07-13 at 21.13.19.jpeg). Flyer prices are
+ * ranges by vehicle class (Sedan vs SUV/Truck/Van); we seed the sedan lower
+ * bound as the base price and the SUV/Truck/Van lower bound as a vehicle
+ * adjustment. DURATIONS are still estimates, and the non-flyer categories
+ * (paint correction, protection, tint, styling) remain quote-only. Everything
+ * is configurable in Admin → Services.
  */
 
 type SvcSeed = {
@@ -27,22 +30,32 @@ type SvcSeed = {
   photosRequired?: boolean;
   depositType?: string;
   depositValue?: number;
+  /** Flyer's SUV / Truck / Van price minus sedan price (+ extra time). */
+  largeVehicleDeltaCents?: number;
+  largeVehicleDeltaMin?: number;
 };
 
 const CATALOG: { category: string; slug: string; description: string; services: SvcSeed[] }[] = [
   {
-    category: "Vehicle Detailing",
+    category: "Detailing Packages",
     slug: "vehicle-detailing",
     description:
-      "Interior and exterior detailing packages that restore, refresh and protect your vehicle.",
+      "Our signature detailing packages — from a basic hand wash to a complete inside-and-out detail with engine bay.",
     services: [
-      { name: "Interior Detailing", slug: "interior-detailing", short: "Deep clean of seats, carpets, panels, vents and glass.", priceCents: 18900, durationMin: 180, mode: "bookable", featured: true },
-      { name: "Exterior Detailing", slug: "exterior-detailing", short: "Hand wash, decontamination, wheels, and protective finish.", priceCents: 14900, durationMin: 120, mode: "bookable" },
-      { name: "Full Detailing", slug: "full-detailing", short: "Complete interior and exterior detail — our most popular package.", priceCents: 29900, durationMin: 300, mode: "bookable", featured: true },
-      { name: "Express Detailing", slug: "express-detailing", short: "Maintenance wash and interior refresh in about an hour.", priceCents: 8900, durationMin: 60, mode: "bookable" },
-      { name: "Engine Bay Detailing", slug: "engine-bay-detailing", short: "Safe degrease and dressing of the engine compartment.", priceCents: 7900, durationMin: 45, mode: "bookable" },
-      { name: "Odour Removal", slug: "odour-removal", short: "Source removal and ozone treatment for persistent odours.", priceCents: null, durationMin: 120, mode: "quote_required" },
-      { name: "Pet-Hair Removal", slug: "pet-hair-removal", short: "Specialized removal of embedded pet hair.", priceCents: null, durationMin: 90, mode: "quote_required" },
+      // Flyer "Car Detailing Package #1"
+      { name: "Complete Detail + Engine", slug: "complete-detail-engine", short: "Engine fine detail, rim clean and tire shine, deep-cleaned seats and carpet, full interior clean and buff, hand wash and dry.", priceCents: 17500, durationMin: 300, mode: "bookable", featured: true, largeVehicleDeltaCents: 2500, largeVehicleDeltaMin: 60 },
+      // Flyer "Car Detailing Package #2 — The Works Package"
+      { name: "The Works Package", slug: "the-works", short: "Rim clean and tire shine, deep-cleaned seats, carpet and mats, full interior clean and buff, hand wash and dry.", priceCents: 15000, durationMin: 240, mode: "bookable", featured: true, largeVehicleDeltaCents: 5000, largeVehicleDeltaMin: 60 },
+      // Flyer "Car Detailing Package #3 — Interior Detail"
+      { name: "Interior Detail", slug: "interior-detail", short: "Vacuum carpets and seats, clean mats and interior windows, deep-clean seats and carpets, clean and buff all interior surfaces.", priceCents: 12500, durationMin: 180, mode: "bookable", largeVehicleDeltaCents: 2500, largeVehicleDeltaMin: 45 },
+      // Flyer "Car Detailing Package #6 — Basic Car Wash + Basic Interior Clean"
+      { name: "Wash & Interior Refresh", slug: "wash-interior-refresh", short: "Exterior hand wash and dry plus a basic interior clean — our maintenance combo.", priceCents: 7000, durationMin: 90, mode: "bookable", largeVehicleDeltaCents: 2000, largeVehicleDeltaMin: 30 },
+      // Flyer "Car Detailing Package #5 — Basic Interior Clean"
+      { name: "Basic Interior Clean", slug: "basic-interior-clean", short: "Vacuum carpet and trunk, wipe down dash, doors and cup holders, clean interior windows.", priceCents: 5000, durationMin: 60, mode: "bookable", largeVehicleDeltaCents: 2000, largeVehicleDeltaMin: 30 },
+      // Flyer "Car Detailing Package #4 — Basic Car Wash"
+      { name: "Basic Car Wash", slug: "basic-car-wash", short: "Exterior hand wash, dry and clean mats.", priceCents: 2500, durationMin: 30, mode: "bookable", largeVehicleDeltaCents: 500, largeVehicleDeltaMin: 15 },
+      // Flyer: "RV Detailing Available — Ask Us For Details"
+      { name: "RV Detailing", slug: "rv-detailing", short: "RV and motorhome detailing — contact us for a custom quote.", priceCents: null, durationMin: 480, mode: "contact_only" },
     ],
   },
   {
@@ -64,7 +77,7 @@ const CATALOG: { category: string; slug: string; description: string; services: 
     services: [
       { name: "Ceramic Coating", slug: "ceramic-coating", short: "Professional-grade ceramic coating with multi-year durability.", priceCents: null, durationMin: 480, mode: "inspection_required", featured: true, photosRequired: true },
       { name: "Paint Protection Film", slug: "paint-protection-film", short: "Self-healing film for high-impact areas or full panels.", priceCents: null, durationMin: 480, mode: "inspection_required", photosRequired: true },
-      { name: "Wax & Sealant", slug: "wax-sealant", short: "Premium carnauba wax or synthetic sealant application.", priceCents: 9900, durationMin: 90, mode: "bookable" },
+      { name: "Wax & Sealant", slug: "wax-sealant", short: "Premium carnauba wax or synthetic sealant application.", priceCents: null, durationMin: 90, mode: "quote_required" },
     ],
   },
   {
@@ -95,28 +108,23 @@ const CATALOG: { category: string; slug: string; description: string; services: 
     services: [
       { name: "Fleet Cleaning", slug: "fleet-cleaning", short: "Recurring cleaning programs for company fleets.", priceCents: null, durationMin: 120, mode: "contact_only" },
       { name: "Dealership Services", slug: "dealership-services", short: "Lot washes, delivery preps and reconditioning.", priceCents: null, durationMin: 120, mode: "contact_only" },
-      { name: "Rideshare Packages", slug: "rideshare-packages", short: "Fast interior turnarounds for rideshare drivers.", priceCents: 9900, durationMin: 75, mode: "bookable" },
+      { name: "Rideshare Packages", slug: "rideshare-packages", short: "Fast interior turnarounds for rideshare drivers.", priceCents: null, durationMin: 75, mode: "quote_required" },
       { name: "Recurring Commercial Detailing", slug: "recurring-commercial", short: "Scheduled commercial detailing with consolidated billing.", priceCents: null, durationMin: 240, mode: "contact_only" },
     ],
   },
 ];
 
-/** Placeholder vehicle-size adjustments applied to bookable detailing services. */
-const VEHICLE_ADJUSTMENTS: { category: string; priceDeltaCents: number; durationDeltaMin: number }[] = [
-  { category: "suv_small", priceDeltaCents: 2000, durationDeltaMin: 30 },
-  { category: "suv_large", priceDeltaCents: 4000, durationDeltaMin: 60 },
-  { category: "pickup", priceDeltaCents: 4000, durationDeltaMin: 60 },
-  { category: "van", priceDeltaCents: 5000, durationDeltaMin: 60 },
-  { category: "commercial", priceDeltaCents: 6000, durationDeltaMin: 60 },
-];
+/**
+ * The flyer prices in two classes: Sedan vs SUV / Truck / Van. These vehicle
+ * categories get each service's large-vehicle delta.
+ */
+const LARGE_VEHICLE_CATEGORIES = ["suv_small", "suv_large", "pickup", "van", "commercial"];
 
+/** Flyer extras ("$X Extra" box) — confirmed prices. */
 const ADDONS = [
-  { name: "Headlight Restoration", description: "Restore clarity to oxidized headlights.", priceCents: 7900, durationMin: 45 },
-  { name: "Interior Protectant", description: "UV protectant for dash, trim and leather.", priceCents: 3900, durationMin: 15 },
-  { name: "Odour Treatment (Light)", description: "Deodorizing treatment for mild odours.", priceCents: 6900, durationMin: 45 },
-  { name: "Trim Restoration", description: "Restore faded exterior plastic trim.", priceCents: 4900, durationMin: 30 },
-  { name: "Glass Rain Repellent", description: "Hydrophobic coating for windshield and glass.", priceCents: 2900, durationMin: 15 },
-  { name: "Salt & Stain Extraction", description: "Winter salt and carpet stain extraction.", priceCents: 5900, durationMin: 45 },
+  { name: "Dog Hair Clean", description: "Removal of embedded pet hair (for interior clean-up packages).", priceCents: 5000, durationMin: 45 },
+  { name: "Wax / Buff", description: "Machine wax and buff for added gloss and protection.", priceCents: 12000, durationMin: 60 },
+  { name: "Salt Stain Removal", description: "Winter salt stain extraction from carpets and mats.", priceCents: 5000, durationMin: 45 },
 ];
 
 const MESSAGE_TEMPLATES = [
@@ -124,7 +132,13 @@ const MESSAGE_TEMPLATES = [
   { key: "booking_confirmation", channel: "email", subject: "Booking confirmed — {{businessName}}", body: "Hi {{firstName}},\n\nYour appointment on {{date}} at {{time}} is confirmed.\n\nService: {{services}}\nVehicle: {{vehicle}}\nEstimated total: {{total}}\n\nIf you need to reschedule, reply to this email or call us.\n\n— {{businessName}}" },
   { key: "appointment_reminder", channel: "sms", subject: null, body: "Reminder from {{businessName}}: your appointment is {{date}} at {{time}}. Reply to reschedule." },
   { key: "estimate_sent", channel: "email", subject: "Your estimate from {{businessName}}", body: "Hi {{firstName}},\n\nYour estimate #{{estimateNumber}} is ready. View and approve it here: {{link}}\n\nThis estimate expires on {{expiry}}.\n\n— {{businessName}}" },
+  { key: "additional_work_request", channel: "email", subject: "Approval needed for your vehicle — {{businessName}}", body: "Hi {{firstName}},\n\nWhile working on your vehicle we found something that needs your approval:\n\n{{description}}\nPrice: {{price}} plus tax\n\nApprove or decline here: {{link}}\n\nWork continues on the originally approved services in the meantime.\n\n— {{businessName}}" },
   { key: "vehicle_ready", channel: "sms", subject: null, body: "{{businessName}}: your {{vehicle}} is ready for pickup!" },
+  { key: "invoice_sent", channel: "email", subject: "Your invoice from {{businessName}}", body: "Hi {{firstName}},\n\nYour invoice INV-{{invoiceNumber}} for {{total}} is ready. View and pay it here: {{link}}\n\n— {{businessName}}" },
+  { key: "portal_access", channel: "email", subject: "Your customer portal — {{businessName}}", body: "Hi {{firstName}},\n\nYour secure {{businessName}} customer portal is ready. View your vehicles, appointments, estimates, service history and invoices here:\n\n{{link}}\n\nThis personal link expires in {{expiryDays}} days. Please do not share it.\n\n— {{businessName}}" },
+  { key: "receipt", channel: "email", subject: "Payment received — {{businessName}}", body: "Hi {{firstName}},\n\nWe received your payment of {{amount}} for invoice INV-{{invoiceNumber}}.\n{{balanceLine}}\nThank you for choosing {{businessName}}!\n\n— {{businessName}}" },
+  { key: "review_request", channel: "email", subject: "How did we do? — {{businessName}}", body: "Hi {{firstName}},\n\nThanks for choosing {{businessName}}! If you have a minute, we'd really appreciate a review — it helps other drivers find us:\n\n{{reviewUrl}}\n\n— {{businessName}}" },
+  { key: "maintenance", channel: "email", subject: "Time for your next detail? — {{businessName}}", body: "Hi {{firstName}},\n\nIt's been a little while since we detailed your {{vehicle}} — vehicles look and feel best with regular care. Ready to book your next visit?\n\n{{bookingUrl}}\n\n— {{businessName}}" },
 ];
 
 async function main() {
@@ -136,15 +150,22 @@ async function main() {
   // --- staff (dev owner account) -----------------------------------------
   const existingStaff = await db.select().from(schema.staffUsers);
   if (existingStaff.length === 0) {
-    const password = process.env.SEED_ADMIN_PASSWORD ?? "detailing-dev-2026";
+    const production = process.env.NODE_ENV === "production";
+    const password = process.env.SEED_ADMIN_PASSWORD ?? (production ? undefined : "detailing-dev-2026");
+    const email = process.env.SEED_ADMIN_EMAIL ?? (production ? undefined : "owner@ptcd.local");
+    if (!password || password.length < 12 || !email) {
+      throw new Error(
+        "First production seed requires SEED_ADMIN_EMAIL and a SEED_ADMIN_PASSWORD of at least 12 characters",
+      );
+    }
     await db.insert(schema.staffUsers).values({
       id: newId("usr"),
-      name: "Dev Owner",
-      email: "owner@ptcd.local",
+      name: process.env.SEED_ADMIN_NAME ?? (production ? "Owner" : "Dev Owner"),
+      email,
       passwordHash: await bcrypt.hash(password, 12),
       role: "owner",
     });
-    console.log(`Seeded staff: owner@ptcd.local / ${password} (DEV ONLY — change before production)`);
+    console.log(`Seeded owner account: ${email}`);
   }
 
   // --- counters ----------------------------------------------------------
@@ -160,17 +181,18 @@ async function main() {
     ]);
   }
 
-  // --- business hours (PLACEHOLDER — needs owner confirmation) -----------
+  // --- business hours (owner-confirmed: Mon–Sat 9–7, Sun closed; editable
+  // in Admin → Settings) --------------------------------------------------
   const existingHours = await db.select().from(schema.businessHours);
   if (existingHours.length === 0) {
     const rows = [
       { weekday: 0, closed: true, open: null as string | null, close: null as string | null },
-      { weekday: 1, closed: false, open: "08:00", close: "18:00" },
-      { weekday: 2, closed: false, open: "08:00", close: "18:00" },
-      { weekday: 3, closed: false, open: "08:00", close: "18:00" },
-      { weekday: 4, closed: false, open: "08:00", close: "18:00" },
-      { weekday: 5, closed: false, open: "08:00", close: "18:00" },
-      { weekday: 6, closed: false, open: "09:00", close: "17:00" },
+      { weekday: 1, closed: false, open: "09:00", close: "19:00" },
+      { weekday: 2, closed: false, open: "09:00", close: "19:00" },
+      { weekday: 3, closed: false, open: "09:00", close: "19:00" },
+      { weekday: 4, closed: false, open: "09:00", close: "19:00" },
+      { weekday: 5, closed: false, open: "09:00", close: "19:00" },
+      { weekday: 6, closed: false, open: "09:00", close: "19:00" },
     ];
     await db.insert(schema.businessHours).values(rows.map((r) => ({ id: newId("blk"), ...r })));
   }
@@ -219,14 +241,16 @@ async function main() {
         });
         // Vehicle-size adjustments + addon links for directly bookable services
         if (svc.mode === "bookable") {
-          for (const adj of VEHICLE_ADJUSTMENTS) {
-            await db.insert(schema.serviceVehicleAdjustments).values({
-              id: newId("adj"),
-              serviceId,
-              vehicleCategory: adj.category,
-              priceDeltaCents: adj.priceDeltaCents,
-              durationDeltaMin: adj.durationDeltaMin,
-            });
+          if (svc.largeVehicleDeltaCents) {
+            for (const category of LARGE_VEHICLE_CATEGORIES) {
+              await db.insert(schema.serviceVehicleAdjustments).values({
+                id: newId("adj"),
+                serviceId,
+                vehicleCategory: category,
+                priceDeltaCents: svc.largeVehicleDeltaCents,
+                durationDeltaMin: svc.largeVehicleDeltaMin ?? 0,
+              });
+            }
           }
           for (const addonId of addonIds) {
             await db.insert(schema.serviceAddons).values({ id: newId("add"), serviceId, addonId });
@@ -234,7 +258,7 @@ async function main() {
         }
       }
     }
-    console.log("Seeded service catalog (placeholder prices — confirm with owner).");
+    console.log("Seeded service catalog (package prices from owner flyer; durations estimated).");
   }
 
   // --- message templates -------------------------------------------------

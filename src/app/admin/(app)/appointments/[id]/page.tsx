@@ -7,6 +7,9 @@ import { formatCents } from "@/lib/money";
 import { formatInZone } from "@/lib/tz";
 import { getSettings } from "@/lib/settings";
 import { TransitionButtons } from "./transition-buttons";
+import { CheckInButton } from "./check-in-button";
+import { requirePageStaff } from "@/lib/auth/page";
+import { ReschedulePanel } from "./reschedule-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +18,7 @@ export default async function AppointmentDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await requirePageStaff("manage_bookings");
   const { id } = await params;
   const settings = await getSettings();
 
@@ -57,7 +61,23 @@ export default async function AppointmentDetailPage({
         <StatusBadge status={appt.status} />
       </div>
 
-      <TransitionButtons appointmentId={appt.id} status={appt.status} />
+      <TransitionButtons
+        appointmentId={appt.id}
+        status={appt.status}
+        depositRequiredCents={appt.depositRequiredCents}
+        depositPaidCents={appt.depositPaidCents}
+      />
+      {["pending", "deposit_required", "confirmed"].includes(appt.status) && (
+        <ReschedulePanel appointmentId={appt.id} maxBookingWindowDays={settings.maxBookingWindowDays} />
+      )}
+      {appt.status === "arrived" && !appt.jobId && <CheckInButton appointmentId={appt.id} />}
+      {appt.jobId && (
+        <p className="mt-4 text-sm">
+          <Link href={`/admin/jobs/${appt.jobId}`} className="text-accent-300 hover:underline">
+            View job →
+          </Link>
+        </p>
+      )}
 
       <div className="mt-8 grid gap-6 sm:grid-cols-2">
         <section className="rounded-xl border border-ink-800 p-5">

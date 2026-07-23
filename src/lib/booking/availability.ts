@@ -1,10 +1,17 @@
-import { and, eq, gt, lt, inArray } from "drizzle-orm";
+import { and, eq, gt, lt, inArray, ne } from "drizzle-orm";
 import { db, schema } from "@/db";
 import type { BusinessSettings } from "@/lib/settings";
 import { APPOINTMENT_BLOCKING_STATUSES } from "@/lib/types";
 import { parseHHMM, zonedToUtc, zonedWeekday } from "@/lib/tz";
 
 export type Interval = { start: number; end: number }; // epoch ms, [start, end)
+
+export type StaffCapacity = {
+  id: string;
+  skills: string[];
+  shifts: Interval[];
+  busy: Interval[];
+};
 
 export function overlaps(a: Interval, b: Interval): boolean {
   return a.start < b.end && a.end > b.start;
@@ -26,6 +33,13 @@ export type DayContext = {
   unassignedBusy: Interval[];
   /** Whole-business closures (holidays etc.). */
   globalBlocks: Interval[];
+  /** False only when the installation has no weekly staff schedule rows. */
+  staffingConfigured: boolean;
+  /** Skill-matched staff who have at least one shift on this local weekday. */
+  staffCapacity: StaffCapacity[];
+  /** Legacy/unassigned appointments conservatively consume one staff slot. */
+  unassignedStaffBusy: Interval[];
+  requiredSkills: string[];
 };
 
 /**
@@ -49,9 +63,39 @@ export function computeDaySlots(ctx: DayContext): Interval[] {
     if (start < earliest || start > latest) continue;
     if (ctx.globalBlocks.some((b) => overlaps(b, window))) continue;
     if (!hasFreeBay(ctx, window)) continue;
+    if (ctx.staffingConfigured && pickFreeStaff(ctx, window) === null) continue;
     out.push(window);
   }
   return out;
+}
+
+export function normalizeSkill(skill: string): string {
+  return skill.trim().toLowerCase();
+}
+
+export function hasRequiredSkills(staffSkills: string[], requiredSkills: string[]): boolean {
+  const available = new Set(staffSkills.map(normalizeSkill));
+  return requiredSkills.map(normalizeSkill).every((skill) => available.has(skill));
+}
+
+/**
+ * Returns an eligible on-shift, non-busy staff id. `undefined` means staffing
+ * is not configured and callers should preserve the legacy bay-only fallback;
+ * `null` means configured but no eligible staff is available.
+ */
+export function pickFreeStaff(
+  ctx: Pick<DayContext, "staffingConfigured" | "staffCapacity" | "unassignedStaffBusy" | "requiredSkills">,
+  window: Interval,
+): string | null | undefined {
+  if (!ctx.staffingConfigured) return undefined;
+  const free = ctx.staffCapacity.filter((staff) =>
+    hasRequiredSkills(staff.skills, ctx.requiredSkills) &&
+    staff.shifts.some((shift) => shift.start <= window.start && shift.end >= window.end) &&
+    !staff.busy.some((busy) => overlaps(busy, window)),
+  );
+  const unassignedOverlap = ctx.unassignedStaffBusy.filter((busy) => overlaps(busy, window)).length;
+  if (free.length - unassignedOverlap < 1) return null;
+  return free[free.length - 1].id;
 }
 
 export function hasFreeBay(
@@ -88,6 +132,9 @@ export async function loadDayContext(input: {
   workDurationMin: number;
   settings: BusinessSettings;
   now?: Date;
+  /** Used while rescheduling so the appointment does not block itself. */
+  excludeAppointmentId?: string;
+  requiredSkills?: string[];
 }): Promise<{ ctx: DayContext; bayIds: string[] }> {
   const { settings } = input;
   const [y, m, d] = input.dateISO.split("-").map(Number);
@@ -119,6 +166,38 @@ export async function loadDayContext(input: {
   const busyByBay: Interval[][] = bayIds.map(() => []);
   const unassignedBusy: Interval[] = [];
   const globalBlocks: Interval[] = [];
+  const unassignedStaffBusy: Interval[] = [];
+
+  // Compatibility fallback: an install with zero weekly schedule rows keeps
+  // the historic bay-only behavior. Once the owner saves any shift, staffing
+  // becomes authoritative for every day and service.
+  const staffingConfigured = (
+    await db().select({ id: schema.staffSchedules.id }).from(schema.staffSchedules).limit(1)
+  ).length > 0;
+  const staffCapacity: StaffCapacity[] = [];
+  if (staffingConfigured) {
+    const [activeStaff, daySchedules] = await Promise.all([
+      db().select({ id: schema.staffUsers.id, skills: schema.staffUsers.skills })
+        .from(schema.staffUsers).where(eq(schema.staffUsers.active, true)),
+      db().select().from(schema.staffSchedules).where(eq(schema.staffSchedules.weekday, weekday)),
+    ]);
+    const activeById = new Map(activeStaff.map((staff) => [staff.id, staff]));
+    for (const schedule of daySchedules) {
+      const staff = activeById.get(schedule.staffUserId);
+      if (!staff) continue;
+      let capacity = staffCapacity.find((candidate) => candidate.id === staff.id);
+      if (!capacity) {
+        capacity = { id: staff.id, skills: staff.skills, shifts: [], busy: [] };
+        staffCapacity.push(capacity);
+      }
+      const start = parseHHMM(schedule.start);
+      const end = parseHHMM(schedule.end);
+      capacity.shifts.push({
+        start: zonedToUtc(tz, y, m, d, start.hh, start.mm).getTime(),
+        end: zonedToUtc(tz, y, m, d, end.hh, end.mm).getTime(),
+      });
+    }
+  }
 
   if (openMs !== null && closeMs !== null) {
     const dayStart = new Date(openMs - 12 * 3600_000);
@@ -129,11 +208,15 @@ export async function loadDayContext(input: {
         startsAt: schema.appointments.startsAt,
         endsAt: schema.appointments.endsAt,
         resourceId: schema.appointments.resourceId,
+        assignedStaffId: schema.appointments.assignedStaffId,
       })
       .from(schema.appointments)
       .where(
         and(
           inArray(schema.appointments.status, APPOINTMENT_BLOCKING_STATUSES),
+          input.excludeAppointmentId
+            ? ne(schema.appointments.id, input.excludeAppointmentId)
+            : undefined,
           lt(schema.appointments.startsAt, dayEnd),
           gt(schema.appointments.endsAt, dayStart),
         ),
@@ -143,6 +226,13 @@ export async function loadDayContext(input: {
       const idx = a.resourceId ? bayIds.indexOf(a.resourceId) : -1;
       if (idx >= 0) busyByBay[idx].push(iv);
       else unassignedBusy.push(iv);
+      if (staffingConfigured) {
+        const assigned = a.assignedStaffId
+          ? staffCapacity.find((candidate) => candidate.id === a.assignedStaffId)
+          : undefined;
+        if (assigned) assigned.busy.push(iv);
+        else unassignedStaffBusy.push(iv);
+      }
     }
 
     const blocks = await db()
@@ -159,7 +249,9 @@ export async function loadDayContext(input: {
       } else if (!b.staffUserId) {
         globalBlocks.push(iv); // whole-business closure
       }
-      // staff-specific blocks affect staff assignment, not bay capacity (Phase 1)
+      if (staffingConfigured && b.staffUserId) {
+        staffCapacity.find((candidate) => candidate.id === b.staffUserId)?.busy.push(iv);
+      }
     }
   }
 
@@ -174,6 +266,10 @@ export async function loadDayContext(input: {
     busyByBay,
     unassignedBusy,
     globalBlocks,
+    staffingConfigured,
+    staffCapacity,
+    unassignedStaffBusy,
+    requiredSkills: [...new Set((input.requiredSkills ?? []).map(normalizeSkill).filter(Boolean))],
   };
   return { ctx, bayIds };
 }
@@ -183,6 +279,8 @@ export async function getAvailableSlots(input: {
   workDurationMin: number;
   settings: BusinessSettings;
   now?: Date;
+  excludeAppointmentId?: string;
+  requiredSkills?: string[];
 }): Promise<Interval[]> {
   const { ctx } = await loadDayContext(input);
   return computeDaySlots(ctx);

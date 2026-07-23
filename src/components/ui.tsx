@@ -2,15 +2,15 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 export function Container({ children, className = "" }: { children: ReactNode; className?: string }) {
-  return <div className={`mx-auto w-full max-w-6xl px-4 sm:px-6 ${className}`}>{children}</div>;
+  return <div className={`mx-auto w-full max-w-7xl px-5 sm:px-8 lg:px-10 ${className}`}>{children}</div>;
 }
 
 const buttonStyles = {
   primary:
-    "bg-accent-400 text-ink-950 hover:bg-accent-300 font-semibold shadow-lg shadow-accent-500/20",
+    "border border-accent-400 bg-accent-400 text-ink-950 hover:border-accent-300 hover:bg-accent-300 font-semibold shadow-[0_10px_28px_rgba(224,169,59,0.14)]",
   outline:
-    "border border-ink-600 text-ink-100 hover:border-accent-400 hover:text-accent-300",
-  ghost: "text-ink-300 hover:text-accent-300",
+    "border border-ink-500/70 text-ink-100 hover:border-accent-400 hover:bg-white/5 hover:text-accent-300",
+  ghost: "border border-transparent text-ink-300 hover:text-white",
 } as const;
 
 export function ButtonLink({
@@ -27,7 +27,7 @@ export function ButtonLink({
   return (
     <Link
       href={href}
-      className={`inline-flex items-center justify-center rounded-lg px-5 py-3 text-sm transition-colors ${buttonStyles[variant]} ${className}`}
+      className={`inline-flex min-h-11 items-center justify-center rounded-xl px-6 py-3 text-sm tracking-[0.01em] transition-all duration-200 ${buttonStyles[variant]} ${className}`}
     >
       {children}
     </Link>
@@ -38,28 +38,55 @@ export function SectionHeading({
   eyebrow,
   title,
   subtitle,
+  tone = "dark",
+  align = "left",
 }: {
   eyebrow?: string;
   title: string;
   subtitle?: string;
+  tone?: "dark" | "light";
+  align?: "left" | "center";
 }) {
+  const centered = align === "center";
   return (
-    <div className="mb-10 max-w-2xl">
+    <div className={`mb-12 max-w-3xl ${centered ? "mx-auto text-center" : ""}`}>
       {eyebrow && (
-        <p className="mb-2 text-sm font-semibold uppercase tracking-widest text-accent-400">
+        <p className="mb-4 text-xs font-semibold uppercase tracking-[0.24em] text-accent-500">
           {eyebrow}
         </p>
       )}
-      <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">{title}</h2>
-      {subtitle && <p className="mt-3 text-ink-300">{subtitle}</p>}
+      <h2
+        className={`font-display text-4xl leading-[1.05] tracking-[-0.025em] sm:text-5xl ${
+          tone === "light" ? "text-[#1C2026]" : "text-white"
+        }`}
+      >
+        {title}
+      </h2>
+      {subtitle && (
+        <p className={`mt-5 max-w-2xl text-base leading-7 ${centered ? "mx-auto" : ""} ${tone === "light" ? "text-slate-600" : "text-ink-300"}`}>
+          {subtitle}
+        </p>
+      )}
     </div>
   );
 }
 
-export function Card({ children, className = "" }: { children: ReactNode; className?: string }) {
+export function Card({
+  children,
+  className = "",
+  tone = "dark",
+}: {
+  children: ReactNode;
+  className?: string;
+  tone?: "dark" | "light";
+}) {
   return (
     <div
-      className={`rounded-2xl border border-ink-700/60 bg-ink-900/60 p-6 backdrop-blur ${className}`}
+      className={`rounded-[1.25rem] border p-6 ${
+        tone === "light"
+          ? "border-[#DED8CE] bg-[#FFFEFB] text-[#1C2026] shadow-[0_16px_45px_rgba(11,42,74,0.07)]"
+          : "border-white/10 bg-white/[0.045] text-ink-100 backdrop-blur"
+      } ${className}`}
     >
       {children}
     </div>

@@ -6,10 +6,14 @@ import { StatusBadge } from "@/components/admin";
 import { formatCents } from "@/lib/money";
 import { formatInZone } from "@/lib/tz";
 import { getSettings } from "@/lib/settings";
+import { CustomerActionPanels } from "./customer-actions";
+import { requirePageStaff } from "@/lib/auth/page";
+import { summarizeRevenue } from "@/lib/reporting";
 
 export const dynamic = "force-dynamic";
 
 export default async function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {
+  await requirePageStaff("manage_customers");
   const { id } = await params;
   const settings = await getSettings();
   const rows = await db().select().from(schema.customers).where(eq(schema.customers.id, id)).limit(1);
@@ -29,17 +33,20 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
     .where(eq(schema.communications.customerId, id))
     .orderBy(desc(schema.communications.createdAt))
     .limit(50);
-
-  const lifetimeCents = appointments
-    .filter((a) => a.status === "completed")
-    .reduce((sum, a) => sum + a.totalCents, 0);
+  const paymentRows = await db().select().from(schema.payments).where(eq(schema.payments.customerId, id));
+  const lifetimeRevenue = summarizeRevenue(paymentRows);
 
   return (
     <div className="max-w-3xl">
       <p className="font-mono text-xs text-ink-500">{customer.id}</p>
       <h1 className="text-2xl font-bold text-white">
-        {customer.firstName} {customer.lastName}
+        {customer.customerType === "business" && customer.companyName ? customer.companyName : `${customer.firstName} ${customer.lastName}`}
       </h1>
+      {customer.customerType === "business" && (
+        <p className="mt-1 text-sm text-ink-300">
+          Fleet contact: {customer.firstName} {customer.lastName} · <Link href={`/admin/fleet/${customer.id}`} className="text-accent-300 hover:underline">Open fleet workspace →</Link>
+        </p>
+      )}
       <div className="mt-1 flex flex-wrap gap-4 text-sm text-ink-300">
         {customer.email && <span>{customer.email}</span>}
         {customer.phone && <span>{customer.phone}</span>}
@@ -49,8 +56,23 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
         </span>
       </div>
       <p className="mt-2 text-sm text-ink-400">
-        Lifetime value (completed): <span className="text-accent-300">{formatCents(lifetimeCents)}</span>
+        Net revenue received: <span className="text-accent-300">{formatCents(lifetimeRevenue.netCents)}</span>
       </p>
+
+      <CustomerActionPanels customer={{
+        id: customer.id,
+        firstName: customer.firstName,
+        lastName: customer.lastName,
+        email: customer.email,
+        phone: customer.phone,
+        preferredContact: customer.preferredContact,
+        customerType: customer.customerType,
+        companyName: customer.companyName,
+        tags: customer.tags,
+        notes: customer.notes,
+        marketingConsent: customer.marketingConsent,
+        anonymizedAt: customer.anonymizedAt?.toISOString() ?? null,
+      }} />
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold text-white">Vehicles ({vehicles.length})</h2>

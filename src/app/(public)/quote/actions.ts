@@ -1,15 +1,15 @@
 "use server";
 
-import { mkdir, writeFile } from "fs/promises";
-import { join } from "path";
 import { randomBytes } from "crypto";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { newId } from "@/lib/id";
 import { getSettings } from "@/lib/settings";
-import { sendMessage, renderTemplate } from "@/lib/messaging";
-import { eq, inArray } from "drizzle-orm";
+import { sendMessageTemplate } from "@/lib/messaging";
+import { inArray } from "drizzle-orm";
 import { VEHICLE_CATEGORIES } from "@/lib/types";
+import { consumeRateLimit } from "@/lib/rate-limit";
+import { putPrivateFile } from "@/lib/storage";
 
 const MAX_PHOTOS = 6;
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
@@ -37,6 +37,8 @@ export type QuoteResult = { ok: true; reference: string } | { ok: false; error: 
  * and logs an acknowledgement message.
  */
 export async function submitQuoteAction(formData: FormData): Promise<QuoteResult> {
+  const rate = await consumeRateLimit("quote", { limit: 5, windowMs: 60 * 60_000 });
+  if (!rate.allowed) return { ok: false, error: "Too many requests. Please try again later or call us." };
   let payload: unknown;
   try {
     payload = JSON.parse(String(formData.get("payload") ?? "{}"));
@@ -86,10 +88,9 @@ export async function submitQuoteAction(formData: FormData): Promise<QuoteResult
       status: "new",
       message: input.conditionDescription,
       attribution: (input.attribution ?? null) as never,
-      // Consent transfers to the customer record on lead conversion.
-      notes: input.marketingConsent
-        ? `Marketing consent given via quote form at ${new Date().toISOString()}`
-        : null,
+      marketingConsent: input.marketingConsent,
+      marketingConsentAt: input.marketingConsent ? new Date() : null,
+      marketingConsentSource: input.marketingConsent ? "public_quote_form" : null,
     });
 
     await db().insert(schema.quoteRequests).values({
@@ -105,14 +106,13 @@ export async function submitQuoteAction(formData: FormData): Promise<QuoteResult
       conditionDescription: input.conditionDescription,
     });
 
-    // Store photos privately on disk (dev). Production: S3-compatible storage.
+    // Store photos through the private storage abstraction (local in dev,
+    // S3-compatible object storage in production).
     if (photos.length > 0) {
-      const dir = join(process.cwd(), "var", "uploads", "quote_requests", quoteRequestId);
-      await mkdir(dir, { recursive: true });
       for (const photo of photos) {
         const ext = photo.type === "image/png" ? "png" : photo.type === "image/webp" ? "webp" : photo.type === "image/heic" ? "heic" : "jpg";
         const key = `quote_requests/${quoteRequestId}/${randomBytes(8).toString("hex")}.${ext}`;
-        await writeFile(join(process.cwd(), "var", "uploads", key), Buffer.from(await photo.arrayBuffer()));
+        await putPrivateFile(key, Buffer.from(await photo.arrayBuffer()), photo.type);
         await db().insert(schema.files).values({
           id: newId("file"),
           entityType: "quote_request",
@@ -126,29 +126,19 @@ export async function submitQuoteAction(formData: FormData): Promise<QuoteResult
       }
     }
 
-    if (input.email) {
-      const settings = await getSettings();
-      const tpl = await db()
-        .select()
-        .from(schema.messageTemplates)
-        .where(eq(schema.messageTemplates.key, "lead_ack"))
-        .limit(1);
-      if (tpl[0]) {
-        await sendMessage({
-          leadId,
-          channel: "email",
-          kind: "lead_ack",
-          to: input.email,
-          subject: renderTemplate(tpl[0].subject ?? "", { businessName: settings.businessName }),
-          body: renderTemplate(tpl[0].body, {
-            businessName: settings.businessName,
-            firstName: input.name.split(" ")[0],
-          }),
-          relatedEntityType: "quote_request",
-          relatedEntityId: quoteRequestId,
-        });
-      }
-    }
+    const settings = await getSettings();
+    await sendMessageTemplate({
+      templateKey: "lead_ack",
+      recipient: input,
+      leadId,
+      kind: "lead_ack",
+      variables: {
+        businessName: settings.businessName,
+        firstName: input.name.split(" ")[0],
+      },
+      relatedEntityType: "quote_request",
+      relatedEntityId: quoteRequestId,
+    });
 
     return { ok: true, reference: quoteRequestId };
   } catch (err) {

@@ -5,6 +5,7 @@ import { StatusBadge } from "@/components/admin";
 import { formatCents } from "@/lib/money";
 import { formatInZone } from "@/lib/tz";
 import { getSettings } from "@/lib/settings";
+import { requirePageStaff } from "@/lib/auth/page";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,7 @@ export default async function AppointmentsPage({
 }: {
   searchParams: Promise<{ status?: string }>;
 }) {
+  await requirePageStaff("manage_bookings");
   const { status } = await searchParams;
   const settings = await getSettings();
   const filter = FILTERS.includes((status ?? "all") as (typeof FILTERS)[number])
@@ -42,7 +44,10 @@ export default async function AppointmentsPage({
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-white">Appointments</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-white">Appointments</h1>
+        <Link href="/admin/appointments/new" className="rounded-lg bg-accent-400 px-4 py-2 text-sm font-semibold text-ink-950">New appointment</Link>
+      </div>
       <div className="mt-4 flex flex-wrap gap-2">
         {FILTERS.map((f) => (
           <Link

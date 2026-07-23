@@ -4,8 +4,8 @@ import { z } from "zod";
 import { db, schema } from "@/db";
 import { newId } from "@/lib/id";
 import { getSettings } from "@/lib/settings";
-import { sendMessage, renderTemplate } from "@/lib/messaging";
-import { eq } from "drizzle-orm";
+import { sendMessageTemplate } from "@/lib/messaging";
+import { consumeRateLimit } from "@/lib/rate-limit";
 
 const contactSchema = z.object({
   name: z.string().trim().min(1).max(150),
@@ -20,6 +20,8 @@ const contactSchema = z.object({
 export type ContactResult = { ok: true } | { ok: false; error: string };
 
 export async function submitContactAction(raw: unknown): Promise<ContactResult> {
+  const rate = await consumeRateLimit("contact", { limit: 5, windowMs: 60 * 60_000 });
+  if (!rate.allowed) return { ok: false, error: "Too many requests. Please try again later or call us." };
   const parsed = contactSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, error: "Please fill in the required fields." };
   const input = parsed.data;
@@ -38,29 +40,19 @@ export async function submitContactAction(raw: unknown): Promise<ContactResult> 
       message: input.message,
       attribution: (input.attribution ?? null) as never,
     });
-    if (input.email) {
-      const settings = await getSettings();
-      const tpl = await db()
-        .select()
-        .from(schema.messageTemplates)
-        .where(eq(schema.messageTemplates.key, "lead_ack"))
-        .limit(1);
-      if (tpl[0]) {
-        await sendMessage({
-          leadId,
-          channel: "email",
-          kind: "lead_ack",
-          to: input.email,
-          subject: renderTemplate(tpl[0].subject ?? "", { businessName: settings.businessName }),
-          body: renderTemplate(tpl[0].body, {
-            businessName: settings.businessName,
-            firstName: input.name.split(" ")[0],
-          }),
-          relatedEntityType: "lead",
-          relatedEntityId: leadId,
-        });
-      }
-    }
+    const settings = await getSettings();
+    await sendMessageTemplate({
+      templateKey: "lead_ack",
+      recipient: input,
+      leadId,
+      kind: "lead_ack",
+      variables: {
+        businessName: settings.businessName,
+        firstName: input.name.split(" ")[0],
+      },
+      relatedEntityType: "lead",
+      relatedEntityId: leadId,
+    });
     return { ok: true };
   } catch (err) {
     console.error("submitContactAction failed", err);

@@ -1,7 +1,9 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { QuoteStatusSelect } from "../../status-select";
+import { requirePageStaff } from "@/lib/auth/page";
 
 export const dynamic = "force-dynamic";
 
@@ -10,6 +12,7 @@ export default async function QuoteRequestDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  await requirePageStaff("manage_estimates");
   const { id } = await params;
   const rows = await db().select().from(schema.quoteRequests).where(eq(schema.quoteRequests.id, id)).limit(1);
   const quote = rows[0];
@@ -103,10 +106,23 @@ export default async function QuoteRequestDetailPage({
         </section>
       )}
 
-      <p className="mt-8 text-xs text-ink-500">
-        Estimate builder ships in Phase 2 — until then, reply to the customer directly and track
-        the request status here.
-      </p>
+      <div className="mt-8">
+        {quote.estimateId ? (
+          <Link
+            href={`/admin/estimates/${quote.estimateId}`}
+            className="inline-block rounded-lg border border-ink-600 px-5 py-2.5 text-sm text-ink-200 hover:border-accent-400"
+          >
+            View Estimate →
+          </Link>
+        ) : (
+          <Link
+            href={`/admin/estimates/new?quoteRequest=${quote.id}`}
+            className="inline-block rounded-lg bg-accent-400 px-5 py-2.5 text-sm font-semibold text-ink-950 hover:bg-accent-300"
+          >
+            Create Estimate
+          </Link>
+        )}
+      </div>
     </div>
   );
 }

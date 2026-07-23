@@ -61,11 +61,11 @@ export default async function BookPage({
   }));
 
   return (
-    <Container className="py-16">
+    <Container className="py-12 sm:py-16">
       <SectionHeading
         eyebrow="Online booking"
         title="Book an appointment"
-        subtitle="Pick a service, tell us about your vehicle, and choose a time that works. Condition-dependent services (paint correction, coatings, tinting, wraps) are quoted first — use Request a Quote instead."
+        subtitle="Choose a service, tell us about your vehicle, and reserve a convenient time. You’ll see a clear estimate before confirming. Condition-dependent work is quoted first."
       />
       <BookingWizard
         services={wizardServices}

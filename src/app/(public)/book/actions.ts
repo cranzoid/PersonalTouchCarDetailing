@@ -5,12 +5,13 @@ import { getSettings } from "@/lib/settings";
 import { priceBooking, PricingError } from "@/lib/pricing";
 import { getAvailableSlots } from "@/lib/booking/availability";
 import { createAppointment, BookingError } from "@/lib/booking/create";
-import { sendMessage, renderTemplate } from "@/lib/messaging";
+import { sendMessageTemplate } from "@/lib/messaging";
 import { formatCents } from "@/lib/money";
 import { formatInZone } from "@/lib/tz";
-import { db, schema } from "@/db";
-import { eq } from "drizzle-orm";
 import { VEHICLE_CATEGORIES } from "@/lib/types";
+import { consumeRateLimit } from "@/lib/rate-limit";
+import { getAppBaseUrl } from "@/lib/urls";
+import { sendAppointmentDepositRequest } from "@/lib/appointment-deposits";
 
 const attributionSchema = z
   .object({
@@ -41,6 +42,8 @@ export type SlotsResult =
   | { ok: false; error: string };
 
 export async function getSlotsAction(raw: unknown): Promise<SlotsResult> {
+  const rate = await consumeRateLimit("booking-slots", { limit: 60, windowMs: 5 * 60_000 });
+  if (!rate.allowed) return { ok: false, error: "Too many availability requests. Please wait a moment." };
   const parsed = slotsInputSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, error: "Invalid request" };
   const input = parsed.data;
@@ -51,6 +54,7 @@ export async function getSlotsAction(raw: unknown): Promise<SlotsResult> {
       dateISO: input.dateISO,
       workDurationMin: pricing.durationMin,
       settings,
+      requiredSkills: pricing.requiredSkills,
     });
     return {
       ok: true,
@@ -104,10 +108,14 @@ export type BookingResult =
       whenLabel: string;
       totalLabel: string;
       depositLabel: string | null;
+      depositUrl: string | null;
+      confirmationDelivery: "email" | "sms" | null;
     }
   | { ok: false; error: string };
 
 export async function submitBookingAction(raw: unknown): Promise<BookingResult> {
+  const rate = await consumeRateLimit("booking-submit", { limit: 5, windowMs: 60 * 60_000 });
+  if (!rate.allowed) return { ok: false, error: "Too many booking attempts. Please try again later or call us." };
   const parsed = bookingInputSchema.safeParse(raw);
   if (!parsed.success) {
     return { ok: false, error: "Please check the form — some fields are missing or invalid." };
@@ -122,6 +130,9 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
       vehicleCategory: input.vehicleCategory,
       settings,
     });
+    // Validate external-link configuration before committing a booking that
+    // requires online confirmation, avoiding an orphaned unpaid reservation.
+    const baseUrl = pricing.depositRequiredCents > 0 ? getAppBaseUrl() : null;
     const result = await createAppointment({
       customer: input.customer,
       vehicle: input.vehicle,
@@ -142,21 +153,25 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
       minute: "2-digit",
     });
 
-    // Booking confirmation (operational message; dev transport logs it).
-    if (input.customer.email) {
-      const tpl = await db()
-        .select()
-        .from(schema.messageTemplates)
-        .where(eq(schema.messageTemplates.key, "booking_confirmation"))
-        .limit(1);
-      if (tpl[0]) {
-        await sendMessage({
+    let depositUrl: string | null = null;
+    let delivery: "email" | "sms" | null = null;
+    try {
+      if (pricing.depositRequiredCents > 0) {
+        if (!result.depositAccessToken || !baseUrl) {
+          throw new Error("Deposit-required booking did not create an access token");
+        }
+        depositUrl = `${baseUrl}/portal/deposits/${result.depositAccessToken}`;
+        const request = await sendAppointmentDepositRequest(result.appointmentId, depositUrl);
+        delivery = request.sent ? (request.channel ?? null) : null;
+      } else {
+        // Only deposit-free bookings are confirmed immediately. Deposit-backed
+        // bookings receive their confirmation after payment succeeds.
+        const confirmation = await sendMessageTemplate({
+          templateKey: "booking_confirmation",
+          recipient: input.customer,
           customerId: result.customerId,
-          channel: "email",
           kind: "confirmation",
-          to: input.customer.email,
-          subject: renderTemplate(tpl[0].subject ?? "", { businessName: settings.businessName }),
-          body: renderTemplate(tpl[0].body, {
+          variables: {
             businessName: settings.businessName,
             firstName: input.customer.firstName,
             date: whenLabel,
@@ -164,11 +179,16 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
             services: pricing.lines.map((l) => l.description).join(", "),
             vehicle: `${input.vehicle.make} ${input.vehicle.model}`,
             total: formatCents(pricing.totalCents),
-          }),
+          },
           relatedEntityType: "appointment",
           relatedEntityId: result.appointmentId,
         });
+        delivery = confirmation.sent ? (confirmation.channel ?? null) : null;
       }
+    } catch {
+      // The secure link remains visible in the success UI even when message
+      // delivery is unavailable; a messaging outage must not duplicate a booking.
+      console.error("Booking created but customer message could not be queued");
     }
 
     return {
@@ -179,6 +199,8 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
       totalLabel: formatCents(pricing.totalCents),
       depositLabel:
         pricing.depositRequiredCents > 0 ? formatCents(pricing.depositRequiredCents) : null,
+      depositUrl,
+      confirmationDelivery: delivery,
     };
   } catch (err) {
     if (err instanceof PricingError || err instanceof BookingError) {

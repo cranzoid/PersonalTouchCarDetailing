@@ -21,6 +21,8 @@ export type BookingPricing = {
   depositRequiredCents: number;
   /** Work duration only; buffers are added by the availability engine. */
   durationMin: number;
+  /** Normalized union of skills required by every selected service. */
+  requiredSkills: string[];
 };
 
 export class PricingError extends Error {}
@@ -106,7 +108,10 @@ export async function priceBooking(input: {
     });
   }
 
-  return computeTotals(lines, settings.taxRateBp, depositRequiredCents);
+  return {
+    ...computeTotals(lines, settings.taxRateBp, depositRequiredCents),
+    requiredSkills: [...new Set(services.flatMap((service) => service.requiredSkills.map(normalizeSkill)).filter(Boolean))],
+  };
 }
 
 /** Pure totals math (unit-tested in tests/pricing.test.ts). */
@@ -126,5 +131,10 @@ export function computeTotals(
     totalCents: subtotalCents + tax,
     depositRequiredCents,
     durationMin,
+    requiredSkills: [],
   };
+}
+
+function normalizeSkill(skill: string): string {
+  return skill.trim().toLowerCase();
 }

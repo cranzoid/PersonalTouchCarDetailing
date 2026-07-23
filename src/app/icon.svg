@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Personal Touch monogram">
+  <rect width="64" height="64" rx="15" fill="#0B2A4A"/>
+  <path d="M12 18c12-8 28-8 40 0" fill="none" stroke="#E0A93B" stroke-width="4" stroke-linecap="round"/>
+  <text x="32" y="45" fill="#F4F6FA" font-family="Arial, Helvetica, sans-serif" font-size="28" font-weight="700" text-anchor="middle" letter-spacing="-2">PT</text>
+</svg>

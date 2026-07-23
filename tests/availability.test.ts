@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { computeDaySlots, pickFreeBay, type DayContext } from "../src/lib/booking/availability";
+import {
+  computeDaySlots,
+  pickFreeBay,
+  pickFreeStaff,
+  type DayContext,
+} from "../src/lib/booking/availability";
 
 const HOUR = 3600_000;
 const DAY = 24 * HOUR;
@@ -18,6 +23,10 @@ function ctx(overrides: Partial<DayContext> = {}): DayContext {
     busyByBay: [[], []],
     unassignedBusy: [],
     globalBlocks: [],
+    staffingConfigured: false,
+    staffCapacity: [],
+    unassignedStaffBusy: [],
+    requiredSkills: [],
     ...overrides,
   };
 }
@@ -75,6 +84,62 @@ describe("computeDaySlots", () => {
     expect(slots.some((s) => s.start === c.openMs)).toBe(false);
     // Later, non-overlapping slots still offered
     expect(slots.some((s) => s.start === c.openMs! + 2 * HOUR)).toBe(true);
+  });
+
+  it("preserves bay-only availability when no weekly staff schedules exist", () => {
+    const c = ctx();
+    const window = { start: c.openMs!, end: c.openMs! + 2 * HOUR };
+    expect(pickFreeStaff(c, window)).toBeUndefined();
+    expect(computeDaySlots(c).some((slot) => slot.start === c.openMs)).toBe(true);
+  });
+
+  it("requires configured staff capacity for the complete buffered window", () => {
+    const c = ctx({ staffingConfigured: true });
+    expect(computeDaySlots(c)).toHaveLength(0);
+
+    const fullShift = { start: c.openMs!, end: c.closeMs! };
+    const staffed = ctx({
+      staffingConfigured: true,
+      staffCapacity: [{ id: "staff_1", skills: [], shifts: [fullShift], busy: [] }],
+    });
+    expect(computeDaySlots(staffed).some((slot) => slot.start === c.openMs)).toBe(true);
+  });
+
+  it("requires every service skill and excludes busy or off-shift staff", () => {
+    const c = ctx({
+      staffingConfigured: true,
+      requiredSkills: ["Ceramic", "polishing"],
+      staffCapacity: [
+        { id: "partial", skills: ["ceramic"], shifts: [{ start: 0, end: 20 * DAY }], busy: [] },
+        {
+          id: "eligible",
+          skills: [" POLISHING ", "CERAMIC"],
+          shifts: [{ start: 0, end: 20 * DAY }],
+          busy: [],
+        },
+      ],
+    });
+    const window = { start: c.openMs!, end: c.openMs! + 2 * HOUR };
+    expect(pickFreeStaff(c, window)).toBe("eligible");
+
+    c.staffCapacity[1].busy.push(window);
+    expect(pickFreeStaff(c, window)).toBeNull();
+    expect(computeDaySlots(c).some((slot) => slot.start === window.start)).toBe(false);
+  });
+
+  it("reserves configured staff capacity for legacy unassigned appointments", () => {
+    const c = ctx({
+      staffingConfigured: true,
+      staffCapacity: [{
+        id: "staff_1",
+        skills: [],
+        shifts: [{ start: 0, end: 20 * DAY }],
+        busy: [],
+      }],
+    });
+    const window = { start: c.openMs!, end: c.openMs! + 2 * HOUR };
+    c.unassignedStaffBusy.push(window);
+    expect(pickFreeStaff(c, window)).toBeNull();
   });
 });
 

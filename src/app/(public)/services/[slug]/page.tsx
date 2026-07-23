@@ -1,9 +1,22 @@
 import { notFound } from "next/navigation";
+import type { Metadata } from "next";
 import { asc, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { Container, ButtonLink, Card } from "@/components/ui";
 import { formatCents } from "@/lib/money";
 import { VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
+
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const { slug } = await params;
+  const [service] = await db()
+    .select({ name: schema.services.name, description: schema.services.shortDescription })
+    .from(schema.services)
+    .where(eq(schema.services.slug, slug))
+    .limit(1);
+  return service
+    ? { title: service.name, description: service.description ?? undefined }
+    : { title: "Service" };
+}
 
 export default async function ServiceDetailPage({
   params,
@@ -41,12 +54,13 @@ export default async function ServiceDetailPage({
   const quotePath = svc.bookingMode === "contact_only" ? "/contact" : `/quote?service=${svc.slug}`;
 
   return (
-    <Container className="py-16">
-      <div className="grid gap-12 lg:grid-cols-[2fr_1fr]">
+    <Container className="py-20 sm:py-28">
+      <div className="grid gap-14 lg:grid-cols-[minmax(0,1.45fr)_minmax(19rem,0.55fr)]">
         <div>
-          <h1 className="text-4xl font-bold tracking-tight text-white">{svc.name}</h1>
-          <p className="mt-4 max-w-2xl text-lg text-ink-300">{svc.shortDescription}</p>
-          {svc.longDescription && <p className="mt-4 max-w-2xl text-ink-300">{svc.longDescription}</p>}
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-accent-300">Detailing service</p>
+          <h1 className="mt-5 max-w-3xl font-display text-5xl leading-[1.02] tracking-[-0.03em] text-white sm:text-6xl">{svc.name}</h1>
+          <p className="mt-6 max-w-2xl text-lg leading-8 text-ink-200">{svc.shortDescription}</p>
+          {svc.longDescription && <p className="mt-5 max-w-2xl leading-7 text-ink-300">{svc.longDescription}</p>}
 
           {!bookable && (
             <Card className="mt-8 border-accent-500/30">
@@ -67,18 +81,19 @@ export default async function ServiceDetailPage({
 
           {bookable && adjustments.length > 0 && (
             <div className="mt-10">
-              <h2 className="text-lg font-semibold text-white">Pricing by vehicle size</h2>
+              <h2 className="font-display text-2xl text-white">Pricing by vehicle size</h2>
               <div className="mt-4 overflow-x-auto">
-                <table className="w-full max-w-md text-sm">
+                <table className="w-full max-w-lg overflow-hidden rounded-2xl text-sm">
+                  <caption className="sr-only">Price adjustments by vehicle category</caption>
                   <tbody>
-                    <tr className="border-b border-ink-800">
+                    <tr className="border-b border-white/10">
                       <td className="py-2 text-ink-300">Coupe / Sedan</td>
                       <td className="py-2 text-right text-accent-300">
                         {formatCents(svc.basePriceCents!)}
                       </td>
                     </tr>
                     {adjustments.map((adj) => (
-                      <tr key={adj.id} className="border-b border-ink-800">
+                      <tr key={adj.id} className="border-b border-white/10">
                         <td className="py-2 text-ink-300">
                           {VEHICLE_CATEGORY_LABELS[adj.vehicleCategory as VehicleCategory] ??
                             adj.vehicleCategory}
@@ -100,10 +115,10 @@ export default async function ServiceDetailPage({
 
           {addonRows.length > 0 && (
             <div className="mt-10">
-              <h2 className="text-lg font-semibold text-white">Popular add-ons</h2>
+              <h2 className="font-display text-2xl text-white">Popular add-ons</h2>
               <ul className="mt-4 grid max-w-xl gap-2 sm:grid-cols-2">
                 {addonRows.map((a) => (
-                  <li key={a.id} className="flex justify-between rounded-lg border border-ink-800 px-4 py-2 text-sm">
+                  <li key={a.id} className="flex min-h-12 items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm">
                     <span className="text-ink-200">{a.name}</span>
                     <span className="text-accent-300">{formatCents(a.priceCents)}</span>
                   </li>
@@ -114,11 +129,11 @@ export default async function ServiceDetailPage({
         </div>
 
         <aside>
-          <Card className="sticky top-24">
+          <Card className="sticky top-28 border-accent-400/25 p-7">
             <p className="text-sm uppercase tracking-wider text-ink-400">
               {bookable ? "Starting at" : "Pricing"}
             </p>
-            <p className="mt-1 text-3xl font-bold text-white">
+            <p className="mt-2 font-display text-4xl text-white">
               {bookable ? formatCents(svc.basePriceCents!) : "By quote"}
             </p>
             <p className="mt-1 text-sm text-ink-400">

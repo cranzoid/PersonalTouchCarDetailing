@@ -64,7 +64,7 @@ export const accessTokens = pgTable(
   {
     id: id(),
     tokenHash: text("token_hash").notNull().unique(),
-    purpose: text("purpose").notNull(), // estimate_view | invoice_pay | portal | additional_work
+    purpose: text("purpose").notNull(), // estimate_view | invoice_pay | appointment_deposit | portal | additional_work
     subjectType: text("subject_type").notNull(), // estimate | invoice | customer | additional_work_request
     subjectId: text("subject_id").notNull(),
     customerId: text("customer_id").references(() => customers.id),
@@ -93,6 +93,14 @@ export const auditLog = pgTable(
   },
   (t) => [index("audit_entity_idx").on(t.entityType, t.entityId)],
 );
+
+/** Persistent fixed-window counters used by public endpoint rate limiting. */
+export const rateLimitBuckets = pgTable("rate_limit_buckets", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull().default(0),
+  resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
+  updatedAt: updatedAt(),
+});
 
 /* ------------------------------------------------------------------ */
 /* CRM                                                                 */
@@ -175,6 +183,9 @@ export const leads = pgTable(
     convertedCustomerId: text("converted_customer_id").references(() => customers.id),
     assignedStaffId: text("assigned_staff_id").references(() => staffUsers.id),
     notes: text("notes"),
+    marketingConsent: boolean("marketing_consent").notNull().default(false),
+    marketingConsentAt: timestamp("marketing_consent_at", { withTimezone: true }),
+    marketingConsentSource: text("marketing_consent_source"),
     anonymizedAt: timestamp("anonymized_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
@@ -359,6 +370,8 @@ export const appointments = pgTable(
     cancellationReason: text("cancellation_reason"),
     jobId: text("job_id"),
     estimateId: text("estimate_id"),
+    /** Stamped once the pre-appointment SMS reminder goes out — prevents duplicate sends. */
+    reminderSentAt: timestamp("reminder_sent_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -505,6 +518,8 @@ export const jobs = pgTable(
     expectedReadyAt: timestamp("expected_ready_at", { withTimezone: true }),
     internalNotes: text("internal_notes"),
     invoiceId: text("invoice_id"),
+    /** Stamped once the "time for your next detail?" reminder goes out — prevents duplicate sends. */
+    maintenanceReminderSentAt: timestamp("maintenance_reminder_sent_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -644,6 +659,8 @@ export const invoices = pgTable(
     cancelledByStaffId: text("cancelled_by_staff_id").references(() => staffUsers.id),
     cancellationReason: text("cancellation_reason"),
     notes: text("notes"),
+    /** Stamped once the post-payment review-request send fires — prevents duplicate sends. */
+    reviewRequestSentAt: timestamp("review_request_sent_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -667,6 +684,30 @@ export const invoiceLineItems = pgTable(
     sort: integer("sort").notNull().default(0),
   },
   (t) => [index("invoice_line_items_inv_idx").on(t.invoiceId)],
+);
+
+/**
+ * A single invoice may cover several fleet jobs. `invoices.jobId` remains the
+ * convenient legacy pointer for normal one-job invoices; this join is the
+ * authoritative multi-job relationship and enforces one invoice per job.
+ */
+export const invoiceJobs = pgTable(
+  "invoice_jobs",
+  {
+    id: id(),
+    invoiceId: text("invoice_id")
+      .notNull()
+      .references(() => invoices.id),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => jobs.id),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    index("invoice_jobs_invoice_idx").on(t.invoiceId),
+    uniqueIndex("invoice_jobs_job_uq").on(t.jobId),
+    uniqueIndex("invoice_jobs_invoice_job_uq").on(t.invoiceId, t.jobId),
+  ],
 );
 
 export const payments = pgTable(

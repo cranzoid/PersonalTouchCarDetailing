@@ -53,8 +53,8 @@ requiring confirmation". Placeholder copy in the public site must be neutral
 | Validation | Zod at every untrusted boundary (forms, route handlers, webhooks) | |
 | Auth (staff) | Database-backed sessions: random 256-bit token in httpOnly/secure/SameSite=Lax cookie → `staff_sessions` table; passwords hashed with bcryptjs (cost 12) | Revocable, auditable, no external dependency. |
 | Auth (customers) | No accounts required. Secure single-purpose token links (estimate approval, invoice payment, portal access) stored hashed in `access_tokens` with purpose, expiry, and usage audit. A future password-based portal can layer on top. |
-| Payments | Provider abstraction in `src/lib/payments/` shaped around Stripe (PaymentIntent-style). Dev uses a `FakePaymentProvider`. **No live keys in repo.** Webhook route verifies signatures before trusting events. |
-| Email/SMS | Provider abstraction in `src/lib/messaging/` (dev transport logs to `communications` table + console). Production adapters (Resend/Twilio or similar) are configuration, not code changes. |
+| Payments | Provider abstraction in `src/lib/payments/` shaped around Stripe Checkout. Development can use a `FakePaymentProvider`; production refuses fake checkout and requires Stripe configuration. **No live keys in repo.** Webhook routes verify signatures before trusting events. |
+| Email/SMS | Provider abstraction in `src/lib/messaging/` (development transport records delivery attempts in `communications`; production uses Resend/Twilio and records missing configuration as failure rather than simulated success). |
 | Tests | Vitest. Unit tests for pricing/availability/state machines; DB integration tests against `ptcd_test` database (each test file runs in a transaction-per-test or truncates). |
 | IDs | Prefixed random IDs (`cus_…`, `veh_…`, `apt_…`, `job_…`, `est_…`, `inv_…`) generated in `src/lib/id.ts`. Human-scannable in logs and URLs. |
 | Money | Integer **cents** everywhere (`_cents` column suffix). Tax rates in basis points (13% HST = 1300). Never floats. |
@@ -91,12 +91,12 @@ src/
       quote/             # quote request flow
       gallery/ about/ reviews/ faq/ contact/ fleet/
       policies/          # privacy, cancellation, terms
-    portal/              # customer tokened access (estimates, invoices, appointments)
+    (public)/portal/     # customer tokened access (estimates, invoices, deposits, work)
     admin/               # staff app (session-gated layout + per-action server checks)
       login/
-      (app)/             # built: dashboard, appointments, leads(+quotes), customers,
-                         #        services, settings
-                         # planned (Phase 2+): estimates, jobs, invoices, calendar, reports
+      (app)/             # dashboard, appointments, leads/quotes, customers, services,
+                         # estimates, jobs, invoices, fleet, reports, communications,
+                         # staff, schedules, and settings
     api/                 # route handlers: webhooks, uploads, availability
   db/
     schema.ts            # Drizzle schema (single source of truth)
@@ -106,7 +106,8 @@ src/
     auth/                # sessions, password hashing, permissions
     booking/             # availability engine, slot locking
     pricing/             # price/duration computation (vehicle-size adjustments, add-ons, tax)
-    estimates/ invoices/ jobs/   # domain state machines + services
+    estimates.ts invoices.ts jobs.ts reporting.ts scheduling.ts
+                         # domain state machines, reporting, and automation
     payments/ messaging/ # provider abstractions
     audit.ts  id.ts  money.ts  settings.ts
   components/            # shared UI
@@ -218,20 +219,20 @@ No customer account is ever required for the first booking or quote.
 
 ## 8. Implementation phases
 
-**Phase 1 — Foundation + booking vertical (current)**
+**Phase 1 — Foundation + booking vertical — complete**
 Scaffold, schema + migrations + seed, staff auth + roles, availability engine + transactional booking, public site core pages (home, services, service detail, booking, quote request, contact, policies, FAQ, about, gallery/fleet/reviews placeholders with real routes), admin (login, dashboard, appointments, leads, customers, services settings), booking-concurrency + pricing tests.
 
-**Phase 2 — Estimates & approvals** — estimate builder, tokened customer approval, quote-request review UI, conversion to appointment.
+**Phase 2 — Estimates & approvals — complete** — estimate builder, tokened customer approval, quote-request review UI, conversion to appointment.
 
-**Phase 3 — Jobs pipeline** — check-in + inspections (mobile-first), job states, additional-work approval, QC checklist, photo handling.
+**Phase 3 — Jobs pipeline — complete** — check-in + inspections (mobile-first), job states, additional-work approval, QC checklist, photo handling.
 
-**Phase 4 — Invoicing & payments** — invoice lifecycle, PDF, payment provider integration + webhooks, receipts, refunds.
+**Phase 4 — Invoicing & payments — complete** — invoice lifecycle, PDF, provider-authenticated checkout and webhooks, appointment deposits, receipts, and refunds.
 
-**Phase 5 — Communications & automation** — template-driven reminders, review requests, maintenance reminders, scheduling of sends.
+**Phase 5 — Communications & automation — complete** — template-driven reminders, review requests, maintenance reminders, scheduling of sends, and editable channel-aware templates.
 
-**Phase 6 — Reporting & marketing attribution** — dashboard reports (revenue, conversion, utilization), source→revenue attribution.
+**Phase 6 — Reporting & marketing attribution — complete** — cash-basis revenue, conversion funnel, utilization, and source-to-revenue attribution reports.
 
-**Phase 7 — Customer portal & fleet** — portal pages over access tokens, company accounts, consolidated invoicing.
+**Phase 7 — Customer portal & fleet — complete** — portal pages over access tokens, company/fleet accounts, work history, and consolidated invoicing.
 
 A smaller feature working end-to-end (UI → server → DB → tests) always beats
 more placeholder screens.
