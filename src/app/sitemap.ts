@@ -2,6 +2,10 @@ import type { MetadataRoute } from "next";
 import { asc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 
+// Service URLs come from PostgreSQL and must be resolved after startup
+// migrations have initialized the production database.
+export const dynamic = "force-dynamic";
+
 const PUBLIC_ROUTES = [
   "",
   "/services",

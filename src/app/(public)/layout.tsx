@@ -5,6 +5,10 @@ import { Container, ButtonLink } from "@/components/ui";
 import { AttributionCapture } from "@/components/attribution";
 import { getSettings } from "@/lib/settings";
 
+// Public pages read business settings and service data from PostgreSQL. Render
+// them at request time so production builds do not depend on an initialized DB.
+export const dynamic = "force-dynamic";
+
 const PRIMARY_NAV = [
   { href: "/services", label: "Services" },
   { href: "/gallery", label: "Gallery" },
