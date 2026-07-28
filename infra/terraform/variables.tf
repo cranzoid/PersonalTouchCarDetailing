@@ -60,5 +60,5 @@ variable "admin_email" {
 variable "monthly_budget_inr" {
   description = "Monthly resource-group budget in the subscription billing currency (INR)."
   type        = number
-  default     = 4000
+  default     = 8000
 }
