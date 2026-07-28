@@ -60,15 +60,48 @@ jobs:
       - run: ./node_modules/.bin/tsc --noEmit
       - run: npm run build
       - run: npm audit --omit=dev --audit-level=high
-      - name: Package the prebuilt Linux release
+      - name: Package the standalone Linux release
         run: |
-          npm prune --omit=dev
-          test -x node_modules/.bin/tsx
-          rm -rf .next/cache
           mkdir release
-          cp -R .next public src drizzle release/
-          cp package.json package-lock.json next.config.ts tsconfig.json startup.sh release/
-          tar -czf release/node_modules.tar.gz -C node_modules .
+          cp -R .next/standalone/. release/
+          mkdir -p release/.next
+          cp -R .next/static release/.next/static
+          cp -R public drizzle release/
+          cp startup.sh release/
+          test -f release/server.js
+      - name: Smoke-test the standalone artifact
+        run: |
+          (
+            cd release
+            NODE_ENV=production \
+            DATABASE_URL="$TEST_DATABASE_URL" \
+            SESSION_SECRET=standalone-release-smoke-test-secret \
+            SEED_ADMIN_EMAIL=release-smoke@example.invalid \
+            SEED_ADMIN_PASSWORD=standalone-release-smoke-password \
+            APP_BASE_URL=https://release-smoke.example.invalid \
+            HOSTNAME=127.0.0.1 \
+            PORT=3001 \
+            node server.js > standalone.log 2>&1 &
+            server_pid=$!
+            trap 'kill "$server_pid"' EXIT
+            for attempt in $(seq 1 30); do
+              if curl --fail --silent --show-error --max-time 5 \
+                --output /dev/null http://127.0.0.1:3001/api/health; then
+                break
+              fi
+              if [ "$attempt" -eq 30 ]; then
+                cat standalone.log
+                exit 1
+              fi
+              sleep 1
+            done
+            curl --fail --silent --show-error --max-time 10 \
+              --output /dev/null http://127.0.0.1:3001/
+            curl --fail --silent --show-error --max-time 10 \
+              --output /dev/null http://127.0.0.1:3001/connect
+          )
+      - name: Create release archive
+        run: |
           (cd release && zip -qr ../ptcd-app.zip .)
           sha256sum ptcd-app.zip
       - uses: actions/upload-artifact@v7

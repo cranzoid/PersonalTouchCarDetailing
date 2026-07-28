@@ -20,6 +20,7 @@ const contentSecurityPolicy = [
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  output: "standalone",
   serverExternalPackages: ["pg", "bcryptjs", "pdfkit"],
   outputFileTracingRoot: resolve(process.cwd()),
   experimental: {
