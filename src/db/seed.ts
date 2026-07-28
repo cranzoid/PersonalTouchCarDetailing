@@ -12,11 +12,11 @@ loadEnv();
  *
  * Detailing-package prices come from the owner's current printed flyer
  * (pictures/WhatsApp Image 2026-07-13 at 21.13.19.jpeg). Flyer prices are
- * ranges by vehicle class (Sedan vs SUV/Truck/Van); we seed the sedan lower
- * bound as the base price and the SUV/Truck/Van lower bound as a vehicle
- * adjustment. DURATIONS are still estimates, and the non-flyer categories
- * (paint correction, protection, tint, styling) remain quote-only. Everything
- * is configurable in Admin → Services.
+ * ranges by vehicle class (Sedan vs SUV/Truck/Van); per the owner's direction,
+ * we seed the upper bound for each vehicle class. Durations are the
+ * owner-confirmed booking times. The non-flyer categories (paint correction,
+ * protection, tint, styling) remain quote-only. Everything is configurable in
+ * Admin → Services.
  */
 
 type SvcSeed = {
@@ -30,7 +30,7 @@ type SvcSeed = {
   photosRequired?: boolean;
   depositType?: string;
   depositValue?: number;
-  /** Flyer's SUV / Truck / Van price minus sedan price (+ extra time). */
+  /** Flyer's SUV / Truck / Van price minus sedan price (+ extra time, if any). */
   largeVehicleDeltaCents?: number;
   largeVehicleDeltaMin?: number;
 };
@@ -43,17 +43,17 @@ const CATALOG: { category: string; slug: string; description: string; services: 
       "Our signature detailing packages — from a basic hand wash to a complete inside-and-out detail with engine bay.",
     services: [
       // Flyer "Car Detailing Package #1"
-      { name: "Complete Detail + Engine", slug: "complete-detail-engine", short: "Engine fine detail, rim clean and tire shine, deep-cleaned seats and carpet, full interior clean and buff, hand wash and dry.", priceCents: 17500, durationMin: 300, mode: "bookable", featured: true, largeVehicleDeltaCents: 2500, largeVehicleDeltaMin: 60 },
+      { name: "Complete Detail + Engine", slug: "complete-detail-engine", short: "Engine fine detail, rim clean and tire shine, deep-cleaned seats and carpet, full interior clean and buff, hand wash and dry.", priceCents: 20000, durationMin: 150, mode: "bookable", featured: true, largeVehicleDeltaCents: 5000 },
       // Flyer "Car Detailing Package #2 — The Works Package"
-      { name: "The Works Package", slug: "the-works", short: "Rim clean and tire shine, deep-cleaned seats, carpet and mats, full interior clean and buff, hand wash and dry.", priceCents: 15000, durationMin: 240, mode: "bookable", featured: true, largeVehicleDeltaCents: 5000, largeVehicleDeltaMin: 60 },
+      { name: "The Works Package", slug: "the-works", short: "Rim clean and tire shine, deep-cleaned seats, carpet and mats, full interior clean and buff, hand wash and dry.", priceCents: 17500, durationMin: 120, mode: "bookable", featured: true, largeVehicleDeltaCents: 5000 },
       // Flyer "Car Detailing Package #3 — Interior Detail"
-      { name: "Interior Detail", slug: "interior-detail", short: "Vacuum carpets and seats, clean mats and interior windows, deep-clean seats and carpets, clean and buff all interior surfaces.", priceCents: 12500, durationMin: 180, mode: "bookable", largeVehicleDeltaCents: 2500, largeVehicleDeltaMin: 45 },
+      { name: "Interior Detail", slug: "interior-detail", short: "Vacuum carpets and seats, clean mats and interior windows, deep-clean seats and carpets, clean and buff all interior surfaces.", priceCents: 15000, durationMin: 90, mode: "bookable", largeVehicleDeltaCents: 2500 },
       // Flyer "Car Detailing Package #6 — Basic Car Wash + Basic Interior Clean"
-      { name: "Wash & Interior Refresh", slug: "wash-interior-refresh", short: "Exterior hand wash and dry plus a basic interior clean — our maintenance combo.", priceCents: 7000, durationMin: 90, mode: "bookable", largeVehicleDeltaCents: 2000, largeVehicleDeltaMin: 30 },
+      { name: "Wash & Interior Refresh", slug: "wash-interior-refresh", short: "Exterior hand wash and dry plus a basic interior clean — our maintenance combo.", priceCents: 7000, durationMin: 90, mode: "bookable", largeVehicleDeltaCents: 2000 },
       // Flyer "Car Detailing Package #5 — Basic Interior Clean"
-      { name: "Basic Interior Clean", slug: "basic-interior-clean", short: "Vacuum carpet and trunk, wipe down dash, doors and cup holders, clean interior windows.", priceCents: 5000, durationMin: 60, mode: "bookable", largeVehicleDeltaCents: 2000, largeVehicleDeltaMin: 30 },
+      { name: "Basic Interior Clean", slug: "basic-interior-clean", short: "Vacuum carpet and trunk, wipe down dash, doors and cup holders, clean interior windows.", priceCents: 5000, durationMin: 30, mode: "bookable", largeVehicleDeltaCents: 2000 },
       // Flyer "Car Detailing Package #4 — Basic Car Wash"
-      { name: "Basic Car Wash", slug: "basic-car-wash", short: "Exterior hand wash, dry and clean mats.", priceCents: 2500, durationMin: 30, mode: "bookable", largeVehicleDeltaCents: 500, largeVehicleDeltaMin: 15 },
+      { name: "Basic Car Wash", slug: "basic-car-wash", short: "Exterior hand wash, dry and clean mats.", priceCents: 2500, durationMin: 60, mode: "bookable", largeVehicleDeltaCents: 500 },
       // Flyer: "RV Detailing Available — Ask Us For Details"
       { name: "RV Detailing", slug: "rv-detailing", short: "RV and motorhome detailing — contact us for a custom quote.", priceCents: null, durationMin: 480, mode: "contact_only" },
     ],
@@ -122,9 +122,9 @@ const LARGE_VEHICLE_CATEGORIES = ["suv_small", "suv_large", "pickup", "van", "co
 
 /** Flyer extras ("$X Extra" box) — confirmed prices. */
 const ADDONS = [
-  { name: "Dog Hair Clean", description: "Removal of embedded pet hair (for interior clean-up packages).", priceCents: 5000, durationMin: 45 },
-  { name: "Wax / Buff", description: "Machine wax and buff for added gloss and protection.", priceCents: 12000, durationMin: 60 },
-  { name: "Salt Stain Removal", description: "Winter salt stain extraction from carpets and mats.", priceCents: 5000, durationMin: 45 },
+  { name: "Dog Hair Clean", description: "Removal of embedded pet hair (for interior clean-up packages).", priceCents: 5000, durationMin: 30 },
+  { name: "Wax / Buff", description: "Machine wax and buff for added gloss and protection.", priceCents: 12000, durationMin: 120 },
+  { name: "Salt Stain Removal", description: "Winter salt stain extraction from carpets and mats.", priceCents: 5000, durationMin: 30 },
 ];
 
 const MESSAGE_TEMPLATES = [
@@ -181,18 +181,18 @@ async function main() {
     ]);
   }
 
-  // --- business hours (owner-confirmed: Mon–Sat 9–7, Sun closed; editable
+  // --- business hours (owner-confirmed: Mon–Sat 9–5, Sun closed; editable
   // in Admin → Settings) --------------------------------------------------
   const existingHours = await db.select().from(schema.businessHours);
   if (existingHours.length === 0) {
     const rows = [
       { weekday: 0, closed: true, open: null as string | null, close: null as string | null },
-      { weekday: 1, closed: false, open: "09:00", close: "19:00" },
-      { weekday: 2, closed: false, open: "09:00", close: "19:00" },
-      { weekday: 3, closed: false, open: "09:00", close: "19:00" },
-      { weekday: 4, closed: false, open: "09:00", close: "19:00" },
-      { weekday: 5, closed: false, open: "09:00", close: "19:00" },
-      { weekday: 6, closed: false, open: "09:00", close: "19:00" },
+      { weekday: 1, closed: false, open: "09:00", close: "17:00" },
+      { weekday: 2, closed: false, open: "09:00", close: "17:00" },
+      { weekday: 3, closed: false, open: "09:00", close: "17:00" },
+      { weekday: 4, closed: false, open: "09:00", close: "17:00" },
+      { weekday: 5, closed: false, open: "09:00", close: "17:00" },
+      { weekday: 6, closed: false, open: "09:00", close: "17:00" },
     ];
     await db.insert(schema.businessHours).values(rows.map((r) => ({ id: newId("blk"), ...r })));
   }
@@ -258,7 +258,7 @@ async function main() {
         }
       }
     }
-    console.log("Seeded service catalog (package prices from owner flyer; durations estimated).");
+    console.log("Seeded service catalog (owner-confirmed flyer prices and durations).");
   }
 
   // --- message templates -------------------------------------------------

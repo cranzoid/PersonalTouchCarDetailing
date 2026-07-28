@@ -227,42 +227,13 @@ resource "azurerm_service_plan" "main" {
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
   os_type             = "Linux"
-  sku_name            = "B1"
+  sku_name            = var.app_service_sku_name
   tags                = local.tags
 }
 
-resource "azurerm_linux_web_app" "main" {
-  name                      = local.app_name
-  resource_group_name       = azurerm_resource_group.main.name
-  location                  = azurerm_service_plan.main.location
-  service_plan_id           = azurerm_service_plan.main.id
-  https_only                = true
-  virtual_network_subnet_id = azurerm_subnet.app.id
-  tags                      = local.tags
-
-  identity {
-    type = "SystemAssigned"
-  }
-
-  site_config {
-    always_on                         = true
-    app_command_line                  = "npm run start:azure"
-    ftps_state                        = "Disabled"
-    health_check_eviction_time_in_min = 10
-    health_check_path                 = "/"
-    http2_enabled                     = true
-    minimum_tls_version               = "1.2"
-    use_32_bit_worker                 = false
-    vnet_route_all_enabled            = true
-
-    application_stack {
-      node_version = "22-lts"
-    }
-  }
-
-  app_settings = {
+locals {
+  web_app_common_settings = {
     NODE_ENV                                   = "production"
-    APP_BASE_URL                               = "https://${local.app_name}.azurewebsites.net"
     DATABASE_URL                               = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault_secret.database_url.id})"
     SESSION_SECRET                             = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault_secret.session_secret.id})"
     CRON_SECRET                                = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault_secret.cron_secret.id})"
@@ -273,12 +244,92 @@ resource "azurerm_linux_web_app" "main" {
     AZURE_STORAGE_CONTAINER_NAME               = azurerm_storage_container.private_files.name
     APPLICATIONINSIGHTS_CONNECTION_STRING      = azurerm_application_insights.main.connection_string
     ApplicationInsightsAgent_EXTENSION_VERSION = "~3"
-    SCM_DO_BUILD_DURING_DEPLOYMENT             = "true"
-    ENABLE_ORYX_BUILD                          = "true"
+    SCM_DO_BUILD_DURING_DEPLOYMENT             = "false"
+    ENABLE_ORYX_BUILD                          = "false"
     WEBSITE_NODE_DEFAULT_VERSION               = "~22"
+    WEBSITE_SWAP_WARMUP_PING_PATH              = "/api/health"
+    WEBSITE_SWAP_WARMUP_PING_STATUSES          = "200"
     WEBSITES_CONTAINER_START_TIME_LIMIT        = "600"
     WEBSITE_START_SCM_ON_SITE_CREATION         = "1"
   }
+}
+
+resource "azurerm_linux_web_app" "main" {
+  name                      = local.app_name
+  resource_group_name       = azurerm_resource_group.main.name
+  location                  = azurerm_service_plan.main.location
+  service_plan_id           = azurerm_service_plan.main.id
+  https_only                = true
+  virtual_network_subnet_id = azurerm_subnet.app.id
+  tags = merge(local.tags, {
+    "hidden-link: /app-insights-resource-id" = replace(
+      azurerm_application_insights.main.id,
+      "Microsoft.Insights",
+      "microsoft.insights",
+    )
+  })
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  site_config {
+    always_on                         = true
+    app_command_line                  = "sh startup.sh"
+    ftps_state                        = "Disabled"
+    health_check_eviction_time_in_min = 10
+    health_check_path                 = var.production_health_check_path
+    http2_enabled                     = true
+    minimum_tls_version               = "1.2"
+    use_32_bit_worker                 = false
+    vnet_route_all_enabled            = true
+
+    application_stack {
+      node_version = "22-lts"
+    }
+  }
+
+  app_settings = merge(local.web_app_common_settings, {
+    APP_BASE_URL = "https://${local.app_name}.azurewebsites.net"
+  })
+
+  sticky_settings {
+    app_setting_names = ["APP_BASE_URL"]
+  }
+}
+
+resource "azurerm_linux_web_app_slot" "staging" {
+  name                                           = "staging"
+  app_service_id                                 = azurerm_linux_web_app.main.id
+  https_only                                     = true
+  ftp_publish_basic_authentication_enabled       = false
+  webdeploy_publish_basic_authentication_enabled = false
+  virtual_network_subnet_id                      = azurerm_subnet.app.id
+  tags                                           = merge(local.tags, { environment = "staging" })
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  site_config {
+    always_on                         = true
+    app_command_line                  = "sh startup.sh"
+    ftps_state                        = "Disabled"
+    health_check_eviction_time_in_min = 10
+    health_check_path                 = "/api/health"
+    http2_enabled                     = true
+    minimum_tls_version               = "1.2"
+    use_32_bit_worker                 = false
+    vnet_route_all_enabled            = true
+
+    application_stack {
+      node_version = "22-lts"
+    }
+  }
+
+  app_settings = merge(local.web_app_common_settings, {
+    APP_BASE_URL = "https://${local.app_name}-staging.azurewebsites.net"
+  })
 }
 
 resource "azurerm_key_vault_access_policy" "web_app" {
@@ -289,10 +340,51 @@ resource "azurerm_key_vault_access_policy" "web_app" {
   secret_permissions = ["Get", "List"]
 }
 
+resource "azurerm_key_vault_access_policy" "staging_web_app" {
+  key_vault_id = azurerm_key_vault.main.id
+  tenant_id    = azurerm_linux_web_app_slot.staging.identity[0].tenant_id
+  object_id    = azurerm_linux_web_app_slot.staging.identity[0].principal_id
+
+  secret_permissions = ["Get", "List"]
+}
+
 resource "azurerm_role_assignment" "web_blob_data" {
   scope                = azurerm_storage_account.files.id
   role_definition_name = "Storage Blob Data Contributor"
   principal_id         = azurerm_linux_web_app.main.identity[0].principal_id
+}
+
+resource "azurerm_role_assignment" "staging_web_blob_data" {
+  scope                            = azurerm_storage_account.files.id
+  role_definition_name             = "Storage Blob Data Contributor"
+  principal_id                     = azurerm_linux_web_app_slot.staging.identity[0].principal_id
+  skip_service_principal_aad_check = true
+}
+
+resource "azurerm_user_assigned_identity" "github_actions" {
+  name                = "id-ptcd-github-actions"
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
+  tags                = local.tags
+}
+
+resource "azurerm_federated_identity_credential" "github_actions_main" {
+  name                      = "github-main"
+  user_assigned_identity_id = azurerm_user_assigned_identity.github_actions.id
+  audience                  = ["api://AzureADTokenExchange"]
+  issuer                    = "https://token.actions.githubusercontent.com"
+  subject                   = "repo:${var.github_repository}:ref:refs/heads/main"
+}
+
+resource "azurerm_role_assignment" "github_actions_web_app" {
+  scope = join("", [
+    "/subscriptions/${var.subscription_id}",
+    "/resourceGroups/${var.resource_group_name}",
+    "/providers/Microsoft.Web/sites/${local.app_name}",
+  ])
+  role_definition_name             = "Website Contributor"
+  principal_id                     = azurerm_user_assigned_identity.github_actions.principal_id
+  skip_service_principal_aad_check = true
 }
 
 resource "azurerm_logic_app_workflow" "scheduler" {

@@ -1,10 +1,9 @@
 import Image from "next/image";
 import Link from "next/link";
-import { asc, eq } from "drizzle-orm";
-import { db, schema } from "@/db";
 import { Container, ButtonLink, SectionHeading, Card } from "@/components/ui";
 import { formatCents } from "@/lib/money";
-import { getSettings } from "@/lib/settings";
+import { getPublicHomeCatalog } from "@/lib/public-catalog";
+import { getPublicSettings } from "@/lib/settings";
 
 const EXPERIENCE_POINTS = [
   {
@@ -25,19 +24,9 @@ const EXPERIENCE_POINTS = [
 ];
 
 export default async function HomePage() {
-  const [featured, categories, settings] = await Promise.all([
-    db()
-      .select()
-      .from(schema.services)
-      .where(eq(schema.services.featured, true))
-      .orderBy(asc(schema.services.sort))
-      .limit(3),
-    db()
-      .select()
-      .from(schema.serviceCategories)
-      .where(eq(schema.serviceCategories.active, true))
-      .orderBy(asc(schema.serviceCategories.sort)),
-    getSettings(),
+  const [{ featured, categories }, settings] = await Promise.all([
+    getPublicHomeCatalog(),
+    getPublicSettings(),
   ]);
 
   return (

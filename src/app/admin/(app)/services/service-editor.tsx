@@ -2,8 +2,19 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { BOOKING_MODES } from "@/lib/types";
-import { updateServiceAction } from "./actions";
+import { BOOKING_MODES, VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
+import {
+  updateAddonAction,
+  updateServiceAction,
+  updateVehicleAdjustmentAction,
+} from "./actions";
+
+type EditableAdjustment = {
+  id: string;
+  vehicleCategory: string;
+  priceDeltaCents: number;
+  durationDeltaMin: number;
+};
 
 type EditableService = {
   id: string;
@@ -18,7 +29,13 @@ type EditableService = {
   depositValue: number;
 };
 
-export function ServiceEditor({ service }: { service: EditableService }) {
+export function ServiceEditor({
+  service,
+  adjustments,
+}: {
+  service: EditableService;
+  adjustments: EditableAdjustment[];
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -132,6 +149,21 @@ export function ServiceEditor({ service }: { service: EditableService }) {
               Featured on home page
             </label>
           </div>
+          {adjustments.length > 0 && (
+            <div className="mt-5 border-t border-ink-800 pt-4">
+              <p className="text-xs font-semibold uppercase tracking-wider text-ink-400">
+                Vehicle price and time adjustments
+              </p>
+              <p className="mt-1 text-xs text-ink-500">
+                These amounts are added to the base price and duration above.
+              </p>
+              <div className="mt-3 space-y-2">
+                {adjustments.map((adjustment) => (
+                  <VehicleAdjustmentEditor key={adjustment.id} adjustment={adjustment} />
+                ))}
+              </div>
+            </div>
+          )}
           {error && <p className="mt-3 text-sm text-red-400">{error}</p>}
           {saved && <p className="mt-3 text-sm text-emerald-300">Saved.</p>}
           <button
@@ -143,6 +175,134 @@ export function ServiceEditor({ service }: { service: EditableService }) {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function VehicleAdjustmentEditor({ adjustment }: { adjustment: EditableAdjustment }) {
+  const router = useRouter();
+  const [price, setPrice] = useState((adjustment.priceDeltaCents / 100).toFixed(2));
+  const [duration, setDuration] = useState(String(adjustment.durationDeltaMin));
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const input = "w-full rounded-lg border border-ink-600 bg-ink-950 px-3 py-1.5 text-sm text-white";
+  const label =
+    VEHICLE_CATEGORY_LABELS[adjustment.vehicleCategory as VehicleCategory] ??
+    adjustment.vehicleCategory;
+
+  async function save() {
+    setBusy(true);
+    setMsg(null);
+    const res = await updateVehicleAdjustmentAction({
+      adjustmentId: adjustment.id,
+      vehicleCategory: adjustment.vehicleCategory,
+      priceDeltaCents: Math.round(Number(price) * 100),
+      durationDeltaMin: Number(duration),
+    });
+    setBusy(false);
+    setMsg(res.ok ? { ok: true, text: "Saved." } : { ok: false, text: res.error });
+    if (res.ok) router.refresh();
+  }
+
+  return (
+    <div className="grid items-end gap-2 rounded-lg border border-ink-800 p-3 sm:grid-cols-[1fr_8rem_8rem_auto]">
+      <span className="self-center text-sm text-ink-300">{label}</span>
+      <label>
+        <span className="mb-1 block text-xs text-ink-500">Price extra (CAD)</span>
+        <input className={input} value={price} onChange={(e) => setPrice(e.target.value)} />
+      </label>
+      <label>
+        <span className="mb-1 block text-xs text-ink-500">Minutes extra</span>
+        <input className={input} value={duration} onChange={(e) => setDuration(e.target.value)} />
+      </label>
+      <button
+        type="button"
+        onClick={() => void save()}
+        disabled={busy}
+        className="rounded-lg border border-accent-400 px-3 py-2 text-xs font-semibold text-accent-300 disabled:opacity-40"
+      >
+        {busy ? "Saving…" : "Save"}
+      </button>
+      {msg && (
+        <p className={`text-xs sm:col-start-2 sm:col-span-3 ${msg.ok ? "text-emerald-300" : "text-red-400"}`}>
+          {msg.text}
+        </p>
+      )}
+    </div>
+  );
+}
+
+type EditableAddon = {
+  id: string;
+  name: string;
+  description: string;
+  priceCents: number;
+  durationMin: number;
+  active: boolean;
+};
+
+export function AddonEditor({ addon }: { addon: EditableAddon }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [form, setForm] = useState({
+    name: addon.name,
+    description: addon.description,
+    price: (addon.priceCents / 100).toFixed(2),
+    duration: String(addon.durationMin),
+    active: addon.active,
+  });
+  const input = "w-full rounded-lg border border-ink-600 bg-ink-950 px-3 py-1.5 text-sm text-white";
+
+  async function save() {
+    setBusy(true);
+    setMsg(null);
+    const res = await updateAddonAction({
+      addonId: addon.id,
+      name: form.name,
+      description: form.description,
+      priceCents: Math.round(Number(form.price) * 100),
+      durationMin: Number(form.duration),
+      active: form.active,
+    });
+    setBusy(false);
+    setMsg(res.ok ? { ok: true, text: "Saved." } : { ok: false, text: res.error });
+    if (res.ok) router.refresh();
+  }
+
+  return (
+    <div className="rounded-xl border border-ink-800 bg-ink-900/40 p-4">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <label>
+          <span className="mb-1 block text-xs text-ink-400">Name</span>
+          <input className={input} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+        </label>
+        <label>
+          <span className="mb-1 block text-xs text-ink-400">Description</span>
+          <input className={input} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+        </label>
+        <label>
+          <span className="mb-1 block text-xs text-ink-400">Price (CAD)</span>
+          <input className={input} value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} />
+        </label>
+        <label>
+          <span className="mb-1 block text-xs text-ink-400">Extra duration (minutes)</span>
+          <input className={input} value={form.duration} onChange={(e) => setForm({ ...form, duration: e.target.value })} />
+        </label>
+        <label className="flex items-center gap-2 text-sm text-ink-300">
+          <input type="checkbox" checked={form.active} onChange={(e) => setForm({ ...form, active: e.target.checked })} />
+          Active
+        </label>
+      </div>
+      {msg && <p className={`mt-3 text-sm ${msg.ok ? "text-emerald-300" : "text-red-400"}`}>{msg.text}</p>}
+      <button
+        type="button"
+        onClick={() => void save()}
+        disabled={busy}
+        className="mt-4 rounded-lg bg-accent-400 px-5 py-2 text-sm font-semibold text-ink-950 hover:bg-accent-300 disabled:opacity-40"
+      >
+        {busy ? "Saving…" : "Save Add-on"}
+      </button>
     </div>
   );
 }

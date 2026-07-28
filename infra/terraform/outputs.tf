@@ -10,6 +10,22 @@ output "web_app_url" {
   value = "https://${azurerm_linux_web_app.main.default_hostname}"
 }
 
+output "staging_web_app_url" {
+  value = "https://${azurerm_linux_web_app.main.name}-staging.azurewebsites.net"
+}
+
+output "github_actions_azure_client_id" {
+  value = azurerm_user_assigned_identity.github_actions.client_id
+}
+
+output "github_actions_azure_tenant_id" {
+  value = azurerm_user_assigned_identity.github_actions.tenant_id
+}
+
+output "github_actions_azure_subscription_id" {
+  value = var.subscription_id
+}
+
 output "key_vault_name" {
   value = azurerm_key_vault.main.name
 }

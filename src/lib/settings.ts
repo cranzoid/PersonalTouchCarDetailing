@@ -74,6 +74,37 @@ export async function getSettings(): Promise<BusinessSettings> {
   return { ...SETTINGS_DEFAULTS, ...stored };
 }
 
+const PUBLIC_SETTINGS_TTL_MS = 60_000;
+let publicSettingsCache:
+  | { expiresAt: number; value: Promise<BusinessSettings> }
+  | undefined;
+
+/**
+ * Short process-local cache for public Server Components. Business settings
+ * change infrequently, while the public layout and page can request the same
+ * row set during every render. Mutating actions invalidate this process
+ * immediately; other scaled-out workers expire their copy within one minute.
+ */
+export function getPublicSettings(): Promise<BusinessSettings> {
+  const now = Date.now();
+  if (!publicSettingsCache || publicSettingsCache.expiresAt <= now) {
+    const pending = getSettings();
+    const cached = pending.catch((error) => {
+      if (publicSettingsCache?.value === cached) publicSettingsCache = undefined;
+      throw error;
+    });
+    publicSettingsCache = {
+      expiresAt: now + PUBLIC_SETTINGS_TTL_MS,
+      value: cached,
+    };
+  }
+  return publicSettingsCache.value;
+}
+
+export function invalidatePublicSettingsCache(): void {
+  publicSettingsCache = undefined;
+}
+
 export async function setSetting<K extends keyof BusinessSettings>(
   key: K,
   value: BusinessSettings[K],

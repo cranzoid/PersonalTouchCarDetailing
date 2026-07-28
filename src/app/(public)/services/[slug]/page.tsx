@@ -120,7 +120,10 @@ export default async function ServiceDetailPage({
                 {addonRows.map((a) => (
                   <li key={a.id} className="flex min-h-12 items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm">
                     <span className="text-ink-200">{a.name}</span>
-                    <span className="text-accent-300">{formatCents(a.priceCents)}</span>
+                    <span className="text-right text-accent-300">
+                      {formatCents(a.priceCents)}
+                      <span className="block text-xs text-ink-500">+{formatDuration(a.durationMin)}</span>
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -137,8 +140,7 @@ export default async function ServiceDetailPage({
               {bookable ? formatCents(svc.basePriceCents!) : "By quote"}
             </p>
             <p className="mt-1 text-sm text-ink-400">
-              Approx. {Math.round(svc.baseDurationMin / 60)}h {svc.baseDurationMin % 60 || ""}
-              {svc.baseDurationMin % 60 ? "m" : ""} for a standard vehicle
+              Approx. {formatDuration(svc.baseDurationMin)} for a standard vehicle
             </p>
             <div className="mt-6 flex flex-col gap-2">
               {bookable ? (
@@ -157,4 +159,13 @@ export default async function ServiceDetailPage({
       </div>
     </Container>
   );
+}
+
+function formatDuration(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const remaining = minutes % 60;
+  return [
+    hours ? `${hours}h` : "",
+    remaining ? `${remaining}m` : "",
+  ].filter(Boolean).join(" ");
 }
