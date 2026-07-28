@@ -22,6 +22,13 @@
       "when": 1784764890385,
       "tag": "0002_absurd_monster_badoon",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785092582014,
+      "tag": "0003_owner_confirmed_hours_pricing_durations",
+      "breakpoints": true
     }
   ]
 }

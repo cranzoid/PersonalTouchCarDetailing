@@ -55,10 +55,22 @@ export function formatInZone(
   timeZone: string,
   opts: Intl.DateTimeFormatOptions = {},
 ): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone, ...opts }).format(date);
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    ...(opts.hour ? { hour12: true } : {}),
+    ...opts,
+  }).format(date);
 }
 
 export function parseHHMM(s: string): { hh: number; mm: number } {
   const [hh, mm] = s.split(":").map(Number);
   return { hh, mm };
+}
+
+/** Format a stored business-local "HH:MM" value as a 12-hour clock label. */
+export function formatHHMM12(value: string): string {
+  const { hh, mm } = parseHHMM(value);
+  const period = hh < 12 ? "a.m." : "p.m.";
+  const hour = hh % 12 || 12;
+  return `${hour}:${String(mm).padStart(2, "0")} ${period}`;
 }

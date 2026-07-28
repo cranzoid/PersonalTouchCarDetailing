@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { BusinessSettings } from "@/lib/settings";
+import { formatHHMM12 } from "@/lib/tz";
 import { updateSettingsAction, updateBusinessHoursAction } from "./actions";
 
 export type DayHours = {
@@ -12,6 +13,11 @@ export type DayHours = {
 };
 
 const WEEKDAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const CLOCK_OPTIONS = Array.from({ length: 96 }, (_, index) => {
+  const minutes = index * 15;
+  const value = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+  return { value, label: formatHHMM12(value) };
+});
 
 export function SettingsForm({ initial }: { initial: BusinessSettings }) {
   const [form, setForm] = useState({
@@ -189,19 +195,27 @@ export function BusinessHoursForm({ initialHours }: { initialHours: DayHours[] }
             </label>
             {!d.closed && (
               <>
-                <input
-                  type="time"
+                <select
+                  aria-label={`${WEEKDAY_LABELS[d.weekday]} opening time`}
                   className={input}
                   value={d.open ?? "09:00"}
                   onChange={(e) => setDay(d.weekday, { open: e.target.value })}
-                />
+                >
+                  {CLOCK_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
                 <span className="text-ink-500">to</span>
-                <input
-                  type="time"
+                <select
+                  aria-label={`${WEEKDAY_LABELS[d.weekday]} closing time`}
                   className={input}
-                  value={d.close ?? "19:00"}
+                  value={d.close ?? "17:00"}
                   onChange={(e) => setDay(d.weekday, { close: e.target.value })}
-                />
+                >
+                  {CLOCK_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
               </>
             )}
           </div>

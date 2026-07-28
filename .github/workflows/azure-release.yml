@@ -1,0 +1,138 @@
+name: Azure release
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Stage a new build, or swap an already verified staging build
+        required: true
+        type: choice
+        options:
+          - stage
+          - swap
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ptcd-azure-production
+  cancel-in-progress: false
+
+env:
+  AZURE_RESOURCE_GROUP: rg-ptcd-prod
+  AZURE_WEBAPP_NAME: app-ptcd-prod-7mutra
+  AZURE_SLOT_NAME: staging
+  STAGING_URL: https://app-ptcd-prod-7mutra-staging.azurewebsites.net
+  PRODUCTION_URL: https://www.personaltouchcardetailing.ca
+
+jobs:
+  stage:
+    if: github.event.inputs.operation == 'stage' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: ptcd
+          POSTGRES_PASSWORD: ptcd
+          POSTGRES_DB: ptcd_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ptcd -d ptcd_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      TEST_DATABASE_URL: postgresql://ptcd:ptcd@127.0.0.1:5432/ptcd_test
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: TEST=1 npm run db:migrate
+      - run: npm test
+      - run: ./node_modules/.bin/tsc --noEmit
+      - run: npm run build
+      - run: npm audit --omit=dev --audit-level=high
+      - name: Package the prebuilt Linux release
+        run: |
+          npm prune --omit=dev
+          test -x node_modules/.bin/tsx
+          rm -rf .next/cache
+          mkdir release
+          cp -R .next public src drizzle release/
+          cp package.json package-lock.json next.config.ts tsconfig.json startup.sh release/
+          tar -czf release/node_modules.tar.gz -C node_modules .
+          (cd release && zip -qr ../ptcd-app.zip .)
+          sha256sum ptcd-app.zip
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ptcd-app-${{ github.sha }}
+          path: ptcd-app.zip
+          if-no-files-found: error
+          retention-days: 14
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Deploy only to staging
+        run: |
+          az webapp deploy \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_WEBAPP_NAME" \
+            --slot "$AZURE_SLOT_NAME" \
+            --src-path ptcd-app.zip \
+            --type zip \
+            --clean true \
+            --restart true \
+            --async false
+      - name: Warm and verify staging
+        run: |
+          for attempt in $(seq 1 36); do
+            if curl --fail --silent --show-error --max-time 10 \
+              --output /dev/null "$STAGING_URL/api/health"; then
+              break
+            fi
+            if [ "$attempt" -eq 36 ]; then
+              exit 1
+            fi
+            sleep 5
+          done
+          curl --fail --silent --show-error --max-time 20 --output /dev/null "$STAGING_URL/"
+          curl --fail --silent --show-error --max-time 20 --output /dev/null "$STAGING_URL/connect"
+
+  swap:
+    if: github.event.inputs.operation == 'swap' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Recheck staging
+        run: |
+          curl --fail --silent --show-error --max-time 10 --output /dev/null "$STAGING_URL/api/health"
+          curl --fail --silent --show-error --max-time 20 --output /dev/null "$STAGING_URL/"
+          curl --fail --silent --show-error --max-time 20 --output /dev/null "$STAGING_URL/connect"
+      - name: Swap staging into production
+        run: |
+          az webapp deployment slot swap \
+            --resource-group "$AZURE_RESOURCE_GROUP" \
+            --name "$AZURE_WEBAPP_NAME" \
+            --slot "$AZURE_SLOT_NAME" \
+            --target-slot production
+      - name: Verify production
+        run: |
+          curl --fail --silent --show-error --retry 12 --retry-delay 5 \
+            --retry-all-errors --max-time 15 --output /dev/null "$PRODUCTION_URL/api/health"
+          curl --fail --silent --show-error --max-time 20 --output /dev/null "$PRODUCTION_URL/"
+          curl --fail --silent --show-error --max-time 20 --output /dev/null "$PRODUCTION_URL/connect"

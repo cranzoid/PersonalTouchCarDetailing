@@ -3,7 +3,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { Container, ButtonLink } from "@/components/ui";
 import { AttributionCapture } from "@/components/attribution";
-import { getSettings } from "@/lib/settings";
+import { getPublicSettings } from "@/lib/settings";
 
 // Public pages read business settings and service data from PostgreSQL. Render
 // them at request time so production builds do not depend on an initialized DB.
@@ -37,7 +37,7 @@ function BrandLogo({ footer = false }: { footer?: boolean }) {
 }
 
 export default async function PublicLayout({ children }: { children: ReactNode }) {
-  const settings = await getSettings();
+  const settings = await getPublicSettings();
   return (
     <div className="flex min-h-screen flex-col bg-ink-950">
       <AttributionCapture />

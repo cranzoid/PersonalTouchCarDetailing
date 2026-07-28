@@ -3,6 +3,7 @@ import { ContactForm } from "@/components/contact-form";
 import { getSettings } from "@/lib/settings";
 import { db, schema } from "@/db";
 import { asc } from "drizzle-orm";
+import { formatHHMM12 } from "@/lib/tz";
 
 export const metadata = { title: "Contact" };
 export const dynamic = "force-dynamic";
@@ -49,7 +50,11 @@ export default async function ContactPage() {
               {hours.map((h) => (
                 <li key={h.weekday} className="flex justify-between gap-6">
                   <span>{WEEKDAYS[h.weekday]}</span>
-                  <span>{h.closed ? "Closed" : `${h.open} – ${h.close}`}</span>
+                  <span>
+                    {h.closed || !h.open || !h.close
+                      ? "Closed"
+                      : `${formatHHMM12(h.open)} – ${formatHHMM12(h.close)}`}
+                  </span>
                 </li>
               ))}
             </ul>

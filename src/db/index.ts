@@ -16,7 +16,12 @@ export function getPool(): Pool {
     if (!connectionString) {
       throw new Error("DATABASE_URL is not set (see .env.example)");
     }
-    globalForDb.__ptcdPool = new Pool({ connectionString, max: 10 });
+    globalForDb.__ptcdPool = new Pool({
+      connectionString,
+      max: 10,
+      connectionTimeoutMillis: 5_000,
+      idleTimeoutMillis: 30_000,
+    });
   }
   return globalForDb.__ptcdPool;
 }

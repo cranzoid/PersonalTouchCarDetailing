@@ -1,4 +1,8 @@
 subscription_id  = "00000000-0000-0000-0000-000000000000"
 admin_name       = "Owner"
 admin_email      = "owner@example.com"
+app_service_sku_name = "P0v3"
+# Use "/" only during the one-time staging-slot bootstrap.
+production_health_check_path = "/api/health"
+github_repository = "cranzoid/PersonalTouchCarDetailing"
 monthly_budget_inr = 4000

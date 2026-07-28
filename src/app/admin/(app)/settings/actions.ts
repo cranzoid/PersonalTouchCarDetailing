@@ -6,7 +6,12 @@ import { and, eq, gt, inArray, lt, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireStaff, AuthError } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
-import { getSettings, setSetting, type BusinessSettings } from "@/lib/settings";
+import {
+  getSettings,
+  invalidatePublicSettingsCache,
+  setSetting,
+  type BusinessSettings,
+} from "@/lib/settings";
 import { newId } from "@/lib/id";
 import { APPOINTMENT_BLOCKING_STATUSES } from "@/lib/types";
 import { zonedToUtc } from "@/lib/tz";
@@ -112,6 +117,7 @@ export async function updateSettingsAction(raw: unknown): Promise<ActionResult> 
       after: input,
     });
 
+    invalidatePublicSettingsCache();
     revalidatePath("/", "layout");
     return { ok: true };
   } catch (err) {
