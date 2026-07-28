@@ -4,5 +4,5 @@ admin_email      = "owner@example.com"
 app_service_sku_name = "P0v3"
 # Use "/" only during the one-time staging-slot bootstrap.
 production_health_check_path = "/api/health"
-github_repository = "cranzoid/PersonalTouchCarDetailing"
+github_oidc_subject_prefix = "repo:cranzoid@93286005/PersonalTouchCarDetailing@1310343352"
 monthly_budget_inr = 8000

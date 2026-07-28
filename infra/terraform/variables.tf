@@ -40,10 +40,15 @@ variable "production_health_check_path" {
   }
 }
 
-variable "github_repository" {
-  description = "GitHub repository allowed to obtain an Azure OIDC token from the main branch."
+variable "github_oidc_subject_prefix" {
+  description = "Exact repository prefix from GitHub's Actions OIDC subject customization endpoint."
   type        = string
-  default     = "cranzoid/PersonalTouchCarDetailing"
+  default     = "repo:cranzoid@93286005/PersonalTouchCarDetailing@1310343352"
+
+  validation {
+    condition     = startswith(var.github_oidc_subject_prefix, "repo:")
+    error_message = "github_oidc_subject_prefix must start with repo:."
+  }
 }
 
 variable "admin_name" {

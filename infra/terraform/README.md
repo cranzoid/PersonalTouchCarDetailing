@@ -54,6 +54,13 @@ three non-secret Terraform outputs as GitHub Actions repository variables:
 - `github_actions_azure_tenant_id` → `AZURE_TENANT_ID`
 - `github_actions_azure_subscription_id` → `AZURE_SUBSCRIPTION_ID`
 
+The federated credential subject uses GitHub's exact repository prefix,
+including its stable owner and repository IDs. Confirm it before applying with:
+
+```bash
+gh api repos/cranzoid/PersonalTouchCarDetailing/actions/oidc/customization/sub
+```
+
 Run the **Azure release** workflow from the GitHub Actions page with operation
 `stage`. It runs migrations against an isolated PostgreSQL service, all tests,
 type checking, a production build, and the production dependency audit before
