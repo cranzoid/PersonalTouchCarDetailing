@@ -264,8 +264,8 @@ resource "azurerm_linux_web_app" "main" {
   tags = merge(local.tags, {
     "hidden-link: /app-insights-resource-id" = replace(
       azurerm_application_insights.main.id,
-      "/providers/Microsoft.Insights/",
-      "/providers/microsoft.insights/",
+      "Microsoft.Insights",
+      "microsoft.insights",
     )
   })
 
