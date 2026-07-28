@@ -46,7 +46,7 @@ requiring confirmation". Placeholder copy in the public site must be neutral
 
 | Concern | Choice | Rationale |
 |---|---|---|
-| Framework | Next.js 15 (App Router) + React 19 + TypeScript | One deployable app hosts the public site, admin, customer access, and API route handlers. Server components + server actions minimize API boilerplate while still allowing explicit REST-ish route handlers for webhooks and tokened customer links. |
+| Framework | Next.js 15 (App Router) + React 19 + TypeScript | One deployable app hosts the public site, admin, customer access, and API route handlers. Server components + server actions minimize API boilerplate while still allowing explicit REST-ish route handlers for webhooks and tokened customer links. Production uses Next.js standalone output built and smoke-tested on GitHub-hosted Linux. |
 | Database | PostgreSQL (dev: local Postgres 14 via unix socket `/tmp`; prod: any managed Postgres ≥14) | Real transactional guarantees for double-booking protection, financial integrity, and audit history. |
 | ORM / migrations | Drizzle ORM + drizzle-kit SQL migrations (`src/db/`, `drizzle/` migrations dir) | Typed schema colocated with code; plain-SQL migration files reviewable in PRs. |
 | Styling | Tailwind CSS v4 | Fast, consistent, no runtime CSS. |
@@ -241,11 +241,16 @@ more placeholder screens.
 
 ## 9. Deployment approach
 
-Target: any Node host with managed Postgres (Vercel + Neon/Supabase, or a VPS
-with PM2/systemd + local Postgres). Requirements: run `npm run db:migrate` on
-deploy, set env vars, put uploads on S3-compatible storage in production
-(dev uses local `var/uploads/`, gitignored). No deployment is performed
-without an explicit owner decision (cost + credentials).
+Production runs on Azure App Service with Azure Database for PostgreSQL. GitHub
+Actions builds and smoke-tests Next.js standalone output on a hosted Linux
+runner, deploys it to the `staging` slot, verifies `/api/health`, `/`, and
+`/connect`, and only then swaps the verified slot into production. Azure never
+builds the application or extracts a dependency archive at startup.
+
+`src/instrumentation.ts` applies committed SQL migrations and the idempotent
+seed before a standalone server accepts traffic. Uploads use Azure Blob Storage
+in production (development uses local `var/uploads/`, gitignored). Infrastructure
+and slot configuration are managed by Terraform under `infra/terraform/`.
 
 ---
 
