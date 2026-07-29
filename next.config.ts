@@ -23,6 +23,23 @@ const nextConfig: NextConfig = {
   output: "standalone",
   serverExternalPackages: ["pg", "bcryptjs", "pdfkit"],
   outputFileTracingRoot: resolve(process.cwd()),
+  async redirects() {
+    return [
+      {
+        // Keep the www hostname canonical for every route, including API and
+        // static-file requests. Next.js preserves the incoming query string.
+        source: "/:path*",
+        has: [
+          {
+            type: "host",
+            value: "personaltouchcardetailing\\.ca",
+          },
+        ],
+        destination: "https://www.personaltouchcardetailing.ca/:path*",
+        permanent: true,
+      },
+    ];
+  },
   experimental: {
     // Staff can upload up to 20 10 MB inspection photos in one server action.
     serverActions: { bodySizeLimit: "210mb" },
