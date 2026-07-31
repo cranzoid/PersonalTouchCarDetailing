@@ -13,6 +13,7 @@ import { getSettings } from "@/lib/settings";
 import { getAvailableSlots } from "@/lib/booking/availability";
 import { BookingError, createStaffAppointment } from "@/lib/booking/create";
 import { rescheduleAppointment } from "@/lib/booking/reschedule";
+import { notifyStaffOfNewAppointment } from "@/lib/staff-notifications";
 import { priceBooking, PricingError } from "@/lib/pricing";
 import { formatInZone } from "@/lib/tz";
 
@@ -47,6 +48,12 @@ const manualSelectionSchema = z.object({
 
 const manualSlotsSchema = manualSelectionSchema.extend({
   dateISO: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  /**
+   * Offer slots that break the minimum-notice / booking-window rules so staff
+   * can record walk-ins and same-day work. Only reachable behind
+   * manage_bookings; bay and staff conflicts are still enforced.
+   */
+  allowOutsideBookingWindow: z.boolean().optional(),
 });
 
 const createManualSchema = manualSlotsSchema.extend({
@@ -58,6 +65,7 @@ const rescheduleSchema = z.object({
   appointmentId: z.string().min(1),
   dateISO: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   startMs: z.number().int().positive(),
+  allowOutsideBookingWindow: z.boolean().optional(),
 });
 
 const rescheduleSlotsSchema = rescheduleSchema.omit({ startMs: true });
@@ -99,6 +107,7 @@ export async function getManualAppointmentSlotsAction(raw: unknown): Promise<App
       workDurationMin: pricing.durationMin,
       settings,
       requiredSkills: pricing.requiredSkills,
+      allowOutsideBookingWindow: input.allowOutsideBookingWindow,
     });
     return {
       ok: true,
@@ -127,6 +136,13 @@ export async function createManualAppointmentAction(
     if (!parsed.success) return { ok: false, error: "Please check the appointment details" };
     const settings = await getSettings();
     const result = await createStaffAppointment({ ...parsed.data, settings, staffId: staff.id });
+    // Best-effort: the booking is already committed, so an alert failure must
+    // not surface as a failed appointment creation.
+    try {
+      await notifyStaffOfNewAppointment(result.appointmentId);
+    } catch {
+      console.error("Manual appointment created but staff alert could not be queued");
+    }
     revalidatePath("/admin/appointments");
     revalidatePath(`/admin/appointments/${result.appointmentId}`);
     return { ok: true, appointmentId: result.appointmentId };
@@ -159,6 +175,7 @@ export async function getRescheduleSlotsAction(raw: unknown): Promise<Appointmen
       settings,
       excludeAppointmentId: appointment.id,
       requiredSkills,
+      allowOutsideBookingWindow: parsed.data.allowOutsideBookingWindow,
     });
     return {
       ok: true,

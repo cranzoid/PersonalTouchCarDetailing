@@ -62,6 +62,22 @@ export function formatInZone(
   }).format(date);
 }
 
+/**
+ * Calendar date as "YYYY-MM-DD" in `timeZone`, optionally offset from now.
+ *
+ * Use this instead of `new Date(...).toISOString().slice(0, 10)` for date-input
+ * bounds: that computes the UTC date, so after ~8pm in America/Toronto it
+ * silently reports tomorrow and pushes every bound a day out.
+ */
+export function localDateISO(timeZone: string, offsetMs = 0, nowMs = Date.now()): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(nowMs + offsetMs));
+}
+
 export function parseHHMM(s: string): { hh: number; mm: number } {
   const [hh, mm] = s.split(":").map(Number);
   return { hh, mm };

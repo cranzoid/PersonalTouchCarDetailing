@@ -19,6 +19,7 @@ import {
   sendInvoiceReceipt,
   summarizePayments,
 } from "@/lib/invoices";
+import { zonedToUtc } from "@/lib/tz";
 import { getAppBaseUrl } from "@/lib/urls";
 import {
   decodeStripeRefundReference,
@@ -88,7 +89,10 @@ export async function createInvoiceFromJobAction(
         return { ok: false, error: "Nothing to invoice — no booked services or approved additional work" };
       }
 
-      const taxRateBp = appointment?.taxRateBp || settings.taxRateBp;
+      // `??` not `||`: a legitimately zero-rated appointment (0) must stay zero.
+      // With `||` it silently fell back to the 13% settings rate, which made
+      // tax exemption impossible on job-derived invoices.
+      const taxRateBp = appointment?.taxRateBp ?? settings.taxRateBp;
       const totals = computeInvoiceTotals(lines, 0, taxRateBp);
       const depositAppliedCents = Math.min(appointment?.depositPaidCents ?? 0, totals.totalCents);
 
@@ -796,6 +800,229 @@ export async function cancelInvoiceAction(raw: unknown): Promise<ActionResult> {
   } catch (err) {
     if (err instanceof AuthError) return { ok: false, error: err.message };
     console.error("cancelInvoiceAction failed", err);
+    return { ok: false, error: "Something went wrong" };
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Manual invoice (walk-ins, work already done)                        */
+/* ------------------------------------------------------------------ */
+
+/** "YYYY-MM-DD" business-local -> the UTC instant at local noon that day. */
+function localNoonUtc(timeZone: string, dateISO: string): Date {
+  const [y, m, d] = dateISO.split("-").map(Number);
+  return zonedToUtc(timeZone, y, m, d, 12, 0);
+}
+
+const manualLineInput = z.object({
+  serviceId: z.string().min(1).optional(),
+  description: z.string().trim().min(1).max(500),
+  quantity: z.number().int().min(1).max(999),
+  unitPriceCents: z.number().int().min(0),
+});
+
+const createManualInvoiceInput = z.object({
+  customerId: z.string().min(1),
+  vehicleId: z.string().min(1).optional(),
+  lines: z.array(manualLineInput).min(1).max(50),
+  discountCents: z.number().int().min(0).default(0),
+  /** Business-local calendar date; may be in the past for work already done. */
+  invoiceDateISO: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  taxExempt: z.boolean().default(false),
+  taxExemptReason: z.string().trim().max(200).optional(),
+  notes: z.string().trim().max(2000).optional(),
+});
+
+/**
+ * Raises an invoice that has no originating job — a walk-in, a cash job, or
+ * work completed before the customer existed in the system.
+ *
+ * Reuses computeInvoiceTotals / nextInvoiceNumber so numbering and money math
+ * are identical to job-derived invoices. `invoices.jobId` stays null and no
+ * invoice_jobs row is written, which keeps the one-invoice-per-job constraint
+ * untouched.
+ */
+export async function createManualInvoiceAction(
+  raw: unknown,
+): Promise<ActionResult<{ invoiceId: string }>> {
+  try {
+    const staff = await requireStaff("manage_invoices");
+    const parsed = createManualInvoiceInput.safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Please check the invoice details" };
+    const input = parsed.data;
+    if (input.taxExempt && !input.taxExemptReason) {
+      return { ok: false, error: "Give a reason for not charging tax — it appears on the invoice and the tax report" };
+    }
+
+    const settings = await getSettings();
+    // Exempt invoices snapshot a 0 rate so the stored document stays
+    // self-describing; the flag and reason record WHY it was zero.
+    const taxRateBp = input.taxExempt ? 0 : settings.taxRateBp;
+    const totals = computeInvoiceTotals(input.lines, input.discountCents, taxRateBp);
+
+    const result = await db().transaction(async (tx): Promise<ActionResult<{ invoiceId: string }>> => {
+      const [customer] = await tx
+        .select()
+        .from(schema.customers)
+        .where(eq(schema.customers.id, input.customerId))
+        .limit(1);
+      if (!customer || customer.anonymizedAt) return { ok: false, error: "Customer not found" };
+
+      if (input.vehicleId) {
+        const [vehicle] = await tx
+          .select({ customerId: schema.vehicles.customerId })
+          .from(schema.vehicles)
+          .where(eq(schema.vehicles.id, input.vehicleId))
+          .limit(1);
+        if (!vehicle || vehicle.customerId !== input.customerId) {
+          return { ok: false, error: "That vehicle belongs to a different customer" };
+        }
+      }
+
+      const number = await nextInvoiceNumber(tx);
+      const invoiceId = newId("inv");
+      await tx.insert(schema.invoices).values({
+        id: invoiceId,
+        number,
+        customerId: input.customerId,
+        vehicleId: input.vehicleId,
+        jobId: null,
+        status: "draft",
+        subtotalCents: totals.subtotalCents,
+        discountCents: totals.discountCents,
+        taxRateBp,
+        taxLabel: settings.taxLabel,
+        taxRegistrationNumber: settings.taxRegistrationNumber || null,
+        taxCents: totals.taxCents,
+        taxExempt: input.taxExempt,
+        taxExemptReason: input.taxExempt ? input.taxExemptReason : null,
+        totalCents: totals.totalCents,
+        // Noon business-local, matching zonedWeekday's DST-safe convention, so
+        // a backdated invoice lands on the intended calendar day everywhere.
+        invoiceDate: input.invoiceDateISO ? localNoonUtc(settings.timezone, input.invoiceDateISO) : new Date(),
+        createdByStaffId: staff.id,
+        notes: input.notes,
+      });
+      await tx.insert(schema.invoiceLineItems).values(
+        input.lines.map((line, i) => ({
+          id: newId("ili"),
+          invoiceId,
+          serviceId: line.serviceId ?? null,
+          description: line.description,
+          quantity: line.quantity,
+          unitPriceCents: line.unitPriceCents,
+          sort: i,
+        })),
+      );
+      await audit(tx, {
+        actorType: "staff",
+        actorId: staff.id,
+        action: "invoice.created_manually",
+        entityType: "invoice",
+        entityId: invoiceId,
+        after: {
+          number,
+          customerId: input.customerId,
+          totalCents: totals.totalCents,
+          lines: input.lines.length,
+          taxExempt: input.taxExempt,
+          backdated: Boolean(input.invoiceDateISO),
+        },
+        reason: input.taxExempt ? input.taxExemptReason : undefined,
+      });
+      return { ok: true, invoiceId };
+    });
+
+    if (result.ok) {
+      revalidatePath("/admin/invoices");
+      revalidatePath(`/admin/invoices/${result.invoiceId}`);
+    }
+    return result;
+  } catch (err) {
+    if (err instanceof AuthError) return { ok: false, error: err.message };
+    console.error("createManualInvoiceAction failed", err);
+    return { ok: false, error: "Something went wrong creating the invoice" };
+  }
+}
+
+/**
+ * Switches an existing invoice between taxed and exempt, recomputing the total
+ * from the stored line items.
+ *
+ * Restricted to invoices with no money against them: totals are an immutable
+ * snapshot once a payment exists, and rewriting them would desynchronise the
+ * payment ledger from the balance owed.
+ */
+export async function setInvoiceTaxExemptAction(raw: unknown): Promise<ActionResult> {
+  try {
+    const staff = await requireStaff("manage_invoices");
+    const parsed = z
+      .object({
+        invoiceId: z.string().min(1),
+        taxExempt: z.boolean(),
+        reason: z.string().trim().max(200).optional(),
+      })
+      .safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Invalid request" };
+    const input = parsed.data;
+    if (input.taxExempt && !input.reason) {
+      return { ok: false, error: "Give a reason for not charging tax" };
+    }
+
+    const settings = await getSettings();
+    const result = await db().transaction(async (tx): Promise<ActionResult> => {
+      const rows = await tx.select().from(schema.invoices).where(eq(schema.invoices.id, input.invoiceId)).for("update");
+      const invoice = rows[0];
+      if (!invoice) return { ok: false, error: "Invoice not found" };
+      if (!["draft", "sent", "overdue"].includes(invoice.status)) {
+        return { ok: false, error: `A ${invoice.status.replaceAll("_", " ")} invoice cannot have its tax changed` };
+      }
+
+      const payments = await tx.select().from(schema.payments).where(eq(schema.payments.invoiceId, invoice.id));
+      if (payments.some((p) => p.status === "succeeded")) {
+        return { ok: false, error: "This invoice already has a payment — cancel it and raise a new one instead" };
+      }
+
+      const lines = await tx
+        .select()
+        .from(schema.invoiceLineItems)
+        .where(eq(schema.invoiceLineItems.invoiceId, invoice.id));
+      const taxRateBp = input.taxExempt ? 0 : settings.taxRateBp;
+      const totals = computeInvoiceTotals(lines, invoice.discountCents, taxRateBp);
+
+      await tx
+        .update(schema.invoices)
+        .set({
+          taxRateBp,
+          taxCents: totals.taxCents,
+          taxExempt: input.taxExempt,
+          taxExemptReason: input.taxExempt ? input.reason : null,
+          totalCents: totals.totalCents,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.invoices.id, invoice.id));
+
+      await audit(tx, {
+        actorType: "staff",
+        actorId: staff.id,
+        action: "invoice.tax_exemption_changed",
+        entityType: "invoice",
+        entityId: invoice.id,
+        before: { taxExempt: invoice.taxExempt, taxRateBp: invoice.taxRateBp, totalCents: invoice.totalCents },
+        after: { taxExempt: input.taxExempt, taxRateBp, totalCents: totals.totalCents },
+        reason: input.reason,
+      });
+      return { ok: true };
+    });
+
+    if (result.ok) {
+      revalidatePath("/admin/invoices");
+      revalidatePath(`/admin/invoices/${input.invoiceId}`);
+    }
+    return result;
+  } catch (err) {
+    if (err instanceof AuthError) return { ok: false, error: err.message };
+    console.error("setInvoiceTaxExemptAction failed", err);
     return { ok: false, error: "Something went wrong" };
   }
 }

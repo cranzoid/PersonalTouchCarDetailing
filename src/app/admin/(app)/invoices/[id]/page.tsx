@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { asc, desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { formatCents } from "@/lib/money";
+import { PAYMENT_PROVIDER_LABELS } from "@/lib/payment-labels";
 import { formatInZone } from "@/lib/tz";
 import { getSettings } from "@/lib/settings";
 import { summarizePayments, syncOverdueInvoices } from "@/lib/invoices";
@@ -13,13 +14,8 @@ import { getRefundAvailability } from "@/lib/payments";
 
 export const dynamic = "force-dynamic";
 
-const PROVIDER_LABELS: Record<string, string> = {
-  fake: "Test payment",
-  stripe: "Card (Stripe)",
-  cash: "Cash",
-  etransfer: "E-transfer",
-  card_terminal: "Card terminal",
-};
+// Shared with the PDF renderer so both surfaces name a payment the same way.
+const PROVIDER_LABELS = PAYMENT_PROVIDER_LABELS;
 
 export default async function InvoiceDetailPage({ params }: { params: Promise<{ id: string }> }) {
   await requirePageStaff("record_payments");
@@ -224,6 +220,8 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         netPaidCents={summary.netPaidCents}
         stripeRefundableCents={refundAvailability.stripeRefundableCents}
         manualRefundableCents={refundAvailability.manualRefundableCents}
+        taxExempt={invoice.taxExempt}
+        taxLabel={invoice.taxLabel}
       />
     </div>
   );

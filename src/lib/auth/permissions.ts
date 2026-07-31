@@ -7,6 +7,8 @@ import type { StaffRole } from "@/lib/types";
  */
 export const PERMISSIONS = {
   manage_staff: ["owner"],
+  /** Provider API credentials — owner only, matching manage_staff. */
+  manage_integrations: ["owner"],
   manage_settings: ["owner", "manager"],
   manage_services: ["owner", "manager"],
   manage_bookings: ["owner", "manager", "reception"],

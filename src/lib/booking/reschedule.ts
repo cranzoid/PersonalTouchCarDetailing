@@ -18,6 +18,11 @@ export async function rescheduleAppointment(input: {
   startMs: number;
   settings: BusinessSettings;
   staffId: string;
+  /**
+   * Staff-only: move an appointment to a same-day or past slot, e.g. when the
+   * customer actually turned up yesterday. Conflict checks still apply.
+   */
+  allowOutsideBookingWindow?: boolean;
 }): Promise<{ appointmentId: string; startsAt: Date; endsAt: Date; resourceId: string; status: string }> {
   return db().transaction(async (tx) => {
     const [appointment] = await tx
@@ -48,6 +53,7 @@ export async function rescheduleAppointment(input: {
       settings: input.settings,
       excludeAppointmentId: appointment.id,
       requiredSkills,
+      allowOutsideBookingWindow: input.allowOutsideBookingWindow,
     });
     const window: Interval = {
       start: input.startMs,

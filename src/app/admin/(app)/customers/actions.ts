@@ -20,6 +20,125 @@ export type CustomerActionResult<T = object> =
 const optionalEmail = z.string().trim().email().max(200).optional().or(z.literal("").transform(() => undefined));
 const optionalText = (max: number) => z.string().trim().max(max).optional().or(z.literal("").transform(() => undefined));
 
+/**
+ * Contact rules shared by every customer-creating path: we must be able to
+ * reach them, and the preferred channel must be one we actually have.
+ */
+function validateContact(input: {
+  email?: string;
+  phone?: string;
+  preferredContact: "email" | "sms" | "phone";
+}): string | null {
+  if (!input.email && !input.phone) return "Add an email address or phone number";
+  if (input.preferredContact === "email" && !input.email) {
+    return "Preferred email requires an email address";
+  }
+  if (input.preferredContact !== "email" && !input.phone) {
+    return "Preferred phone contact requires a phone number";
+  }
+  return null;
+}
+
+/**
+ * Creates a walk-in / phone-in customer, optionally with their first vehicle in
+ * the same transaction so the booking screen can use them immediately.
+ *
+ * Until now a plain individual could only enter the CRM through the public
+ * booking form, a lead conversion, or the estimate builder — the fleet form
+ * forces customerType "business".
+ */
+export async function createCustomerAction(
+  raw: unknown,
+): Promise<CustomerActionResult<{ customerId: string; vehicleId?: string }>> {
+  try {
+    const staff = await requireStaff("manage_customers");
+    const parsed = z
+      .object({
+        firstName: z.string().trim().min(1).max(100),
+        lastName: z.string().trim().max(100).default(""),
+        email: optionalEmail,
+        phone: optionalText(30),
+        preferredContact: z.enum(["email", "sms", "phone"]).default("phone"),
+        customerType: z.enum(["individual", "business"]).default("individual"),
+        companyName: optionalText(160),
+        notes: optionalText(2000),
+        marketingConsent: z.boolean().default(false),
+        // Optional first vehicle — a walk-in is not bookable without one.
+        vehicle: z
+          .object({
+            year: z.number().int().min(1900).max(new Date().getFullYear() + 2).optional(),
+            make: z.string().trim().min(1).max(60),
+            model: z.string().trim().min(1).max(60),
+            category: z.enum(VEHICLE_CATEGORIES),
+            colour: optionalText(60),
+            licencePlate: optionalText(30),
+          })
+          .optional(),
+      })
+      .safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Please check the customer details" };
+    const input = parsed.data;
+
+    const contactError = validateContact(input);
+    if (contactError) return { ok: false, error: contactError };
+    if (input.customerType === "business" && !input.companyName) {
+      return { ok: false, error: "Business customers need a company name" };
+    }
+
+    const customerId = newId("cus");
+    const vehicleId = input.vehicle ? newId("veh") : undefined;
+    await db().transaction(async (tx) => {
+      await tx.insert(schema.customers).values({
+        id: customerId,
+        firstName: input.firstName,
+        lastName: input.lastName,
+        email: input.email,
+        phone: input.phone,
+        preferredContact: input.preferredContact,
+        customerType: input.customerType,
+        companyName: input.companyName,
+        notes: input.notes,
+        marketingConsent: input.marketingConsent,
+        // Consent provenance matters: the messaging layer blocks marketing
+        // sends without it, and we need to show where it came from.
+        marketingConsentAt: input.marketingConsent ? new Date() : undefined,
+        marketingConsentSource: input.marketingConsent ? "staff_entry" : undefined,
+      });
+      if (input.vehicle && vehicleId) {
+        await tx.insert(schema.vehicles).values({
+          id: vehicleId,
+          customerId,
+          year: input.vehicle.year,
+          make: input.vehicle.make,
+          model: input.vehicle.model,
+          category: input.vehicle.category,
+          colour: input.vehicle.colour,
+          licencePlate: input.vehicle.licencePlate,
+        });
+      }
+      await audit(tx, {
+        actorType: "staff",
+        actorId: staff.id,
+        action: "customer.created",
+        entityType: "customer",
+        entityId: customerId,
+        after: {
+          customerType: input.customerType,
+          preferredContact: input.preferredContact,
+          marketingConsent: input.marketingConsent,
+          withVehicle: Boolean(vehicleId),
+        },
+      });
+    });
+    revalidatePath("/admin/customers");
+    return { ok: true, customerId, vehicleId };
+  } catch (error) {
+    if (error instanceof AuthError) return { ok: false, error: error.message };
+    console.error("createCustomerAction failed", error);
+    return { ok: false, error: "Something went wrong" };
+  }
+}
+
 export async function createFleetCustomerAction(
   raw: unknown,
 ): Promise<CustomerActionResult<{ customerId: string }>> {
@@ -35,9 +154,8 @@ export async function createFleetCustomerAction(
     }).safeParse(raw);
     if (!parsed.success) return { ok: false, error: "Please check the company and contact details" };
     const input = parsed.data;
-    if (!input.email && !input.phone) return { ok: false, error: "Add an email address or phone number" };
-    if (input.preferredContact === "email" && !input.email) return { ok: false, error: "Preferred email requires an email address" };
-    if (input.preferredContact !== "email" && !input.phone) return { ok: false, error: "Preferred phone contact requires a phone number" };
+    const contactError = validateContact(input);
+    if (contactError) return { ok: false, error: contactError };
 
     const customerId = newId("cus");
     await db().transaction(async (tx) => {

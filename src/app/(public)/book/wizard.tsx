@@ -3,6 +3,7 @@
 import { useId, useMemo, useState } from "react";
 import { getStoredAttribution } from "@/components/attribution";
 import { formatCents } from "@/lib/money";
+import { localDateISO } from "@/lib/tz";
 import { VEHICLE_CATEGORIES, VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
 import { getSlotsAction, submitBookingAction, type BookingResult } from "./actions";
 
@@ -36,6 +37,7 @@ export function BookingWizard({
   taxLabel,
   preselectSlug,
   maxBookingWindowDays,
+  timezone,
 }: {
   services: WizardService[];
   addons: WizardAddon[];
@@ -43,6 +45,7 @@ export function BookingWizard({
   taxLabel: string;
   preselectSlug?: string;
   maxBookingWindowDays: number;
+  timezone: string;
 }) {
   const idPrefix = useId();
   const preselected = services.find((s) => s.slug === preselectSlug);
@@ -170,8 +173,11 @@ export function BookingWizard({
     );
   }
 
-  const minDate = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
-  const maxDate = new Date(Date.now() + maxBookingWindowDays * 86_400_000).toISOString().slice(0, 10);
+  // Business-local calendar dates. toISOString() gives the UTC day, which after
+  // ~8pm in America/Toronto had already rolled over and pushed the earliest
+  // bookable date a full day further out than the notice rule requires.
+  const minDate = localDateISO(timezone, 86_400_000);
+  const maxDate = localDateISO(timezone, maxBookingWindowDays * 86_400_000);
 
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,2fr)_minmax(17rem,1fr)] lg:items-start">

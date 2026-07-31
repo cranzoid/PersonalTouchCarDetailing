@@ -54,6 +54,7 @@ export default async function NewAppointmentPage() {
           priceCents: addon.priceCents,
         }))}
         maxBookingWindowDays={settings.maxBookingWindowDays}
+        timezone={settings.timezone}
       />
     </div>
   );

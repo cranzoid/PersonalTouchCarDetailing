@@ -68,7 +68,7 @@ export default async function AppointmentDetailPage({
         depositPaidCents={appt.depositPaidCents}
       />
       {["pending", "deposit_required", "confirmed"].includes(appt.status) && (
-        <ReschedulePanel appointmentId={appt.id} maxBookingWindowDays={settings.maxBookingWindowDays} />
+        <ReschedulePanel appointmentId={appt.id} maxBookingWindowDays={settings.maxBookingWindowDays} timezone={settings.timezone} />
       )}
       {appt.status === "arrived" && !appt.jobId && <CheckInButton appointmentId={appt.id} />}
       {appt.jobId && (

@@ -1,6 +1,7 @@
 import { asc } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { AddonEditor, ServiceEditor } from "./service-editor";
+import { NewAddonForm, NewCategoryForm, NewServiceForm } from "./service-creators";
 import { requirePageStaff } from "@/lib/auth/page";
 
 export const dynamic = "force-dynamic";
@@ -24,6 +25,11 @@ export default async function ServicesAdminPage() {
         Prices, durations, vehicle adjustments, add-ons, booking modes and deposits are fully
         configurable. Changes apply to the public site immediately and are audited.
       </p>
+      <div className="mt-6 flex flex-wrap gap-3">
+        <NewServiceForm categories={categories.map((cat) => ({ id: cat.id, name: cat.name }))} />
+        <NewAddonForm services={services.map((s) => ({ id: s.id, name: s.name }))} />
+        <NewCategoryForm />
+      </div>
       <div className="mt-8 space-y-10">
         {categories.map((cat) => (
           <section key={cat.id}>

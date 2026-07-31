@@ -650,8 +650,23 @@ export const invoices = pgTable(
     taxLabel: text("tax_label").notNull().default("HST"),
     taxRegistrationNumber: text("tax_registration_number"),
     taxCents: integer("tax_cents").notNull().default(0),
+    /**
+     * Set when no tax was charged. `taxRateBp`/`taxCents` are still snapshotted
+     * as 0 so historical documents stay self-describing; this flag plus the
+     * reason are what make the exemption auditable and reportable.
+     */
+    taxExempt: boolean("tax_exempt").notNull().default(false),
+    taxExemptReason: text("tax_exempt_reason"),
     totalCents: integer("total_cents").notNull().default(0),
     depositAppliedCents: integer("deposit_applied_cents").notNull().default(0),
+    /**
+     * The date the invoice is issued for, which may be backdated for work
+     * already performed. Reads fall back to `createdAt` for rows predating
+     * this column.
+     */
+    invoiceDate: timestamp("invoice_date", { withTimezone: true }),
+    /** Set for invoices raised by hand rather than derived from a job. */
+    createdByStaffId: text("created_by_staff_id").references(() => staffUsers.id),
     dueAt: timestamp("due_at", { withTimezone: true }),
     sentAt: timestamp("sent_at", { withTimezone: true }),
     paidAt: timestamp("paid_at", { withTimezone: true }),
@@ -789,6 +804,22 @@ export const messageTemplates = pgTable("message_templates", {
 export const businessSettings = pgTable("business_settings", {
   key: text("key").primaryKey(),
   value: jsonb("value").notNull(),
+  updatedAt: updatedAt(),
+  updatedByStaffId: text("updated_by_staff_id"),
+});
+
+/**
+ * Provider API credentials (Twilio, Resend), encrypted at rest.
+ *
+ * Deliberately NOT part of business_settings: getPublicSettings() loads that
+ * whole table into public server components, so a secret stored there would be
+ * one careless prop away from the browser. Nothing here is ever returned to a
+ * client — see src/lib/integrations.ts for the only accessor.
+ */
+export const integrationCredentials = pgTable("integration_credentials", {
+  key: text("key").primaryKey(),
+  /** AES-256-GCM ciphertext, `v1:<iv>:<authTag>:<payload>`, all base64url. */
+  valueEncrypted: text("value_encrypted").notNull(),
   updatedAt: updatedAt(),
   updatedByStaffId: text("updated_by_staff_id"),
 });
