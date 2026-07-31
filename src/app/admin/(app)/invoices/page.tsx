@@ -39,11 +39,19 @@ export default async function InvoicesPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-white">Invoices</h1>
+        <Link
+          href="/admin/invoices/new"
+          className="rounded-lg bg-accent-400 px-4 py-2 text-sm font-semibold text-ink-950 hover:bg-accent-300"
+        >
+          New invoice
+        </Link>
       </div>
       <p className="mt-1 text-sm text-ink-400">
-        Invoices are created from a job once it&apos;s ready for pickup or completed.
+        Invoices are created automatically from a job once it&apos;s ready for pickup or completed.
+        Use <span className="text-ink-200">New invoice</span> for walk-ins and work done outside a
+        booked job.
       </p>
       <div className="mt-6 overflow-x-auto rounded-xl border border-ink-800">
         <table className="w-full text-left text-sm">

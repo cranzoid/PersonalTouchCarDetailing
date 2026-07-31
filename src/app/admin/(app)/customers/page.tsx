@@ -2,6 +2,7 @@ import Link from "next/link";
 import { desc, ilike, or } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requirePageStaff } from "@/lib/auth/page";
+import { NewCustomerForm } from "./new-customer-form";
 
 export const dynamic = "force-dynamic";
 
@@ -34,6 +35,10 @@ export default async function CustomersPage({
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-white">Customers</h1>
         <Link href="/admin/fleet" className="text-sm font-medium text-accent-300 hover:underline">Fleet accounts →</Link>
+      </div>
+      {/* Collapsed this renders just a button; expanded it becomes the form. */}
+      <div className="mt-4">
+        <NewCustomerForm />
       </div>
       <form className="mt-4 max-w-sm">
         <input

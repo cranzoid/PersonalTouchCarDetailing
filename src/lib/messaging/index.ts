@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "@/lib/id";
+import { getIntegrationSecret } from "@/lib/integrations";
 
 export type OutboundMessage = {
   customerId?: string;
@@ -20,7 +21,13 @@ export type OutboundMessage = {
     | "review_request"
     | "maintenance"
     | "marketing"
-    | "manual";
+    | "manual"
+    /**
+     * Operational alert to our own staff (new booking, connectivity test) —
+     * never customer-facing, and deliberately outside MARKETING_KINDS: staff
+     * are not customers and have no consent record to check.
+     */
+    | "staff_alert";
   to: string;
   subject?: string;
   body: string;
@@ -33,6 +40,12 @@ export type MessageResult = {
   sent: boolean;
   /** Machine-readable enough for callers to decide whether a retry is useful. */
   reason?: "suppressed" | "not_configured" | "provider_error";
+  /**
+   * Provider error text, returned to the caller only — never logged and never
+   * written to the communications row. Exists so the owner-only integrations
+   * screen can show why a test send failed instead of a bare "provider error".
+   */
+  detail?: string;
 };
 
 export type TemplateRecipient = {
@@ -159,7 +172,12 @@ export async function sendMessage(msg: OutboundMessage): Promise<MessageResult> 
       .update(schema.communications)
       .set({ status: "failed" })
       .where(eq(schema.communications.id, id));
-    return { id, sent: false, reason: "provider_error" };
+    return {
+      id,
+      sent: false,
+      reason: "provider_error",
+      detail: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
@@ -210,8 +228,10 @@ export function isTerminalTemplateDelivery(result: TemplateDeliveryResult): bool
 }
 
 async function sendWithResend(msg: OutboundMessage): Promise<string | null> {
-  const apiKey = process.env.RESEND_API_KEY;
-  const from = process.env.EMAIL_FROM;
+  const [apiKey, from] = await Promise.all([
+    getIntegrationSecret("resendApiKey"),
+    getIntegrationSecret("emailFrom"),
+  ]);
   if (!apiKey || !from) return null;
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -234,9 +254,11 @@ async function sendWithResend(msg: OutboundMessage): Promise<string | null> {
 }
 
 async function sendWithTwilio(msg: OutboundMessage): Promise<string | null> {
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const from = process.env.TWILIO_FROM_NUMBER;
+  const [accountSid, authToken, from] = await Promise.all([
+    getIntegrationSecret("twilioAccountSid"),
+    getIntegrationSecret("twilioAuthToken"),
+    getIntegrationSecret("twilioFromNumber"),
+  ]);
   if (!accountSid || !authToken || !from) return null;
   const form = new URLSearchParams({ To: msg.to, From: from, Body: msg.body });
   const response = await fetch(

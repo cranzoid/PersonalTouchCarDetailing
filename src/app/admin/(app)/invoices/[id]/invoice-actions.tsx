@@ -7,6 +7,7 @@ import {
   recordPaymentAction,
   issueRefundAction,
   cancelInvoiceAction,
+  setInvoiceTaxExemptAction,
 } from "../actions";
 
 const PAYMENT_METHODS = [
@@ -32,6 +33,8 @@ export function InvoiceActions({
   netPaidCents,
   stripeRefundableCents,
   manualRefundableCents,
+  taxExempt,
+  taxLabel,
 }: {
   invoiceId: string;
   status: string;
@@ -39,6 +42,8 @@ export function InvoiceActions({
   netPaidCents: number;
   stripeRefundableCents: number;
   manualRefundableCents: number;
+  taxExempt: boolean;
+  taxLabel: string;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -58,11 +63,30 @@ export function InvoiceActions({
   const [refundIdempotencyKey, setRefundIdempotencyKey] = useState(() => newIdempotencyKey("refund"));
   const [cancelReason, setCancelReason] = useState("");
   const [showCancel, setShowCancel] = useState(false);
+  const [showTax, setShowTax] = useState(false);
+  const [taxReason, setTaxReason] = useState("");
 
   const canSend = ["draft", "sent", "partially_paid", "overdue"].includes(status);
   const canTakePayment = balanceCents > 0 && !["cancelled", "refunded"].includes(status);
   const canRefund = netPaidCents > 0 && stripeRefundableCents + manualRefundableCents > 0;
   const canCancel = ["draft", "sent", "overdue"].includes(status) && netPaidCents === 0;
+  // Totals are an immutable snapshot once money has moved against the invoice.
+  const canChangeTax = ["draft", "sent", "overdue"].includes(status) && netPaidCents === 0;
+
+  async function changeTaxExemption(next: boolean) {
+    setBusy(true);
+    setError(null);
+    const res = await setInvoiceTaxExemptAction({
+      invoiceId,
+      taxExempt: next,
+      reason: next ? taxReason : undefined,
+    });
+    setBusy(false);
+    if (!res.ok) return setError(res.error);
+    setShowTax(false);
+    setTaxReason("");
+    router.refresh();
+  }
 
   async function send() {
     setBusy(true);
@@ -212,6 +236,17 @@ export function InvoiceActions({
                 placeholder="0.00"
               />
             </label>
+            {/* Paying the exact balance is the overwhelmingly common case, and
+                typing a rounded pre-tax figure was leaving invoices stuck at
+                "partially paid". */}
+            <button
+              type="button"
+              onClick={() => setAmount((balanceCents / 100).toFixed(2))}
+              disabled={busy}
+              className="rounded-lg border border-ink-600 px-4 py-2 text-sm font-medium text-ink-200 hover:bg-ink-800 disabled:opacity-40"
+            >
+              Pay in full
+            </button>
             <button
               onClick={recordPayment}
               disabled={busy}
@@ -220,6 +255,70 @@ export function InvoiceActions({
               Record Payment
             </button>
           </div>
+        </div>
+      )}
+
+      {canChangeTax && (
+        <div className="border-t border-ink-800 pt-5">
+          <p className="text-sm font-medium text-white">{taxLabel} treatment</p>
+          {taxExempt ? (
+            <>
+              <p className="mt-1 text-xs text-ink-500">
+                No {taxLabel} is being charged on this invoice.
+              </p>
+              <button
+                type="button"
+                onClick={() => void changeTaxExemption(false)}
+                disabled={busy}
+                className="mt-3 rounded-lg border border-ink-600 px-4 py-2 text-sm font-medium text-ink-200 hover:bg-ink-800 disabled:opacity-40"
+              >
+                Charge {taxLabel} again
+              </button>
+            </>
+          ) : !showTax ? (
+            <>
+              <p className="mt-1 text-xs text-ink-500">
+                {taxLabel} is being charged at the current rate. Removing it recalculates the total.
+              </p>
+              <button
+                type="button"
+                onClick={() => setShowTax(true)}
+                disabled={busy}
+                className="mt-3 rounded-lg border border-ink-600 px-4 py-2 text-sm font-medium text-ink-200 hover:bg-ink-800 disabled:opacity-40"
+              >
+                Remove {taxLabel} from this invoice
+              </button>
+            </>
+          ) : (
+            <div className="mt-3">
+              <label className="block text-xs text-ink-400">
+                Reason (required — shown on the invoice and the tax report)
+                <input
+                  className={`${input} mt-1 block w-full`}
+                  value={taxReason}
+                  onChange={(e) => setTaxReason(e.target.value)}
+                  placeholder="e.g. Cash sale, out-of-province customer"
+                />
+              </label>
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => void changeTaxExemption(true)}
+                  disabled={busy || !taxReason.trim()}
+                  className="rounded-lg bg-accent-400 px-4 py-2 text-sm font-semibold text-ink-950 hover:bg-accent-300 disabled:opacity-40"
+                >
+                  Remove {taxLabel}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowTax(false)}
+                  className="rounded-lg border border-ink-600 px-4 py-2 text-sm font-medium text-ink-200 hover:bg-ink-800"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

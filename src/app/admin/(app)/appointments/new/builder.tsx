@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatCents } from "@/lib/money";
+import { localDateISO } from "@/lib/tz";
 import { VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
 import { createManualAppointmentAction, getManualAppointmentSlotsAction } from "../actions";
 
@@ -19,12 +20,14 @@ export function NewAppointmentBuilder({
   services,
   addons,
   maxBookingWindowDays,
+  timezone,
 }: {
   customers: CustomerOption[];
   vehicles: VehicleOption[];
   services: ServiceOption[];
   addons: AddonOption[];
   maxBookingWindowDays: number;
+  timezone: string;
 }) {
   const router = useRouter();
   const [customerId, setCustomerId] = useState("");
@@ -37,6 +40,7 @@ export function NewAppointmentBuilder({
   const [totalCents, setTotalCents] = useState<number | null>(null);
   const [durationMin, setDurationMin] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
+  const [allowOutsideWindow, setAllowOutsideWindow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -44,8 +48,15 @@ export function NewAppointmentBuilder({
   const selectedVehicle = vehicles.find((vehicle) => vehicle.id === vehicleId);
   const eligibleAddonIds = useMemo(() => new Set(services.filter((service) => serviceIds.includes(service.id)).flatMap((service) => service.addonIds)), [services, serviceIds]);
   const eligibleAddons = addons.filter((addon) => eligibleAddonIds.has(addon.id));
-  const minDate = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
-  const maxDate = new Date(Date.now() + maxBookingWindowDays * 86_400_000).toISOString().slice(0, 10);
+  // Booking-window bounds mirror the public site by default. Staff can lift
+  // them to record a walk-in that already happened or take a same-day job;
+  // the server re-checks the same flag, and bay/staff conflicts always apply.
+  // Dates are computed in the business timezone — using toISOString() here
+  // rolled the calendar over for anyone working after ~8pm local.
+  const minDate = allowOutsideWindow ? undefined : localDateISO(timezone, 86_400_000);
+  const maxDate = allowOutsideWindow
+    ? undefined
+    : localDateISO(timezone, maxBookingWindowDays * 86_400_000);
 
   function resetAvailability() {
     setSlots(null);
@@ -65,7 +76,14 @@ export function NewAppointmentBuilder({
   async function loadSlots() {
     setBusy(true);
     setError(null);
-    const result = await getManualAppointmentSlotsAction({ customerId, vehicleId, serviceIds, addonIds, dateISO });
+    const result = await getManualAppointmentSlotsAction({
+      customerId,
+      vehicleId,
+      serviceIds,
+      addonIds,
+      dateISO,
+      allowOutsideBookingWindow: allowOutsideWindow,
+    });
     setBusy(false);
     if (!result.ok) return setError(result.error);
     setSlots(result.slots);
@@ -86,6 +104,7 @@ export function NewAppointmentBuilder({
       dateISO,
       startMs,
       customerNotes: notes || undefined,
+      allowOutsideBookingWindow: allowOutsideWindow,
     });
     setBusy(false);
     if (!result.ok) return setError(result.error);
@@ -130,6 +149,21 @@ export function NewAppointmentBuilder({
             <label className="text-sm text-ink-300">Date<input type="date" min={minDate} max={maxDate} value={dateISO} onChange={(event) => { setDateISO(event.target.value); resetAvailability(); }} className={`${inputClass} mt-1`} /></label>
             <button onClick={() => void loadSlots()} disabled={busy || !customerId || !vehicleId || serviceIds.length === 0 || !dateISO} className="rounded-lg bg-accent-400 px-4 py-2 text-sm font-semibold text-ink-950 disabled:opacity-40">{busy ? "Checking…" : "Check availability"}</button>
           </div>
+          <label className="mt-3 flex items-center gap-2 text-sm text-ink-300">
+            <input
+              type="checkbox"
+              checked={allowOutsideWindow}
+              onChange={(event) => { setAllowOutsideWindow(event.target.checked); resetAvailability(); }}
+              className="accent-accent-400"
+            />
+            Allow past and same-day dates (walk-ins and work already done)
+          </label>
+          {allowOutsideWindow && (
+            <p className="mt-1 text-xs text-ink-500">
+              The {maxBookingWindowDays}-day booking window and notice period are ignored. Bay and
+              staff conflicts are still checked, so a slot that would double-book is still refused.
+            </p>
+          )}
           {slots && slots.length === 0 && <p className="mt-4 text-sm text-ink-400">No openings on this date.</p>}
           {slots && slots.length > 0 && <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-5">{slots.map((slot) => <button key={slot.startMs} onClick={() => setStartMs(slot.startMs)} className={`rounded-lg border px-3 py-2 text-sm ${startMs === slot.startMs ? "border-accent-400 bg-accent-400 font-semibold text-ink-950" : "border-ink-700 text-ink-200"}`}>{slot.label}</button>)}</div>}
         </section>

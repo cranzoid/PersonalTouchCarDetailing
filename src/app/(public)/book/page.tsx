@@ -74,6 +74,7 @@ export default async function BookPage({
         taxLabel={settings.taxLabel}
         preselectSlug={preselectSlug}
         maxBookingWindowDays={settings.maxBookingWindowDays}
+        timezone={settings.timezone}
       />
     </Container>
   );

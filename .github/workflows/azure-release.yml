@@ -115,6 +115,29 @@ jobs:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      # Staging shares the production database and applies migrations at boot,
+      # so capture the restore target BEFORE the deploy. Burstable servers
+      # cannot take customer on-demand backups, so point-in-time restore is the
+      # recovery path: `az postgres flexible-server restore --restore-time`
+      # accepts exactly this timestamp.
+      - name: Record database restore point
+        run: |
+          RESTORE_POINT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          echo "Pre-deploy restore point (UTC): $RESTORE_POINT"
+          {
+            echo "### Database restore point"
+            echo
+            echo "If this release damages data, restore to the moment before it:"
+            echo
+            echo '```'
+            echo "az postgres flexible-server restore \\"
+            echo "  --resource-group $AZURE_RESOURCE_GROUP \\"
+            echo "  --name psql-ptcd-restored \\"
+            echo "  --source-server psql-ptcd-prod-7mutra \\"
+            echo "  --restore-time $RESTORE_POINT"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Deploy only to staging
         run: |
           az webapp deploy \

@@ -18,6 +18,7 @@ import { zonedToUtc } from "@/lib/tz";
 
 const settingsInput = z.object({
   businessName: z.string().trim().min(1).max(200),
+  legalEntityName: z.string().trim().max(200),
   addressLine1: z.string().trim().max(300),
   city: z.string().trim().max(100),
   province: z.string().trim().max(10),
@@ -36,6 +37,9 @@ const settingsInput = z.object({
   reminderLeadHours: z.number().int().min(1).max(24 * 7),
   reviewRequestDelayHours: z.number().int().min(0).max(24 * 30),
   maintenanceReminderMonths: z.number().int().min(1).max(24),
+  notifyOnNewAppointment: z.boolean(),
+  staffNotifyPhones: z.array(z.string().trim().min(1).max(30)).max(10),
+  staffNotifyEmails: z.array(z.string().trim().email().max(200)).max(10),
 });
 
 export type ActionResult = { ok: true } | { ok: false; error: string };

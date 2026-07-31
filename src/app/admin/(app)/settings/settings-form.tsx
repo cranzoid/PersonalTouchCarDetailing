@@ -13,6 +13,11 @@ export type DayHours = {
 };
 
 const WEEKDAY_LABELS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+/** Comma or newline separated recipients -> trimmed, de-duplicated list. */
+function splitList(raw: string): string[] {
+  return [...new Set(raw.split(/[,\n]/).map((part) => part.trim()).filter(Boolean))];
+}
 const CLOCK_OPTIONS = Array.from({ length: 96 }, (_, index) => {
   const minutes = index * 15;
   const value = `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
@@ -22,6 +27,7 @@ const CLOCK_OPTIONS = Array.from({ length: 96 }, (_, index) => {
 export function SettingsForm({ initial }: { initial: BusinessSettings }) {
   const [form, setForm] = useState({
     businessName: initial.businessName,
+    legalEntityName: initial.legalEntityName,
     addressLine1: initial.addressLine1,
     city: initial.city,
     province: initial.province,
@@ -40,7 +46,11 @@ export function SettingsForm({ initial }: { initial: BusinessSettings }) {
     reminderLeadHours: String(initial.reminderLeadHours),
     reviewRequestDelayHours: String(initial.reviewRequestDelayHours),
     maintenanceReminderMonths: String(initial.maintenanceReminderMonths),
+    // Comma-separated in the UI, split into arrays on save.
+    staffNotifyPhones: initial.staffNotifyPhones.join(", "),
+    staffNotifyEmails: initial.staffNotifyEmails.join(", "),
   });
+  const [notifyOnNewAppointment, setNotifyOnNewAppointment] = useState(initial.notifyOnNewAppointment);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -50,6 +60,7 @@ export function SettingsForm({ initial }: { initial: BusinessSettings }) {
     setMsg(null);
     const res = await updateSettingsAction({
       businessName: form.businessName,
+      legalEntityName: form.legalEntityName,
       addressLine1: form.addressLine1,
       city: form.city,
       province: form.province,
@@ -68,6 +79,9 @@ export function SettingsForm({ initial }: { initial: BusinessSettings }) {
       reminderLeadHours: Number(form.reminderLeadHours),
       reviewRequestDelayHours: Number(form.reviewRequestDelayHours),
       maintenanceReminderMonths: Number(form.maintenanceReminderMonths),
+      notifyOnNewAppointment,
+      staffNotifyPhones: splitList(form.staffNotifyPhones),
+      staffNotifyEmails: splitList(form.staffNotifyEmails),
     });
     setBusy(false);
     setMsg(res.ok ? { ok: true, text: "Settings saved." } : { ok: false, text: res.error });
@@ -96,6 +110,7 @@ export function SettingsForm({ initial }: { initial: BusinessSettings }) {
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-ink-300">Identity</h2>
         <div className="grid gap-3 sm:grid-cols-2">
           {field("businessName", "Business name")}
+          {field("legalEntityName", "Legal entity (appears on invoices)")}
           {field("phone", "Phone *")}
           {field("email", "Email *")}
           {field("addressLine1", "Street address")}
@@ -122,6 +137,29 @@ export function SettingsForm({ initial }: { initial: BusinessSettings }) {
           {field("maxBookingWindowDays", "Booking window (days)")}
           {field("cancellationNoticeHours", "Cancellation notice (hours)")}
         </div>
+      </section>
+      <section>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-ink-300">Staff alerts</h2>
+        <label className="flex items-center gap-2 text-sm text-ink-200">
+          <input
+            type="checkbox"
+            checked={notifyOnNewAppointment}
+            onChange={(e) => setNotifyOnNewAppointment(e.target.checked)}
+          />
+          Text and email us whenever a new appointment is booked
+        </label>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          {field("staffNotifyPhones", "Alert phone numbers (comma separated)", {
+            placeholder: "+19055550143, +19055550144",
+          })}
+          {field("staffNotifyEmails", "Alert email addresses (comma separated)", {
+            placeholder: "owner@example.com, manager@example.com",
+          })}
+        </div>
+        <p className="mt-2 text-xs text-ink-500">
+          Add one entry per person — the manager account is often shared, so each phone listed here
+          gets its own text. Delivery needs SMS or email credentials set up under Integrations.
+        </p>
       </section>
       <section>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-ink-300">Automated messages</h2>

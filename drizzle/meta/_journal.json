@@ -29,6 +29,13 @@
       "when": 1785092582014,
       "tag": "0003_owner_confirmed_hours_pricing_durations",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785523476392,
+      "tag": "0004_manual_invoicing_and_integrations",
+      "breakpoints": true
     }
   ]
 }

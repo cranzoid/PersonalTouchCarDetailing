@@ -12,6 +12,7 @@ import { VEHICLE_CATEGORIES } from "@/lib/types";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { getAppBaseUrl } from "@/lib/urls";
 import { sendAppointmentDepositRequest } from "@/lib/appointment-deposits";
+import { notifyStaffOfNewAppointment } from "@/lib/staff-notifications";
 
 const attributionSchema = z
   .object({
@@ -189,6 +190,14 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
       // The secure link remains visible in the success UI even when message
       // delivery is unavailable; a messaging outage must not duplicate a booking.
       console.error("Booking created but customer message could not be queued");
+    }
+
+    // Staff alert is independent of the customer message: the owner still wants
+    // to know about the booking even if the customer's confirmation bounced.
+    try {
+      await notifyStaffOfNewAppointment(result.appointmentId);
+    } catch {
+      console.error("Booking created but staff alert could not be queued");
     }
 
     return {

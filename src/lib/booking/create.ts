@@ -35,6 +35,13 @@ export type BookingRequest = {
   attribution?: Attribution;
   policiesAccepted: boolean;
   settings: BusinessSettings;
+  /**
+   * Staff-only: book outside the minimum-notice / maximum-window rules, for
+   * walk-ins being recorded after the fact or same-day jobs. Ignored for
+   * customer bookings — see the actor check in createAppointmentInTransaction.
+   * Double-booking protection is unaffected.
+   */
+  allowOutsideBookingWindow?: boolean;
 };
 
 type BookingActor = { type: "customer" } | { type: "staff"; id: string };
@@ -96,6 +103,9 @@ export async function createAppointmentInTransaction(
       workDurationMin: req.pricing.durationMin,
       settings: req.settings,
       requiredSkills: req.pricing.requiredSkills,
+      // Enforced here rather than trusted from the request: a customer-path
+      // caller can never relax the notice window, whatever it passes.
+      allowOutsideBookingWindow: actor.type === "staff" && req.allowOutsideBookingWindow === true,
     });
     const window: Interval = {
       start: req.startMs,
@@ -223,6 +233,8 @@ export async function createStaffAppointment(input: {
   customerNotes?: string;
   settings: BusinessSettings;
   staffId: string;
+  /** Record a walk-in that already happened, or book same-day. */
+  allowOutsideBookingWindow?: boolean;
 }): Promise<{ appointmentId: string; customerId: string; vehicleId: string; status: string }> {
   return db().transaction(async (tx) => {
     const [customer] = await tx
@@ -275,6 +287,7 @@ export async function createStaffAppointment(input: {
         attribution: { source: "manual" },
         policiesAccepted: false,
         settings: input.settings,
+        allowOutsideBookingWindow: input.allowOutsideBookingWindow,
       },
       { type: "staff", id: input.staffId },
     );

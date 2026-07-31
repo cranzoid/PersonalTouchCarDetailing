@@ -40,6 +40,56 @@ describe("computeDaySlots", () => {
     expect(slots.at(-1)!.end).toBe(ctx().closeMs);
   });
 
+  it("hides slots inside the minimum notice window", () => {
+    // "Now" is one hour before opening, so a 24h notice rule blocks the day.
+    const sameDay = computeDaySlots(ctx({ nowMs: 7 * DAY - HOUR }));
+    expect(sameDay).toHaveLength(0);
+  });
+
+  it("offers same-day and past slots for staff who opt out of the booking window", () => {
+    // Same guard as above, plus the staff override.
+    const sameDay = computeDaySlots(
+      ctx({ nowMs: 7 * DAY - HOUR, allowOutsideBookingWindow: true }),
+    );
+    expect(sameDay).toHaveLength(13);
+
+    // A day that has already finished — recording a walk-in after the fact.
+    const past = computeDaySlots(ctx({ nowMs: 7 * DAY + 30 * DAY, allowOutsideBookingWindow: true }));
+    expect(past).toHaveLength(13);
+
+    // ...and beyond the forward booking window.
+    const farFuture = computeDaySlots(
+      ctx({ nowMs: 7 * DAY - 400 * DAY, allowOutsideBookingWindow: true }),
+    );
+    expect(farFuture).toHaveLength(13);
+  });
+
+  it("still refuses conflicting slots when staff override the booking window", () => {
+    const open = 7 * DAY;
+    // Both bays busy for the whole day: the override must not create capacity.
+    const busy = [{ start: open, end: open + 8 * HOUR }];
+    const slots = computeDaySlots(
+      ctx({
+        nowMs: open - HOUR,
+        allowOutsideBookingWindow: true,
+        busyByBay: [busy, busy],
+      }),
+    );
+    expect(slots).toHaveLength(0);
+  });
+
+  it("still honours whole-business closures when staff override the window", () => {
+    const open = 7 * DAY;
+    const slots = computeDaySlots(
+      ctx({
+        nowMs: open - HOUR,
+        allowOutsideBookingWindow: true,
+        globalBlocks: [{ start: open, end: open + 8 * HOUR }],
+      }),
+    );
+    expect(slots).toHaveLength(0);
+  });
+
   it("returns nothing on closed days", () => {
     expect(computeDaySlots(ctx({ openMs: null, closeMs: null }))).toHaveLength(0);
   });

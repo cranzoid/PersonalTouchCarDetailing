@@ -40,6 +40,13 @@ export type DayContext = {
   /** Legacy/unassigned appointments conservatively consume one staff slot. */
   unassignedStaffBusy: Interval[];
   requiredSkills: string[];
+  /**
+   * Staff-only escape hatch: skips the minimum-notice and booking-window checks
+   * so the office can record a walk-in that already happened, or squeeze in a
+   * same-day job. Bay and staff conflict checks are NOT relaxed — a booking
+   * that would double-book is still refused. Never set from a customer path.
+   */
+  allowOutsideBookingWindow?: boolean;
 };
 
 /**
@@ -60,7 +67,7 @@ export function computeDaySlots(ctx: DayContext): Interval[] {
 
   for (let start = ctx.openMs; start + durMs <= ctx.closeMs; start += stepMs) {
     const window: Interval = { start, end: start + durMs };
-    if (start < earliest || start > latest) continue;
+    if (!ctx.allowOutsideBookingWindow && (start < earliest || start > latest)) continue;
     if (ctx.globalBlocks.some((b) => overlaps(b, window))) continue;
     if (!hasFreeBay(ctx, window)) continue;
     if (ctx.staffingConfigured && pickFreeStaff(ctx, window) === null) continue;
@@ -135,6 +142,8 @@ export async function loadDayContext(input: {
   /** Used while rescheduling so the appointment does not block itself. */
   excludeAppointmentId?: string;
   requiredSkills?: string[];
+  /** Staff-only; see DayContext.allowOutsideBookingWindow. */
+  allowOutsideBookingWindow?: boolean;
 }): Promise<{ ctx: DayContext; bayIds: string[] }> {
   const { settings } = input;
   const [y, m, d] = input.dateISO.split("-").map(Number);
@@ -270,6 +279,7 @@ export async function loadDayContext(input: {
     staffCapacity,
     unassignedStaffBusy,
     requiredSkills: [...new Set((input.requiredSkills ?? []).map(normalizeSkill).filter(Boolean))],
+    allowOutsideBookingWindow: input.allowOutsideBookingWindow,
   };
   return { ctx, bayIds };
 }
@@ -281,6 +291,8 @@ export async function getAvailableSlots(input: {
   now?: Date;
   excludeAppointmentId?: string;
   requiredSkills?: string[];
+  /** Staff-only; see DayContext.allowOutsideBookingWindow. */
+  allowOutsideBookingWindow?: boolean;
 }): Promise<Interval[]> {
   const { ctx } = await loadDayContext(input);
   return computeDaySlots(ctx);

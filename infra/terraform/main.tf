@@ -27,6 +27,15 @@ resource "random_password" "admin" {
   override_special = "!#%*+-.:=?@_"
 }
 
+# AES-256 key wrapping the provider API credentials the owner enters in
+# Admin -> Integrations. random_id gives exactly 32 raw bytes; the application
+# accepts the standard-base64 form. Rotating this makes stored credentials
+# unreadable, so the app falls back to environment variables and the owner
+# re-enters them.
+resource "random_id" "settings_encryption_key" {
+  byte_length = 32
+}
+
 locals {
   app_name       = "app-ptcd-prod-${random_string.suffix.result}"
   postgres_name  = "psql-ptcd-prod-${random_string.suffix.result}"
@@ -114,10 +123,14 @@ resource "azurerm_postgresql_flexible_server" "main" {
   zone                          = "1"
   sku_name                      = "B_Standard_B1ms"
   storage_mb                    = 32768
-  backup_retention_days         = 7
-  geo_redundant_backup_enabled  = false
-  auto_grow_enabled             = true
-  tags                          = local.tags
+  # 35 days of point-in-time restore. Geo-redundant backup can only be set at
+  # server creation time, and Burstable servers cannot take customer on-demand
+  # backups — so PITR is the recovery path. Releases record their restore
+  # timestamp in the workflow summary (see .github/workflows/azure-release.yml).
+  backup_retention_days        = 35
+  geo_redundant_backup_enabled = false
+  auto_grow_enabled            = true
+  tags                         = local.tags
 
   depends_on = [azurerm_private_dns_zone_virtual_network_link.postgres]
 }
@@ -203,6 +216,13 @@ resource "azurerm_key_vault_secret" "admin_password" {
   depends_on   = [azurerm_key_vault_access_policy.terraform]
 }
 
+resource "azurerm_key_vault_secret" "settings_encryption_key" {
+  name         = "settings-encryption-key"
+  value        = random_id.settings_encryption_key.b64_std
+  key_vault_id = azurerm_key_vault.main.id
+  depends_on   = [azurerm_key_vault_access_policy.terraform]
+}
+
 resource "azurerm_log_analytics_workspace" "main" {
   name                = "log-ptcd-prod-${random_string.suffix.result}"
   resource_group_name = azurerm_resource_group.main.name
@@ -237,6 +257,7 @@ locals {
     DATABASE_URL                               = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault_secret.database_url.id})"
     SESSION_SECRET                             = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault_secret.session_secret.id})"
     CRON_SECRET                                = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault_secret.cron_secret.id})"
+    SETTINGS_ENCRYPTION_KEY                    = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault_secret.settings_encryption_key.id})"
     SEED_ADMIN_NAME                            = var.admin_name
     SEED_ADMIN_EMAIL                           = var.admin_email
     SEED_ADMIN_PASSWORD                        = "@Microsoft.KeyVault(SecretUri=${azurerm_key_vault_secret.admin_password.id})"
