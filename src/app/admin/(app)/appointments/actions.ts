@@ -8,7 +8,7 @@ import { requireStaff, AuthError } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { newId } from "@/lib/id";
 import type { AppointmentStatus } from "@/lib/types";
-import { VEHICLE_CATEGORIES, type VehicleCategory } from "@/lib/types";
+import { MANUAL_PAYMENT_METHODS, VEHICLE_CATEGORIES, type VehicleCategory } from "@/lib/types";
 import { getSettings } from "@/lib/settings";
 import { getAvailableSlots } from "@/lib/booking/availability";
 import { BookingError, createStaffAppointment } from "@/lib/booking/create";
@@ -218,7 +218,7 @@ const idempotencyKeySchema = z
 
 const depositInput = z.object({
   appointmentId: z.string().min(1),
-  method: z.enum(["cash", "etransfer", "card_terminal"]),
+  method: z.enum(MANUAL_PAYMENT_METHODS),
   amountCents: z.number().int().min(1).max(10_000_000),
   idempotencyKey: idempotencyKeySchema,
 });

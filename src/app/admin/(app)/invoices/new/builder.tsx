@@ -5,20 +5,29 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { formatCents } from "@/lib/money";
 import { localDateISO } from "@/lib/tz";
+import { VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
 import { createManualInvoiceAction } from "../actions";
 
 type CustomerOption = { id: string; label: string; contact: string };
-type VehicleOption = { id: string; customerId: string; label: string };
-type ServiceOption = { id: string; name: string; basePriceCents: number | null };
+type VehicleOption = { id: string; customerId: string; category: string; label: string };
+type ServiceOption = {
+  id: string;
+  name: string;
+  categoryName: string;
+  basePriceCents: number | null;
+  active: boolean;
+  priceDeltaByCategory: Record<string, number>;
+  addonIds: string[];
+};
+type AddonOption = { id: string; name: string; priceCents: number; active: boolean };
 
-type Line = { serviceId?: string; description: string; quantity: string; price: string };
+/** A selected catalog item; `override` is a staff-entered price in dollars. */
+type Picked = { quantity: number; override: string };
+type CustomLine = { description: string; quantity: string; price: string };
 
 const inputClass = "w-full rounded-lg border border-ink-600 bg-ink-950 px-3 py-2 text-sm text-white";
 const labelClass = "mb-1 block text-xs text-ink-400";
 
-const EMPTY_LINE: Line = { description: "", quantity: "1", price: "" };
-
-/** Dollars in the UI, integer cents everywhere else. */
 function toCents(dollars: string): number {
   const value = Number(dollars);
   return Number.isNaN(value) ? 0 : Math.round(value * 100);
@@ -28,6 +37,7 @@ export function NewInvoiceBuilder({
   customers,
   vehicles,
   services,
+  addons,
   taxRateBp,
   taxLabel,
   currency,
@@ -36,6 +46,7 @@ export function NewInvoiceBuilder({
   customers: CustomerOption[];
   vehicles: VehicleOption[];
   services: ServiceOption[];
+  addons: AddonOption[];
   taxRateBp: number;
   taxLabel: string;
   currency: string;
@@ -44,7 +55,10 @@ export function NewInvoiceBuilder({
   const router = useRouter();
   const [customerId, setCustomerId] = useState("");
   const [vehicleId, setVehicleId] = useState("");
-  const [lines, setLines] = useState<Line[]>([{ ...EMPTY_LINE }]);
+  const [pickedServices, setPickedServices] = useState<Record<string, Picked>>({});
+  const [pickedAddons, setPickedAddons] = useState<Record<string, Picked>>({});
+  const [customLines, setCustomLines] = useState<CustomLine[]>([]);
+  const [discountMode, setDiscountMode] = useState<"amount" | "percent">("amount");
   const [discount, setDiscount] = useState("");
   const [invoiceDateISO, setInvoiceDateISO] = useState(() => localDateISO(timezone));
   const [taxExempt, setTaxExempt] = useState(false);
@@ -54,27 +68,82 @@ export function NewInvoiceBuilder({
   const [error, setError] = useState<string | null>(null);
 
   const customerVehicles = vehicles.filter((v) => v.customerId === customerId);
+  const selectedVehicle = vehicles.find((v) => v.id === vehicleId);
+  const vehicleCategory = selectedVehicle?.category ?? null;
 
-  // Mirrors computeInvoiceTotals on the server; the server recomputes and its
-  // numbers are what get stored, so this is a preview only.
+  const money = (cents: number) => formatCents(cents, currency);
+
+  /** Catalog price for the currently selected vehicle size. */
+  function servicePrice(service: ServiceOption): number | null {
+    if (service.basePriceCents === null) return null;
+    const delta = vehicleCategory ? (service.priceDeltaByCategory[vehicleCategory] ?? 0) : 0;
+    return service.basePriceCents + delta;
+  }
+
+  // Only add-ons linked to a chosen service can be billed — same rule the
+  // booking flow enforces server-side.
+  const eligibleAddons = useMemo(() => {
+    const allowed = new Set(
+      services.filter((s) => pickedServices[s.id]).flatMap((s) => s.addonIds),
+    );
+    return addons.filter((a) => allowed.has(a.id));
+  }, [services, addons, pickedServices]);
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, ServiceOption[]>();
+    for (const service of services) {
+      const list = map.get(service.categoryName) ?? [];
+      list.push(service);
+      map.set(service.categoryName, list);
+    }
+    return [...map.entries()];
+  }, [services]);
+
+  // Preview only — the server re-resolves every catalog price on save.
   const totals = useMemo(() => {
-    const subtotal = lines.reduce((sum, l) => sum + Number(l.quantity || 0) * toCents(l.price), 0);
-    const discountCents = Math.min(Math.max(0, toCents(discount)), subtotal);
+    let subtotal = 0;
+    for (const [id, picked] of Object.entries(pickedServices)) {
+      const service = services.find((s) => s.id === id);
+      if (!service) continue;
+      const unit = picked.override.trim() ? toCents(picked.override) : (servicePrice(service) ?? 0);
+      subtotal += unit * picked.quantity;
+    }
+    for (const [id, picked] of Object.entries(pickedAddons)) {
+      const addon = addons.find((a) => a.id === id);
+      if (!addon) continue;
+      const unit = picked.override.trim() ? toCents(picked.override) : addon.priceCents;
+      subtotal += unit * picked.quantity;
+    }
+    for (const line of customLines) {
+      subtotal += Number(line.quantity || 0) * toCents(line.price);
+    }
+    const raw =
+      discountMode === "percent"
+        ? Math.round((subtotal * Math.round(Number(discount || 0) * 100)) / 10000)
+        : toCents(discount);
+    const discountCents = Math.min(Math.max(0, raw), subtotal);
     const taxable = subtotal - discountCents;
     const tax = taxExempt ? 0 : Math.round((taxable * taxRateBp) / 10000);
     return { subtotal, discountCents, tax, total: taxable + tax };
-  }, [lines, discount, taxExempt, taxRateBp]);
+  }, [pickedServices, pickedAddons, customLines, discount, discountMode, taxExempt, taxRateBp, services, addons, vehicleCategory]);
 
-  function updateLine(index: number, patch: Partial<Line>) {
-    setLines((prev) => prev.map((line, i) => (i === index ? { ...line, ...patch } : line)));
-  }
-
-  function pickService(index: number, serviceId: string) {
-    const service = services.find((s) => s.id === serviceId);
-    updateLine(index, {
-      serviceId: serviceId || undefined,
-      description: service ? service.name : lines[index].description,
-      price: service?.basePriceCents != null ? (service.basePriceCents / 100).toFixed(2) : lines[index].price,
+  function toggleService(id: string) {
+    setPickedServices((prev) => {
+      const next = { ...prev };
+      if (next[id]) delete next[id];
+      else next[id] = { quantity: 1, override: "" };
+      return next;
+    });
+    // Dropping a service can orphan its add-ons; clear any that are no longer
+    // offered by something still selected.
+    setPickedAddons((prev) => {
+      const stillSelected = { ...pickedServices };
+      if (stillSelected[id]) delete stillSelected[id];
+      else stillSelected[id] = { quantity: 1, override: "" };
+      const allowed = new Set(
+        services.filter((s) => stillSelected[s.id]).flatMap((s) => s.addonIds),
+      );
+      return Object.fromEntries(Object.entries(prev).filter(([addonId]) => allowed.has(addonId)));
     });
   }
 
@@ -82,18 +151,37 @@ export function NewInvoiceBuilder({
     event.preventDefault();
     setBusy(true);
     setError(null);
-    const result = await createManualInvoiceAction({
-      customerId,
-      vehicleId: vehicleId || undefined,
-      lines: lines
+
+    const lines = [
+      ...Object.entries(pickedServices).map(([serviceId, picked]) => ({
+        kind: "service" as const,
+        serviceId,
+        quantity: picked.quantity,
+        unitPriceCents: picked.override.trim() ? toCents(picked.override) : undefined,
+      })),
+      ...Object.entries(pickedAddons).map(([addonId, picked]) => ({
+        kind: "addon" as const,
+        addonId,
+        quantity: picked.quantity,
+        unitPriceCents: picked.override.trim() ? toCents(picked.override) : undefined,
+      })),
+      ...customLines
         .filter((l) => l.description.trim())
         .map((l) => ({
-          serviceId: l.serviceId,
+          kind: "custom" as const,
           description: l.description,
           quantity: Number(l.quantity || 1),
           unitPriceCents: toCents(l.price),
         })),
-      discountCents: toCents(discount),
+    ];
+
+    const result = await createManualInvoiceAction({
+      customerId,
+      vehicleId: vehicleId || undefined,
+      lines,
+      ...(discountMode === "percent"
+        ? { discountPercentBp: Math.round(Number(discount || 0) * 100) }
+        : { discountCents: toCents(discount) }),
       invoiceDateISO,
       taxExempt,
       taxExemptReason: taxExempt ? taxExemptReason : undefined,
@@ -104,13 +192,16 @@ export function NewInvoiceBuilder({
     router.push(`/admin/invoices/${result.invoiceId}`);
   }
 
-  const money = (cents: number) => formatCents(cents, currency);
+  const lineCount =
+    Object.keys(pickedServices).length +
+    Object.keys(pickedAddons).length +
+    customLines.filter((l) => l.description.trim()).length;
 
   return (
     <form onSubmit={submit} className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(18rem,1fr)] lg:items-start">
       <div className="space-y-6">
         <section className="rounded-xl border border-ink-800 p-5">
-          <h2 className="font-semibold text-white">1. Customer</h2>
+          <h2 className="font-semibold text-white">1. Customer and vehicle</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <label className="block">
               <span className={labelClass}>Customer</span>
@@ -132,7 +223,7 @@ export function NewInvoiceBuilder({
               </select>
             </label>
             <label className="block">
-              <span className={labelClass}>Vehicle (optional)</span>
+              <span className={labelClass}>Vehicle (sets package pricing)</span>
               <select
                 className={inputClass}
                 value={vehicleId}
@@ -148,6 +239,20 @@ export function NewInvoiceBuilder({
               </select>
             </label>
           </div>
+          {selectedVehicle && (
+            <p className="mt-3 text-sm text-ink-400">
+              Pricing size:{" "}
+              <span className="text-white">
+                {VEHICLE_CATEGORY_LABELS[selectedVehicle.category as VehicleCategory] ?? selectedVehicle.category}
+              </span>{" "}
+              — package prices below reflect this vehicle.
+            </p>
+          )}
+          {customerId && !vehicleId && (
+            <p className="mt-3 text-sm text-amber-300">
+              Pick a vehicle to price packages by size. Without one, base prices are used.
+            </p>
+          )}
           <p className="mt-3 text-xs text-ink-500">
             Not in the list?{" "}
             <Link href="/admin/customers" className="text-accent-300 underline">
@@ -158,37 +263,177 @@ export function NewInvoiceBuilder({
         </section>
 
         <section className="rounded-xl border border-ink-800 p-5">
-          <h2 className="font-semibold text-white">2. Work performed</h2>
-          <div className="mt-4 space-y-3">
-            {lines.map((line, index) => (
-              <div key={index} className="grid gap-2 sm:grid-cols-[1fr_5rem_7rem_2rem] sm:items-end">
-                <div className="grid gap-2">
-                  <select
-                    className={`${inputClass} text-ink-300`}
-                    value={line.serviceId ?? ""}
-                    onChange={(e) => pickService(index, e.target.value)}
+          <h2 className="font-semibold text-white">2. Packages and services</h2>
+          <div className="mt-4 space-y-5">
+            {grouped.map(([categoryName, list]) => (
+              <div key={categoryName}>
+                <p className="mb-2 text-xs uppercase tracking-wide text-ink-500">{categoryName}</p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {list.map((service) => {
+                    const picked = pickedServices[service.id];
+                    const price = servicePrice(service);
+                    return (
+                      <div
+                        key={service.id}
+                        className={`rounded-lg border p-3 ${picked ? "border-accent-500/60" : "border-ink-800"}`}
+                      >
+                        <label className="flex cursor-pointer items-start gap-3">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(picked)}
+                            onChange={() => toggleService(service.id)}
+                            className="mt-1 accent-accent-400"
+                          />
+                          <span className="min-w-0">
+                            <span className="block text-sm font-medium text-white">
+                              {service.name}
+                              {!service.active && <span className="ml-2 text-xs text-ink-500">(retired)</span>}
+                            </span>
+                            <span className="block text-xs text-ink-400">
+                              {price === null ? "Price on quote" : money(price)}
+                            </span>
+                          </span>
+                        </label>
+                        {picked && (
+                          <div className="mt-3 flex items-end gap-2">
+                            <label className="block">
+                              <span className={labelClass}>Qty</span>
+                              <input
+                                className={`${inputClass} w-16`}
+                                inputMode="numeric"
+                                value={picked.quantity}
+                                onChange={(e) =>
+                                  setPickedServices((prev) => ({
+                                    ...prev,
+                                    [service.id]: { ...prev[service.id], quantity: Math.max(1, Number(e.target.value) || 1) },
+                                  }))
+                                }
+                              />
+                            </label>
+                            <label className="block flex-1">
+                              <span className={labelClass}>
+                                {price === null ? "Price ($) — required" : "Override price ($)"}
+                              </span>
+                              <input
+                                className={inputClass}
+                                inputMode="decimal"
+                                placeholder={price === null ? "0.00" : (price / 100).toFixed(2)}
+                                value={picked.override}
+                                onChange={(e) =>
+                                  setPickedServices((prev) => ({
+                                    ...prev,
+                                    [service.id]: { ...prev[service.id], override: e.target.value },
+                                  }))
+                                }
+                              />
+                            </label>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {eligibleAddons.length > 0 && (
+          <section className="rounded-xl border border-ink-800 p-5">
+            <h2 className="font-semibold text-white">3. Add-ons</h2>
+            <p className="mt-1 text-sm text-ink-400">Extras available with the services selected above.</p>
+            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+              {eligibleAddons.map((addon) => {
+                const picked = pickedAddons[addon.id];
+                return (
+                  <div
+                    key={addon.id}
+                    className={`rounded-lg border p-3 ${picked ? "border-accent-500/60" : "border-ink-800"}`}
                   >
-                    <option value="">Custom item…</option>
-                    {services.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
+                    <label className="flex cursor-pointer items-center gap-3 text-sm text-white">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(picked)}
+                        onChange={() =>
+                          setPickedAddons((prev) => {
+                            const next = { ...prev };
+                            if (next[addon.id]) delete next[addon.id];
+                            else next[addon.id] = { quantity: 1, override: "" };
+                            return next;
+                          })
+                        }
+                        className="accent-accent-400"
+                      />
+                      {addon.name}
+                      <span className="ml-auto text-ink-400">+{money(addon.priceCents)}</span>
+                    </label>
+                    {picked && (
+                      <div className="mt-3 flex items-end gap-2">
+                        <label className="block">
+                          <span className={labelClass}>Qty</span>
+                          <input
+                            className={`${inputClass} w-16`}
+                            inputMode="numeric"
+                            value={picked.quantity}
+                            onChange={(e) =>
+                              setPickedAddons((prev) => ({
+                                ...prev,
+                                [addon.id]: { ...prev[addon.id], quantity: Math.max(1, Number(e.target.value) || 1) },
+                              }))
+                            }
+                          />
+                        </label>
+                        <label className="block flex-1">
+                          <span className={labelClass}>Override price ($)</span>
+                          <input
+                            className={inputClass}
+                            inputMode="decimal"
+                            placeholder={(addon.priceCents / 100).toFixed(2)}
+                            value={picked.override}
+                            onChange={(e) =>
+                              setPickedAddons((prev) => ({
+                                ...prev,
+                                [addon.id]: { ...prev[addon.id], override: e.target.value },
+                              }))
+                            }
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
+
+        <section className="rounded-xl border border-ink-800 p-5">
+          <h2 className="font-semibold text-white">Custom lines</h2>
+          <p className="mt-1 text-sm text-ink-400">Anything not in the catalogue.</p>
+          <div className="mt-4 space-y-3">
+            {customLines.map((line, index) => (
+              <div key={index} className="grid gap-2 sm:grid-cols-[1fr_5rem_7rem_2rem] sm:items-end">
+                <label className="block">
+                  <span className={labelClass}>Description</span>
                   <input
                     className={inputClass}
-                    placeholder="Description"
                     value={line.description}
-                    onChange={(e) => updateLine(index, { description: e.target.value })}
+                    onChange={(e) =>
+                      setCustomLines((prev) =>
+                        prev.map((l, i) => (i === index ? { ...l, description: e.target.value } : l)),
+                      )
+                    }
                   />
-                </div>
+                </label>
                 <label className="block">
                   <span className={labelClass}>Qty</span>
                   <input
                     className={inputClass}
                     inputMode="numeric"
                     value={line.quantity}
-                    onChange={(e) => updateLine(index, { quantity: e.target.value })}
+                    onChange={(e) =>
+                      setCustomLines((prev) => prev.map((l, i) => (i === index ? { ...l, quantity: e.target.value } : l)))
+                    }
                   />
                 </label>
                 <label className="block">
@@ -197,15 +442,16 @@ export function NewInvoiceBuilder({
                     className={inputClass}
                     inputMode="decimal"
                     value={line.price}
-                    onChange={(e) => updateLine(index, { price: e.target.value })}
+                    onChange={(e) =>
+                      setCustomLines((prev) => prev.map((l, i) => (i === index ? { ...l, price: e.target.value } : l)))
+                    }
                   />
                 </label>
                 <button
                   type="button"
-                  onClick={() => setLines((prev) => prev.filter((_, i) => i !== index))}
-                  disabled={lines.length === 1}
-                  aria-label={`Remove line ${index + 1}`}
-                  className="mb-2 text-ink-400 hover:text-red-300 disabled:opacity-30"
+                  onClick={() => setCustomLines((prev) => prev.filter((_, i) => i !== index))}
+                  aria-label={`Remove custom line ${index + 1}`}
+                  className="mb-2 text-ink-400 hover:text-red-300"
                 >
                   ×
                 </button>
@@ -214,15 +460,15 @@ export function NewInvoiceBuilder({
           </div>
           <button
             type="button"
-            onClick={() => setLines((prev) => [...prev, { ...EMPTY_LINE }])}
+            onClick={() => setCustomLines((prev) => [...prev, { description: "", quantity: "1", price: "" }])}
             className="mt-3 rounded-lg border border-ink-600 px-4 py-2 text-sm font-medium text-ink-200 hover:bg-ink-800"
           >
-            Add line
+            Add custom line
           </button>
         </section>
 
         <section className="rounded-xl border border-ink-800 p-5">
-          <h2 className="font-semibold text-white">3. Date, discount and tax</h2>
+          <h2 className="font-semibold text-white">Date, discount and tax</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <label className="block">
               <span className={labelClass}>Invoice date (may be backdated)</span>
@@ -233,15 +479,35 @@ export function NewInvoiceBuilder({
                 onChange={(e) => setInvoiceDateISO(e.target.value)}
               />
             </label>
-            <label className="block">
-              <span className={labelClass}>Discount ($)</span>
-              <input
-                className={inputClass}
-                inputMode="decimal"
-                value={discount}
-                onChange={(e) => setDiscount(e.target.value)}
-              />
-            </label>
+            <div>
+              <span className={labelClass}>Discount</span>
+              <div className="flex gap-2">
+                <input
+                  className={inputClass}
+                  inputMode="decimal"
+                  placeholder={discountMode === "percent" ? "10" : "25.00"}
+                  value={discount}
+                  onChange={(e) => setDiscount(e.target.value)}
+                />
+                <div className="flex shrink-0 overflow-hidden rounded-lg border border-ink-600">
+                  {(["amount", "percent"] as const).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setDiscountMode(mode)}
+                      className={`px-3 py-2 text-sm ${
+                        discountMode === mode ? "bg-accent-400 font-semibold text-ink-950" : "text-ink-300"
+                      }`}
+                    >
+                      {mode === "amount" ? "$" : "%"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {discountMode === "percent" && totals.discountCents > 0 && (
+                <p className="mt-1 text-xs text-ink-500">= {money(totals.discountCents)} off</p>
+              )}
+            </div>
           </div>
 
           <label className="mt-4 flex items-center gap-2 text-sm text-ink-300">
@@ -274,6 +540,9 @@ export function NewInvoiceBuilder({
 
       <aside className="rounded-xl border border-ink-800 p-5 lg:sticky lg:top-24">
         <h2 className="font-semibold text-white">Totals</h2>
+        <p className="mt-1 text-xs text-ink-500">
+          {lineCount === 0 ? "No lines yet" : `${lineCount} line${lineCount === 1 ? "" : "s"}`}
+        </p>
         <dl className="mt-4 space-y-2 text-sm">
           <div className="flex justify-between text-ink-300">
             <dt>Subtotal</dt>
@@ -297,13 +566,13 @@ export function NewInvoiceBuilder({
           </div>
         </dl>
         <p className="mt-3 text-xs text-ink-500">
-          Totals are recalculated on the server when saved. The invoice is created as a draft — review
-          it, then send it to the customer.
+          Package prices are re-resolved on the server from the vehicle size when saved. The invoice is
+          created as a draft — review it, then send it.
         </p>
         {error && <p className="mt-4 text-sm text-red-300">{error}</p>}
         <button
           type="submit"
-          disabled={busy || !customerId || !lines.some((l) => l.description.trim())}
+          disabled={busy || !customerId || lineCount === 0}
           className="mt-4 w-full rounded-lg bg-accent-400 px-4 py-3 text-sm font-semibold text-ink-950 hover:bg-accent-300 disabled:opacity-40"
         >
           {busy ? "Creating…" : "Create invoice"}

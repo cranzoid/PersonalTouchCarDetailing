@@ -1,4 +1,4 @@
-import { asc, eq, isNull } from "drizzle-orm";
+import { asc, isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requirePageStaff } from "@/lib/auth/page";
 import { getSettings } from "@/lib/settings";
@@ -9,17 +9,23 @@ export const dynamic = "force-dynamic";
 export default async function NewInvoicePage() {
   await requirePageStaff("manage_invoices");
   const settings = await getSettings();
-  const [customers, vehicles, services] = await Promise.all([
+  const [customers, vehicles, categories, services, adjustments, addonLinks, addons] = await Promise.all([
     db()
       .select()
       .from(schema.customers)
       .where(isNull(schema.customers.anonymizedAt))
       .orderBy(asc(schema.customers.firstName), asc(schema.customers.lastName)),
     db().select().from(schema.vehicles).orderBy(asc(schema.vehicles.make)),
-    // Active services are offered as line-item shortcuts. Quote-only services
-    // (null price) are still listed — staff type the agreed amount.
-    db().select().from(schema.services).where(eq(schema.services.active, true)).orderBy(asc(schema.services.sort)),
+    db().select().from(schema.serviceCategories).orderBy(asc(schema.serviceCategories.sort)),
+    // Inactive services are still offered here: an invoice records work that
+    // has already happened, which may pre-date a service being retired.
+    db().select().from(schema.services).orderBy(asc(schema.services.sort)),
+    db().select().from(schema.serviceVehicleAdjustments),
+    db().select().from(schema.serviceAddons),
+    db().select().from(schema.addons).orderBy(asc(schema.addons.sort)),
   ]);
+
+  const categoryNames = new Map(categories.map((c) => [c.id, c.name]));
 
   return (
     <div className="max-w-6xl">
@@ -40,9 +46,30 @@ export default async function NewInvoicePage() {
         vehicles={vehicles.map((v) => ({
           id: v.id,
           customerId: v.customerId,
+          category: v.category,
           label: [v.year, v.make, v.model, v.licencePlate && `(${v.licencePlate})`].filter(Boolean).join(" "),
         }))}
-        services={services.map((s) => ({ id: s.id, name: s.name, basePriceCents: s.basePriceCents }))}
+        services={services.map((s) => ({
+          id: s.id,
+          name: s.name,
+          categoryName: categoryNames.get(s.categoryId) ?? "Services",
+          basePriceCents: s.basePriceCents,
+          active: s.active,
+          // Per-vehicle-category price deltas, so the grid can show the real
+          // price for the selected vehicle before anything is submitted.
+          priceDeltaByCategory: Object.fromEntries(
+            adjustments
+              .filter((a) => a.serviceId === s.id)
+              .map((a) => [a.vehicleCategory, a.priceDeltaCents]),
+          ),
+          addonIds: addonLinks.filter((l) => l.serviceId === s.id).map((l) => l.addonId),
+        }))}
+        addons={addons.map((a) => ({
+          id: a.id,
+          name: a.name,
+          priceCents: a.priceCents,
+          active: a.active,
+        }))}
         taxRateBp={settings.taxRateBp}
         taxLabel={settings.taxLabel}
         currency={settings.currency}

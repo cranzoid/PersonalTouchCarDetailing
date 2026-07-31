@@ -72,6 +72,27 @@ export type UtilizationSummary = {
   unassignedBookedMinutes: number;
 };
 
+export type TaxSummary = {
+  /** Invoices issued in the window (drafts and cancellations excluded). */
+  invoiceCount: number;
+  /** Sum of (subtotal - discount) on invoices that charged tax. */
+  taxableBaseCents: number;
+  taxCollectedCents: number;
+  exemptInvoiceCount: number;
+  /** Sum of (subtotal - discount) on invoices that charged no tax. */
+  exemptBaseCents: number;
+  /** Why tax was not charged, most valuable first. */
+  exemptReasons: { reason: string; count: number; baseCents: number }[];
+};
+
+export type PaymentMethodTotal = {
+  provider: string;
+  grossCents: number;
+  refundCents: number;
+  netCents: number;
+  count: number;
+};
+
 export type ReportingSnapshot = {
   window: ReportWindow;
   timezone: string;
@@ -80,7 +101,84 @@ export type ReportingSnapshot = {
   funnel: LeadFunnel;
   utilization: UtilizationSummary;
   sourceRevenue: SourceRevenue[];
+  tax: TaxSummary;
+  paymentMethods: PaymentMethodTotal[];
 };
+
+/** Statuses that mean an invoice was actually issued to a customer. */
+const ISSUED_INVOICE_STATUSES = new Set(["sent", "partially_paid", "paid", "overdue", "refunded"]);
+
+type TaxInvoiceLike = {
+  status: string;
+  subtotalCents: number;
+  discountCents: number;
+  taxCents: number;
+  taxExempt: boolean;
+  taxExemptReason: string | null;
+};
+
+/**
+ * Accrual-basis tax position: what was charged on invoices issued in the
+ * window, which is what an HST return is built from. Deliberately different
+ * from summarizeRevenue(), which is cash-basis — an invoice can be issued in
+ * one period and paid in another.
+ */
+export function summarizeTax(rows: readonly TaxInvoiceLike[]): TaxSummary {
+  const issued = rows.filter((row) => ISSUED_INVOICE_STATUSES.has(row.status));
+  const summary: TaxSummary = {
+    invoiceCount: issued.length,
+    taxableBaseCents: 0,
+    taxCollectedCents: 0,
+    exemptInvoiceCount: 0,
+    exemptBaseCents: 0,
+    exemptReasons: [],
+  };
+  const reasons = new Map<string, { count: number; baseCents: number }>();
+
+  for (const row of issued) {
+    const base = row.subtotalCents - row.discountCents;
+    // Treat a zero tax amount as exempt even without the flag, so invoices
+    // raised before the flag existed still report correctly.
+    if (row.taxExempt || row.taxCents === 0) {
+      summary.exemptInvoiceCount += 1;
+      summary.exemptBaseCents += base;
+      const reason = row.taxExemptReason?.trim() || "No reason recorded";
+      const entry = reasons.get(reason) ?? { count: 0, baseCents: 0 };
+      reasons.set(reason, { count: entry.count + 1, baseCents: entry.baseCents + base });
+    } else {
+      summary.taxableBaseCents += base;
+      summary.taxCollectedCents += row.taxCents;
+    }
+  }
+
+  summary.exemptReasons = [...reasons.entries()]
+    .map(([reason, entry]) => ({ reason, ...entry }))
+    .sort((a, b) => b.baseCents - a.baseCents);
+  return summary;
+}
+
+type MethodPaymentLike = PaymentLike & { provider: string };
+
+/** Cash-basis split by how the money arrived — cash vs card vs cheque. */
+export function summarizePaymentMethods(rows: readonly MethodPaymentLike[]): PaymentMethodTotal[] {
+  const byProvider = new Map<string, PaymentMethodTotal>();
+  for (const row of rows) {
+    if (row.status !== "succeeded") continue;
+    const entry = byProvider.get(row.provider) ?? {
+      provider: row.provider,
+      grossCents: 0,
+      refundCents: 0,
+      netCents: 0,
+      count: 0,
+    };
+    if (row.kind === "refund") entry.refundCents += row.amountCents;
+    else entry.grossCents += row.amountCents;
+    entry.count += 1;
+    entry.netCents = entry.grossCents - entry.refundCents;
+    byProvider.set(row.provider, entry);
+  }
+  return [...byProvider.values()].sort((a, b) => b.netCents - a.netCents);
+}
 
 const DAY_MS = 86_400_000;
 const NON_CAPACITY_STATUSES = new Set(["cancelled", "no_show", "rescheduled"]);
@@ -528,6 +626,7 @@ export async function getReportingSnapshot(days: ReportDays, now = new Date()): 
           appointmentId: schema.payments.appointmentId,
           customerId: schema.payments.customerId,
           kind: schema.payments.kind,
+          provider: schema.payments.provider,
           amountCents: schema.payments.amountCents,
           status: schema.payments.status,
         })
@@ -582,6 +681,33 @@ export async function getReportingSnapshot(days: ReportDays, now = new Date()): 
           ),
         ),
     ]);
+
+  // Accrual-basis tax needs invoices ISSUED in the window, which is a different
+  // set from the invoices those payments belong to. Backdated invoices report
+  // against their invoice_date; older rows fall back to created_at.
+  const invoiceIssuedInWindow = or(
+    and(
+      isNotNull(schema.invoices.invoiceDate),
+      gte(schema.invoices.invoiceDate, window.start),
+      lt(schema.invoices.invoiceDate, window.end),
+    ),
+    and(
+      isNull(schema.invoices.invoiceDate),
+      gte(schema.invoices.createdAt, window.start),
+      lt(schema.invoices.createdAt, window.end),
+    ),
+  );
+  const taxInvoiceRows = await db()
+    .select({
+      status: schema.invoices.status,
+      subtotalCents: schema.invoices.subtotalCents,
+      discountCents: schema.invoices.discountCents,
+      taxCents: schema.invoices.taxCents,
+      taxExempt: schema.invoices.taxExempt,
+      taxExemptReason: schema.invoices.taxExemptReason,
+    })
+    .from(schema.invoices)
+    .where(invoiceIssuedInWindow);
 
   const invoiceIds = unique(paymentRows.map((payment) => payment.invoiceId));
   const invoiceRows = invoiceIds.length
@@ -713,5 +839,7 @@ export async function getReportingSnapshot(days: ReportDays, now = new Date()): 
       blocks: blockRows,
       appointments: utilizationAppointments,
     }),
+    tax: summarizeTax(taxInvoiceRows),
+    paymentMethods: summarizePaymentMethods(paymentRows),
   };
 }

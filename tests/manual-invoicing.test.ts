@@ -30,11 +30,16 @@ function countPdfPages(buffer: Buffer): number {
 
 let customerId: string;
 let vehicleId: string;
+let sedanVehicleId: string;
+let serviceId: string;
+let quoteOnlyServiceId: string;
+let addonId: string;
 
 beforeEach(async () => {
   await db().execute(
     `TRUNCATE invoice_line_items, invoice_jobs, payments, invoices, vehicles, customers, audit_log,
-     staff_users, invoice_counters RESTART IDENTITY CASCADE` as never,
+     staff_users, invoice_counters, service_addons, addons, services, service_vehicle_adjustments,
+     service_categories RESTART IDENTITY CASCADE` as never,
   );
   await db().insert(schema.staffUsers).values({
     id: staff.id,
@@ -64,6 +69,44 @@ beforeEach(async () => {
     category: "suv_large",
     licencePlate: "ABCD 123",
   });
+  sedanVehicleId = newId("veh");
+  await db().insert(schema.vehicles).values({
+    id: sedanVehicleId,
+    customerId,
+    year: 2020,
+    make: "Honda",
+    model: "Accord",
+    category: "sedan",
+    licencePlate: "SEDN 001",
+  });
+
+  // Catalogue mirroring the real pricing shape: $200 base (sedan/coupe),
+  // +$50 for a large SUV, with one linked add-on and one quote-only service.
+  const categoryId = newId("cat");
+  await db().insert(schema.serviceCategories).values({
+    id: categoryId, name: "Detail packages", slug: "detail-packages", sort: 0,
+  });
+  serviceId = newId("svc");
+  await db().insert(schema.services).values({
+    id: serviceId, categoryId, name: "Complete Detailing Package",
+    slug: "complete-detailing-package", basePriceCents: 20000, baseDurationMin: 180,
+    bookingMode: "bookable", active: true,
+  });
+  await db().insert(schema.serviceVehicleAdjustments).values({
+    id: newId("adj"), serviceId, vehicleCategory: "suv_large",
+    priceDeltaCents: 5000, durationDeltaMin: 30,
+  });
+  quoteOnlyServiceId = newId("svc");
+  await db().insert(schema.services).values({
+    id: quoteOnlyServiceId, categoryId, name: "Paint correction",
+    slug: "paint-correction", basePriceCents: null, baseDurationMin: 240,
+    bookingMode: "quote_required", active: true,
+  });
+  addonId = newId("add");
+  await db().insert(schema.addons).values({
+    id: addonId, name: "Dog hair removal", priceCents: 5000, durationMin: 30, active: true, sort: 0,
+  });
+  await db().insert(schema.serviceAddons).values({ id: newId("add"), serviceId, addonId });
 });
 
 afterAll(async () => {
@@ -71,8 +114,8 @@ afterAll(async () => {
 });
 
 const baseLines = [
-  { description: "Full interior detail", quantity: 1, unitPriceCents: 20000 },
-  { description: "Engine bay clean", quantity: 1, unitPriceCents: 5000 },
+  { kind: "custom", description: "Full interior detail", quantity: 1, unitPriceCents: 20000 },
+  { kind: "custom", description: "Engine bay clean", quantity: 1, unitPriceCents: 5000 },
 ];
 
 describe("createManualInvoiceAction", () => {
@@ -151,6 +194,120 @@ describe("createManualInvoiceAction", () => {
   });
 });
 
+describe("catalogue pricing on manual invoices", () => {
+  it("prices a package by the vehicle size, not the base price", async () => {
+    // The reported bug: picking an SUV still billed the $200 sedan rate.
+    const suv = await createManualInvoiceAction({
+      customerId,
+      vehicleId,
+      lines: [{ kind: "service", serviceId, quantity: 1 }],
+    });
+    const sedan = await createManualInvoiceAction({
+      customerId,
+      vehicleId: sedanVehicleId,
+      lines: [{ kind: "service", serviceId, quantity: 1 }],
+    });
+    expect(suv.ok && sedan.ok).toBe(true);
+    if (!suv.ok || !sedan.ok) return;
+
+    const [suvInvoice] = await db().select().from(schema.invoices).where(eq(schema.invoices.id, suv.invoiceId));
+    const [sedanInvoice] = await db().select().from(schema.invoices).where(eq(schema.invoices.id, sedan.invoiceId));
+    expect(suvInvoice.subtotalCents).toBe(25000);
+    expect(sedanInvoice.subtotalCents).toBe(20000);
+  });
+
+  it("falls back to the base price when no vehicle is chosen", async () => {
+    const result = await createManualInvoiceAction({
+      customerId,
+      lines: [{ kind: "service", serviceId, quantity: 1 }],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const [invoice] = await db().select().from(schema.invoices).where(eq(schema.invoices.id, result.invoiceId));
+    expect(invoice.subtotalCents).toBe(20000);
+  });
+
+  it("ignores a client-supplied price unless it is an explicit override", async () => {
+    const result = await createManualInvoiceAction({
+      customerId,
+      vehicleId,
+      lines: [{ kind: "service", serviceId, quantity: 2 }],
+    });
+    if (!result.ok) throw new Error("setup failed");
+    const [line] = await db()
+      .select()
+      .from(schema.invoiceLineItems)
+      .where(eq(schema.invoiceLineItems.invoiceId, result.invoiceId));
+    expect(line.unitPriceCents).toBe(25000);
+    expect(line.quantity).toBe(2);
+    expect(line.serviceId).toBe(serviceId);
+  });
+
+  it("honours a staff price override", async () => {
+    const result = await createManualInvoiceAction({
+      customerId,
+      vehicleId,
+      lines: [{ kind: "service", serviceId, quantity: 1, unitPriceCents: 18000 }],
+    });
+    if (!result.ok) throw new Error("setup failed");
+    const [invoice] = await db().select().from(schema.invoices).where(eq(schema.invoices.id, result.invoiceId));
+    expect(invoice.subtotalCents).toBe(18000);
+  });
+
+  it("bills add-ons at the catalogue price alongside the service", async () => {
+    const result = await createManualInvoiceAction({
+      customerId,
+      vehicleId,
+      lines: [
+        { kind: "service", serviceId, quantity: 1 },
+        { kind: "addon", addonId, quantity: 1 },
+      ],
+    });
+    if (!result.ok) throw new Error("setup failed");
+    const [invoice] = await db().select().from(schema.invoices).where(eq(schema.invoices.id, result.invoiceId));
+    expect(invoice.subtotalCents).toBe(30000);
+  });
+
+  it("requires a price for a quote-only service", async () => {
+    const missing = await createManualInvoiceAction({
+      customerId,
+      vehicleId,
+      lines: [{ kind: "service", serviceId: quoteOnlyServiceId, quantity: 1 }],
+    });
+    expect(missing.ok).toBe(false);
+
+    const supplied = await createManualInvoiceAction({
+      customerId,
+      vehicleId,
+      lines: [{ kind: "service", serviceId: quoteOnlyServiceId, quantity: 1, unitPriceCents: 45000 }],
+    });
+    expect(supplied.ok).toBe(true);
+  });
+
+  it("applies a percentage discount against the resolved subtotal", async () => {
+    const result = await createManualInvoiceAction({
+      customerId,
+      vehicleId,
+      lines: [{ kind: "service", serviceId, quantity: 1 }],
+      discountPercentBp: 1000, // 10%
+    });
+    if (!result.ok) throw new Error("setup failed");
+    const [invoice] = await db().select().from(schema.invoices).where(eq(schema.invoices.id, result.invoiceId));
+    expect(invoice.subtotalCents).toBe(25000);
+    expect(invoice.discountCents).toBe(2500);
+    expect(invoice.taxCents).toBe(2925); // 13% of 22500
+    expect(invoice.totalCents).toBe(25425);
+  });
+
+  it("rejects a service that no longer exists", async () => {
+    const result = await createManualInvoiceAction({
+      customerId,
+      lines: [{ kind: "service", serviceId: "svc_gone", quantity: 1 }],
+    });
+    expect(result.ok).toBe(false);
+  });
+});
+
 describe("setInvoiceTaxExemptAction", () => {
   it("recomputes the total and settles a cash payment exactly", async () => {
     const created = await createManualInvoiceAction({ customerId, lines: baseLines });
@@ -212,6 +369,7 @@ describe("renderInvoicePdf", () => {
 
   it("paginates long invoices without emitting a blank trailing page", async () => {
     const manyLines = Array.from({ length: 40 }, (_, n) => ({
+      kind: "custom" as const,
       description:
         n % 3 === 0
           ? `Full interior and exterior detail with clay bar, engine bay clean and ceramic sealant — item ${n + 1}`

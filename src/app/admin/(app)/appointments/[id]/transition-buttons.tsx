@@ -6,6 +6,7 @@ import { recordAppointmentDepositAction, transitionAppointmentAction } from "../
 
 const PAYMENT_METHODS = [
   { value: "cash", label: "Cash" },
+  { value: "cheque", label: "Cheque" },
   { value: "etransfer", label: "E-transfer" },
   { value: "card_terminal", label: "Card terminal" },
 ] as const;

@@ -114,6 +114,77 @@ export async function priceBooking(input: {
   };
 }
 
+export type CatalogPrice = {
+  /** Catalog name, used as the invoice line description. */
+  description: string;
+  /** Base price plus the adjustment for the vehicle category, in cents. */
+  priceCents: number;
+  /** True when the service is quote-only, so staff must supply the price. */
+  requiresManualPrice: boolean;
+};
+
+/**
+ * Resolves current catalog prices for invoice lines, applying the same
+ * vehicle-category adjustment the booking flow uses — a large SUV costs more
+ * than a sedan for the same package.
+ *
+ * Deliberately more permissive than priceBooking(): an invoice records work
+ * that has already happened, so quote-only and inactive services are allowed
+ * (staff supply the price for quote-only ones). Booking still refuses them.
+ */
+export async function resolveCatalogPrices(input: {
+  serviceIds: string[];
+  addonIds: string[];
+  vehicleCategory: VehicleCategory | null;
+}): Promise<{ services: Map<string, CatalogPrice>; addons: Map<string, CatalogPrice> }> {
+  const services = new Map<string, CatalogPrice>();
+  const addons = new Map<string, CatalogPrice>();
+
+  if (input.serviceIds.length > 0) {
+    const rows = await db()
+      .select()
+      .from(schema.services)
+      .where(inArray(schema.services.id, input.serviceIds));
+
+    // Only look up adjustments when we know the vehicle; without one the base
+    // price is the honest answer rather than a guess at the size.
+    const adjustments = input.vehicleCategory
+      ? await db()
+          .select()
+          .from(schema.serviceVehicleAdjustments)
+          .where(
+            and(
+              inArray(schema.serviceVehicleAdjustments.serviceId, input.serviceIds),
+              eq(schema.serviceVehicleAdjustments.vehicleCategory, input.vehicleCategory),
+            ),
+          )
+      : [];
+    const adjByService = new Map(adjustments.map((a) => [a.serviceId, a]));
+
+    for (const svc of rows) {
+      const adj = adjByService.get(svc.id);
+      services.set(svc.id, {
+        description: svc.name,
+        priceCents: (svc.basePriceCents ?? 0) + (adj?.priceDeltaCents ?? 0),
+        requiresManualPrice: svc.basePriceCents === null,
+      });
+    }
+  }
+
+  if (input.addonIds.length > 0) {
+    const rows = await db().select().from(schema.addons).where(inArray(schema.addons.id, input.addonIds));
+    for (const addon of rows) {
+      addons.set(addon.id, {
+        description: addon.name,
+        priceCents: addon.priceCents,
+        requiresManualPrice: false,
+      });
+    }
+  }
+
+  return { services, addons };
+}
+
 /** Pure totals math (unit-tested in tests/pricing.test.ts). */
 export function computeTotals(
   lines: PricedLine[],
