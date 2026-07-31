@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import type { ManualPaymentMethod } from "@/lib/types";
 import {
   sendInvoiceAction,
   recordPaymentAction,
@@ -12,12 +13,14 @@ import {
 
 const PAYMENT_METHODS = [
   { value: "cash", label: "Cash" },
+  { value: "cheque", label: "Cheque" },
   { value: "etransfer", label: "E-transfer" },
   { value: "card_terminal", label: "Card terminal" },
 ] as const;
 
 const MANUAL_REFUND_METHODS = [
   { value: "cash", label: "Cash (already returned)" },
+  { value: "cheque", label: "Cheque (already written)" },
   { value: "etransfer", label: "E-transfer (already sent)" },
   { value: "card_terminal", label: "Card terminal (already issued)" },
 ] as const;
@@ -57,7 +60,7 @@ export function InvoiceActions({
   const [refundAmount, setRefundAmount] = useState("");
   const [refundReason, setRefundReason] = useState("");
   const [refundMessage, setRefundMessage] = useState<string | null>(null);
-  const [refundMethod, setRefundMethod] = useState<"stripe" | "cash" | "etransfer" | "card_terminal">(
+  const [refundMethod, setRefundMethod] = useState<"stripe" | ManualPaymentMethod>(
     stripeRefundableCents > 0 ? "stripe" : "cash",
   );
   const [refundIdempotencyKey, setRefundIdempotencyKey] = useState(() => newIdempotencyKey("refund"));

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { requirePageStaff } from "@/lib/auth/page";
 import { formatCents } from "@/lib/money";
+import { PAYMENT_PROVIDER_LABELS } from "@/lib/payment-labels";
 import {
   getReportingSnapshot,
   parseReportDays,
@@ -77,29 +78,151 @@ export default async function ReportsPage({
         <div>
           <h1 className="text-2xl font-bold text-white">Reports</h1>
           <p className="mt-1 text-sm text-ink-400">
-            Cash revenue, lead conversion, capacity utilization and source attribution.
+            Tax position, cash revenue, lead conversion, capacity utilization and source attribution.
           </p>
           <p className="mt-1 text-xs text-ink-400">
             {periodLabel} · {report.timezone}
           </p>
         </div>
-        <nav aria-label="Reporting period" className="flex flex-wrap gap-2">
-          {REPORT_DAY_OPTIONS.map((option) => (
-            <Link
-              key={option}
-              href={`/admin/reports?range=${option}`}
-              aria-current={days === option ? "page" : undefined}
-              className={`rounded-full px-4 py-1.5 text-sm ${
-                days === option
-                  ? "bg-accent-400 font-semibold text-ink-950"
-                  : "bg-ink-800 text-ink-300 hover:text-white"
-              }`}
-            >
-              {option} days
-            </Link>
-          ))}
-        </nav>
+        <div className="flex flex-col items-end gap-3">
+          <nav aria-label="Reporting period" className="flex flex-wrap gap-2">
+            {REPORT_DAY_OPTIONS.map((option) => (
+              <Link
+                key={option}
+                href={`/admin/reports?range=${option}`}
+                aria-current={days === option ? "page" : undefined}
+                className={`rounded-full px-4 py-1.5 text-sm ${
+                  days === option
+                    ? "bg-accent-400 font-semibold text-ink-950"
+                    : "bg-ink-800 text-ink-300 hover:text-white"
+                }`}
+              >
+                {option} days
+              </Link>
+            ))}
+          </nav>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs text-ink-400">Export CSV:</span>
+            {[
+              { kind: "summary", label: "Summary" },
+              { kind: "invoices", label: "Invoices + tax" },
+              { kind: "payments", label: "Payments" },
+            ].map((option) => (
+              <a
+                key={option.kind}
+                href={`/api/reports/export?kind=${option.kind}&range=${days}`}
+                className="rounded-lg border border-ink-600 px-3 py-1.5 text-xs font-medium text-ink-200 hover:bg-ink-800"
+              >
+                {option.label}
+              </a>
+            ))}
+          </div>
+        </div>
       </div>
+
+      <section aria-labelledby="tax-heading" className="mt-8">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 id="tax-heading" className="text-lg font-semibold text-white">
+            Tax
+          </h2>
+          <p className="text-xs text-ink-400">
+            Accrual basis: invoices issued in this period, drafts and cancellations excluded.
+          </p>
+        </div>
+        <div className="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <Kpi
+            label={`${report.currency === "CAD" ? "HST" : "Tax"} collected`}
+            value={formatCents(report.tax.taxCollectedCents, report.currency)}
+            note={`On ${formatCents(report.tax.taxableBaseCents, report.currency)} of taxable sales`}
+          />
+          <Kpi
+            label="Taxable sales"
+            value={formatCents(report.tax.taxableBaseCents, report.currency)}
+            note="Subtotal less discount, before tax"
+          />
+          <Kpi
+            label="Non-taxed sales"
+            value={formatCents(report.tax.exemptBaseCents, report.currency)}
+            note={`${report.tax.exemptInvoiceCount} of ${report.tax.invoiceCount} invoices`}
+          />
+          <Kpi
+            label="Invoices issued"
+            value={String(report.tax.invoiceCount)}
+            note="Sent, paid, overdue or refunded"
+          />
+        </div>
+        {report.tax.exemptReasons.length > 0 && (
+          <div className="mt-4 overflow-x-auto rounded-2xl border border-ink-700">
+            <table className="w-full text-sm">
+              <caption className="sr-only">Sales with no tax charged, by reason</caption>
+              <thead className="bg-ink-900/60 text-xs uppercase tracking-wider text-ink-400">
+                <tr>
+                  <th scope="col" className="px-4 py-3 text-left">Reason no tax was charged</th>
+                  <th scope="col" className="px-4 py-3 text-right">Invoices</th>
+                  <th scope="col" className="px-4 py-3 text-right">Sales</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.tax.exemptReasons.map((row) => (
+                  <tr key={row.reason} className="border-t border-ink-800">
+                    <th scope="row" className="px-4 py-3 text-left font-medium text-ink-200">
+                      {row.reason}
+                    </th>
+                    <td className="px-4 py-3 text-right text-ink-300">{row.count}</td>
+                    <td className="px-4 py-3 text-right text-white">
+                      {formatCents(row.baseCents, report.currency)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      <section aria-labelledby="methods-heading" className="mt-8">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 id="methods-heading" className="text-lg font-semibold text-white">
+            How customers paid
+          </h2>
+          <p className="text-xs text-ink-400">Cash basis, same window as revenue.</p>
+        </div>
+        {report.paymentMethods.length === 0 ? (
+          <p className="mt-3 text-sm text-ink-400">No payments recorded in this period.</p>
+        ) : (
+          <div className="mt-3 overflow-x-auto rounded-2xl border border-ink-700">
+            <table className="w-full text-sm">
+              <caption className="sr-only">Net revenue by payment method</caption>
+              <thead className="bg-ink-900/60 text-xs uppercase tracking-wider text-ink-400">
+                <tr>
+                  <th scope="col" className="px-4 py-3 text-left">Method</th>
+                  <th scope="col" className="px-4 py-3 text-right">Gross</th>
+                  <th scope="col" className="px-4 py-3 text-right">Refunded</th>
+                  <th scope="col" className="px-4 py-3 text-right">Net</th>
+                </tr>
+              </thead>
+              <tbody>
+                {report.paymentMethods.map((row) => (
+                  <tr key={row.provider} className="border-t border-ink-800">
+                    <th scope="row" className="px-4 py-3 text-left font-medium text-ink-200">
+                      {PAYMENT_PROVIDER_LABELS[row.provider] ?? row.provider}
+                    </th>
+                    <td className="px-4 py-3 text-right text-ink-300">
+                      {formatCents(row.grossCents, report.currency)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-ink-300">
+                      {formatCents(row.refundCents, report.currency)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-white">
+                      {formatCents(row.netCents, report.currency)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <section aria-labelledby="revenue-heading" className="mt-8">
         <div className="flex flex-wrap items-baseline justify-between gap-2">

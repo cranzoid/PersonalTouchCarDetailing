@@ -6,6 +6,8 @@ import {
   groupRevenueBySource,
   resolvePaymentSource,
   summarizeRevenue,
+  summarizeTax,
+  summarizePaymentMethods,
 } from "../src/lib/reporting";
 
 describe("summarizeRevenue", () => {
@@ -232,5 +234,75 @@ describe("getReportWindow", () => {
     );
     expect(window.start.toISOString()).toBe("2026-07-17T04:00:00.000Z");
     expect(window.end.toISOString()).toBe("2026-07-24T04:00:00.000Z");
+  });
+});
+
+const invoice = (over: Partial<{
+  status: string; subtotalCents: number; discountCents: number; taxCents: number;
+  taxExempt: boolean; taxExemptReason: string | null;
+}> = {}) => ({
+  status: "paid",
+  subtotalCents: 20000,
+  discountCents: 0,
+  taxCents: 2600,
+  taxExempt: false,
+  taxExemptReason: null,
+  ...over,
+});
+
+describe("summarizeTax", () => {
+  it("splits taxed from non-taxed sales and nets the discount out of the base", () => {
+    const summary = summarizeTax([
+      invoice(),
+      invoice({ subtotalCents: 10000, discountCents: 1000, taxCents: 1170 }),
+      invoice({ taxCents: 0, taxExempt: true, taxExemptReason: "Cash sale" }),
+    ]);
+    expect(summary.invoiceCount).toBe(3);
+    expect(summary.taxableBaseCents).toBe(29000); // 20000 + 9000
+    expect(summary.taxCollectedCents).toBe(3770);
+    expect(summary.exemptInvoiceCount).toBe(1);
+    expect(summary.exemptBaseCents).toBe(20000);
+  });
+
+  it("excludes drafts and cancellations, which were never issued", () => {
+    const summary = summarizeTax([
+      invoice({ status: "draft" }),
+      invoice({ status: "cancelled" }),
+      invoice({ status: "sent" }),
+    ]);
+    expect(summary.invoiceCount).toBe(1);
+    expect(summary.taxCollectedCents).toBe(2600);
+  });
+
+  it("groups exemption reasons by value, labelling unrecorded ones", () => {
+    const summary = summarizeTax([
+      invoice({ taxCents: 0, taxExempt: true, taxExemptReason: "Cash sale" }),
+      invoice({ taxCents: 0, taxExempt: true, taxExemptReason: "Cash sale", subtotalCents: 5000 }),
+      invoice({ taxCents: 0, taxExempt: true, taxExemptReason: "  " }),
+    ]);
+    expect(summary.exemptReasons[0]).toEqual({ reason: "Cash sale", count: 2, baseCents: 25000 });
+    expect(summary.exemptReasons[1].reason).toBe("No reason recorded");
+  });
+
+  it("counts a zero-tax invoice as non-taxed even without the flag", () => {
+    // Invoices raised before the exemption flag existed still report correctly.
+    const summary = summarizeTax([invoice({ taxCents: 0, taxExempt: false })]);
+    expect(summary.exemptInvoiceCount).toBe(1);
+    expect(summary.taxCollectedCents).toBe(0);
+  });
+});
+
+describe("summarizePaymentMethods", () => {
+  it("nets refunds against gross per method and sorts by net", () => {
+    const rows = summarizePaymentMethods([
+      { provider: "cash", kind: "payment", amountCents: 10000, status: "succeeded" },
+      { provider: "cash", kind: "refund", amountCents: 2000, status: "succeeded" },
+      { provider: "cheque", kind: "payment", amountCents: 15000, status: "succeeded" },
+      { provider: "stripe", kind: "payment", amountCents: 500, status: "failed" },
+    ]);
+    expect(rows.map((r) => r.provider)).toEqual(["cheque", "cash"]);
+    expect(rows[1]).toMatchObject({ grossCents: 10000, refundCents: 2000, netCents: 8000, count: 2 });
+    // A failed payment is not money received.
+    expect(rows.some((r) => r.provider === "stripe")).toBe(false);
   });
 });

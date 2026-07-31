@@ -732,7 +732,7 @@ export const payments = pgTable(
     invoiceId: text("invoice_id").references(() => invoices.id),
     appointmentId: text("appointment_id").references(() => appointments.id),
     customerId: text("customer_id").references(() => customers.id),
-    provider: text("provider").notNull(), // fake | stripe | cash | etransfer | card_terminal
+    provider: text("provider").notNull(), // see MANUAL_PAYMENT_METHODS in src/lib/types.ts, plus "stripe" and "fake"
     providerRef: text("provider_ref"),
     /** Client- or system-supplied key; unique constraint makes retries no-ops. */
     idempotencyKey: text("idempotency_key").notNull().unique(),

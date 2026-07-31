@@ -9,7 +9,7 @@ import { requireStaff, AuthError } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { getSettings } from "@/lib/settings";
 import { sendMessageTemplate } from "@/lib/messaging";
-import { formatCents } from "@/lib/money";
+import { formatCents, percentCents } from "@/lib/money";
 import {
   buildConsolidatedInvoiceLines,
   computeInvoiceTotals,
@@ -20,6 +20,8 @@ import {
   summarizePayments,
 } from "@/lib/invoices";
 import { zonedToUtc } from "@/lib/tz";
+import { resolveCatalogPrices } from "@/lib/pricing";
+import { MANUAL_PAYMENT_METHODS, VEHICLE_CATEGORIES, type VehicleCategory } from "@/lib/types";
 import { getAppBaseUrl } from "@/lib/urls";
 import {
   decodeStripeRefundReference,
@@ -434,7 +436,7 @@ export async function recordPaymentAction(raw: unknown): Promise<ActionResult> {
     const parsed = z
       .object({
         invoiceId: z.string().min(1),
-        method: z.enum(["cash", "etransfer", "card_terminal"]),
+        method: z.enum(MANUAL_PAYMENT_METHODS),
         amountCents: z.number().int().min(1).max(10_000_000),
         idempotencyKey: idempotencyKeySchema,
       })
@@ -540,7 +542,7 @@ export async function issueRefundAction(
         amountCents: z.number().int().min(1).max(10_000_000),
         reason: z.string().trim().min(1).max(1000),
         idempotencyKey: idempotencyKeySchema,
-        method: z.enum(["stripe", "cash", "etransfer", "card_terminal"]).default("cash"),
+        method: z.enum(["stripe", ...MANUAL_PAYMENT_METHODS]).default("cash"),
       })
       .safeParse(raw);
     if (!parsed.success) return { ok: false, error: "A reason and amount are required" };
@@ -814,18 +816,40 @@ function localNoonUtc(timeZone: string, dateISO: string): Date {
   return zonedToUtc(timeZone, y, m, d, 12, 0);
 }
 
-const manualLineInput = z.object({
-  serviceId: z.string().min(1).optional(),
-  description: z.string().trim().min(1).max(500),
-  quantity: z.number().int().min(1).max(999),
-  unitPriceCents: z.number().int().min(0),
-});
+/**
+ * Catalog lines carry an id, not a price: the server looks the price up and
+ * applies the vehicle-size adjustment, so the client cannot understate a
+ * package. `unitPriceCents` is an explicit staff override — needed for
+ * quote-only services and one-off adjustments, and recorded on the line.
+ */
+const manualLineInput = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("service"),
+    serviceId: z.string().min(1),
+    quantity: z.number().int().min(1).max(999),
+    unitPriceCents: z.number().int().min(0).optional(),
+  }),
+  z.object({
+    kind: z.literal("addon"),
+    addonId: z.string().min(1),
+    quantity: z.number().int().min(1).max(999),
+    unitPriceCents: z.number().int().min(0).optional(),
+  }),
+  z.object({
+    kind: z.literal("custom"),
+    description: z.string().trim().min(1).max(500),
+    quantity: z.number().int().min(1).max(999),
+    unitPriceCents: z.number().int().min(0),
+  }),
+]);
 
 const createManualInvoiceInput = z.object({
   customerId: z.string().min(1),
   vehicleId: z.string().min(1).optional(),
   lines: z.array(manualLineInput).min(1).max(50),
   discountCents: z.number().int().min(0).default(0),
+  /** Alternative to discountCents: basis points off the subtotal (500 = 5%). */
+  discountPercentBp: z.number().int().min(0).max(10000).optional(),
   /** Business-local calendar date; may be in the past for work already done. */
   invoiceDateISO: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   taxExempt: z.boolean().default(false),
@@ -858,7 +882,64 @@ export async function createManualInvoiceAction(
     // Exempt invoices snapshot a 0 rate so the stored document stays
     // self-describing; the flag and reason record WHY it was zero.
     const taxRateBp = input.taxExempt ? 0 : settings.taxRateBp;
-    const totals = computeInvoiceTotals(input.lines, input.discountCents, taxRateBp);
+
+    // Vehicle size drives package pricing, so resolve it before costing lines.
+    let vehicleCategory: VehicleCategory | null = null;
+    if (input.vehicleId) {
+      const [vehicle] = await db()
+        .select({ customerId: schema.vehicles.customerId, category: schema.vehicles.category })
+        .from(schema.vehicles)
+        .where(eq(schema.vehicles.id, input.vehicleId))
+        .limit(1);
+      if (!vehicle || vehicle.customerId !== input.customerId) {
+        return { ok: false, error: "That vehicle belongs to a different customer" };
+      }
+      vehicleCategory = VEHICLE_CATEGORIES.includes(vehicle.category as VehicleCategory)
+        ? (vehicle.category as VehicleCategory)
+        : null;
+    }
+
+    const catalog = await resolveCatalogPrices({
+      serviceIds: input.lines.flatMap((l) => (l.kind === "service" ? [l.serviceId] : [])),
+      addonIds: input.lines.flatMap((l) => (l.kind === "addon" ? [l.addonId] : [])),
+      vehicleCategory,
+    });
+
+    const lines: { serviceId: string | null; description: string; quantity: number; unitPriceCents: number }[] = [];
+    for (const line of input.lines) {
+      if (line.kind === "custom") {
+        lines.push({
+          serviceId: null,
+          description: line.description,
+          quantity: line.quantity,
+          unitPriceCents: line.unitPriceCents,
+        });
+        continue;
+      }
+      const entry =
+        line.kind === "service" ? catalog.services.get(line.serviceId) : catalog.addons.get(line.addonId);
+      if (!entry) return { ok: false, error: "A selected service or add-on no longer exists" };
+      if (entry.requiresManualPrice && line.unitPriceCents === undefined) {
+        return { ok: false, error: `"${entry.description}" is quote-only — enter a price for it` };
+      }
+      lines.push({
+        // Only real services carry a serviceId; add-ons are their own table and
+        // the column is a services FK, so they record as descriptive lines.
+        serviceId: line.kind === "service" ? line.serviceId : null,
+        description: entry.description,
+        quantity: line.quantity,
+        unitPriceCents: line.unitPriceCents ?? entry.priceCents,
+      });
+    }
+
+    // Percentage discounts are computed against the resolved subtotal so the
+    // client never decides the amount.
+    const subtotalCents = lines.reduce((sum, l) => sum + l.quantity * l.unitPriceCents, 0);
+    const discountCents =
+      input.discountPercentBp !== undefined
+        ? percentCents(subtotalCents, input.discountPercentBp)
+        : input.discountCents;
+    const totals = computeInvoiceTotals(lines, discountCents, taxRateBp);
 
     const result = await db().transaction(async (tx): Promise<ActionResult<{ invoiceId: string }>> => {
       const [customer] = await tx
@@ -867,17 +948,6 @@ export async function createManualInvoiceAction(
         .where(eq(schema.customers.id, input.customerId))
         .limit(1);
       if (!customer || customer.anonymizedAt) return { ok: false, error: "Customer not found" };
-
-      if (input.vehicleId) {
-        const [vehicle] = await tx
-          .select({ customerId: schema.vehicles.customerId })
-          .from(schema.vehicles)
-          .where(eq(schema.vehicles.id, input.vehicleId))
-          .limit(1);
-        if (!vehicle || vehicle.customerId !== input.customerId) {
-          return { ok: false, error: "That vehicle belongs to a different customer" };
-        }
-      }
 
       const number = await nextInvoiceNumber(tx);
       const invoiceId = newId("inv");
@@ -904,10 +974,10 @@ export async function createManualInvoiceAction(
         notes: input.notes,
       });
       await tx.insert(schema.invoiceLineItems).values(
-        input.lines.map((line, i) => ({
+        lines.map((line, i) => ({
           id: newId("ili"),
           invoiceId,
-          serviceId: line.serviceId ?? null,
+          serviceId: line.serviceId,
           description: line.description,
           quantity: line.quantity,
           unitPriceCents: line.unitPriceCents,
@@ -924,7 +994,7 @@ export async function createManualInvoiceAction(
           number,
           customerId: input.customerId,
           totalCents: totals.totalCents,
-          lines: input.lines.length,
+          lines: lines.length,
           taxExempt: input.taxExempt,
           backdated: Boolean(input.invoiceDateISO),
         },

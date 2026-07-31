@@ -7,6 +7,7 @@ export const PAYMENT_PROVIDER_LABELS: Record<string, string> = {
   fake: "Test payment",
   stripe: "Card (Stripe)",
   cash: "Cash",
+  cheque: "Cheque",
   etransfer: "E-transfer",
   card_terminal: "Card terminal",
 };

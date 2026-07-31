@@ -32,6 +32,18 @@ export const VEHICLE_CATEGORY_LABELS: Record<VehicleCategory, string> = {
   other: "Other",
 };
 
+/**
+ * Payment methods staff record by hand, i.e. money that arrived outside the
+ * online checkout. Single source of truth for the Zod enums and the UI selects
+ * — these values were previously repeated inline in five places, so adding one
+ * meant finding all of them.
+ *
+ * `payments.provider` also accepts "stripe" (online checkout) and "fake"
+ * (development), neither of which staff can select.
+ */
+export const MANUAL_PAYMENT_METHODS = ["cash", "cheque", "etransfer", "card_terminal"] as const;
+export type ManualPaymentMethod = (typeof MANUAL_PAYMENT_METHODS)[number];
+
 export const BOOKING_MODES = [
   "bookable",
   "quote_required",
