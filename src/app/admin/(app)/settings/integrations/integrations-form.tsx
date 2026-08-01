@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import type { IntegrationFieldStatus, IntegrationKey } from "@/lib/integrations";
 import {
@@ -25,6 +26,7 @@ export function IntegrationsForm({
   status: IntegrationFieldStatus[];
   canStore: boolean;
 }) {
+  const router = useRouter();
   const [form, setForm] = useState(EMPTY);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<Message>(null);
@@ -43,6 +45,10 @@ export function IntegrationsForm({
     setBusy(false);
     if (res.ok) setForm(EMPTY);
     setMsg({ ok: res.ok, text: res.ok ? res.message ?? "Saved." : res.error });
+    // The Set/Not-configured hints come from a server-rendered prop. Without
+    // this the page keeps showing the pre-save state and a successful save
+    // looks like it did nothing.
+    if (res.ok) router.refresh();
   }
 
   async function clear(key: IntegrationKey) {
@@ -51,6 +57,7 @@ export function IntegrationsForm({
     const res = await clearIntegrationCredentialAction(key);
     setBusy(false);
     setMsg({ ok: res.ok, text: res.ok ? res.message ?? "Removed." : res.error });
+    if (res.ok) router.refresh();
   }
 
   async function test(channel: "sms" | "email") {
@@ -62,6 +69,19 @@ export function IntegrationsForm({
       ...prev,
       [channel]: { ok: res.ok, text: res.ok ? res.message ?? "Sent." : res.error },
     }));
+  }
+
+  function removeButton(key: IntegrationKey) {
+    return (
+      <button
+        type="button"
+        onClick={() => clear(key)}
+        disabled={busy}
+        className="text-ink-400 underline hover:text-white disabled:opacity-50"
+      >
+        Remove
+      </button>
+    );
   }
 
   function credentialField(key: IntegrationKey, title: string, placeholder: string, secret: boolean) {
@@ -83,16 +103,12 @@ export function IntegrationsForm({
               <span className="text-emerald-300">
                 Set{current.source === "environment" ? " via environment" : ""}
               </span>
-              {current.source === "stored" && (
-                <button
-                  type="button"
-                  onClick={() => clear(key)}
-                  disabled={busy}
-                  className="text-ink-400 underline hover:text-white disabled:opacity-50"
-                >
-                  Remove
-                </button>
-              )}
+              {current.source === "stored" && removeButton(key)}
+            </>
+          ) : current?.source === "unreadable" ? (
+            <>
+              <span className="text-red-300">Stored but unreadable — remove and re-enter</span>
+              {removeButton(key)}
             </>
           ) : (
             <span className="text-amber-300">Not configured</span>
@@ -139,11 +155,15 @@ export function IntegrationsForm({
       <section>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-ink-300">SMS — Twilio</h2>
         <div className="grid gap-3 sm:grid-cols-2">
-          {credentialField("twilioAccountSid", "Account SID", "AC…", true)}
-          {credentialField("twilioAuthToken", "Auth token", "Your Twilio auth token", true)}
-          {credentialField("twilioFromNumber", "From number", "+1 905 555 0143", false)}
+          {credentialField("twilioAccountSid", "Account SID", "AC… (34 characters)", true)}
+          {credentialField("twilioAuthToken", "Auth token", "32 hex characters", true)}
+          {credentialField("twilioFromNumber", "From number", "+19055550143", false)}
         </div>
-        {testRow("sms", "+1 905 555 0143")}
+        <p className="mt-2 text-xs text-ink-500">
+          Both values come from the Twilio Console dashboard. Numbers must be in E.164 format — a
+          leading + and digits only, no spaces or dashes.
+        </p>
+        {testRow("sms", "+19055550143")}
       </section>
 
       <section>

@@ -16,15 +16,43 @@ import { sendMessage } from "@/lib/messaging";
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
 
 /**
+ * Twilio answers a malformed credential pair with a bare 401 that names
+ * neither field, so the shapes are checked here instead. These formats are
+ * stable and documented: Account SID is "AC" + 32 hex, auth token is 32 hex,
+ * and this integration authenticates with the Account SID itself, so an API
+ * Key SID ("SK…") cannot stand in for it.
+ */
+const TWILIO_ACCOUNT_SID = /^AC[0-9a-f]{32}$/i;
+const TWILIO_AUTH_TOKEN = /^[0-9a-f]{32}$/i;
+const E164 = /^\+[1-9]\d{7,14}$/;
+
+/** Blank means "leave as-is", so every rule has to pass an empty value. */
+const optional = (max: number) => z.string().trim().max(max).optional();
+const shaped = (max: number, ok: RegExp, message: string) =>
+  optional(max).refine((v) => !v || ok.test(v), { message });
+
+/**
  * Every field is optional and blank means "leave as-is". The form never
  * receives existing secrets, so submitting it must not be able to wipe them.
  */
 const credentialsInput = z.object({
-  twilioAccountSid: z.string().trim().max(200).optional(),
-  twilioAuthToken: z.string().trim().max(200).optional(),
-  twilioFromNumber: z.string().trim().max(30).optional(),
-  resendApiKey: z.string().trim().max(200).optional(),
-  emailFrom: z.string().trim().max(200).optional(),
+  twilioAccountSid: shaped(
+    200,
+    TWILIO_ACCOUNT_SID,
+    'Twilio Account SID must be "AC" followed by 32 hex characters — copy it from the Twilio Console dashboard. An API Key SID starting with "SK" will not work here.',
+  ),
+  twilioAuthToken: shaped(
+    200,
+    TWILIO_AUTH_TOKEN,
+    "Twilio Auth Token must be 32 hex characters — it sits next to the Account SID on the Twilio Console dashboard. This is not the Resend API key and not the Account SID.",
+  ),
+  twilioFromNumber: shaped(
+    30,
+    E164,
+    "From number must be in E.164 format with no spaces or dashes, e.g. +19055550143.",
+  ),
+  resendApiKey: shaped(200, /^re_/, 'Resend API key must start with "re_".'),
+  emailFrom: optional(200),
 });
 
 const CREDENTIAL_KEYS = [
@@ -46,7 +74,11 @@ export async function saveIntegrationCredentialsAction(raw: unknown): Promise<Ac
       };
     }
     const parsed = credentialsInput.safeParse(raw);
-    if (!parsed.success) return { ok: false, error: "Invalid values — check the field lengths." };
+    if (!parsed.success) {
+      // Report the specific rule that failed — these messages name the field
+      // and the expected shape, and never echo the submitted value.
+      return { ok: false, error: parsed.error.issues[0]?.message ?? "Invalid values." };
+    }
 
     const changed: IntegrationKey[] = [];
     for (const key of CREDENTIAL_KEYS) {

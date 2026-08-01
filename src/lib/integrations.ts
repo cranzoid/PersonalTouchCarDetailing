@@ -90,13 +90,17 @@ export function decryptSecret(stored: string): string {
 const CACHE_TTL_MS = 60_000;
 let cache: { expiresAt: number; value: Promise<Map<string, string>> } | undefined;
 
+function readStored(): Promise<Map<string, string>> {
+  return db()
+    .select()
+    .from(schema.integrationCredentials)
+    .then((rows) => new Map(rows.map((r) => [r.key, r.valueEncrypted])));
+}
+
 function loadStored(): Promise<Map<string, string>> {
   const now = Date.now();
   if (!cache || cache.expiresAt <= now) {
-    const pending = db()
-      .select()
-      .from(schema.integrationCredentials)
-      .then((rows) => new Map(rows.map((r) => [r.key, r.valueEncrypted])));
+    const pending = readStored();
     const guarded = pending.catch((error) => {
       if (cache?.value === guarded) cache = undefined;
       throw error;
@@ -118,7 +122,16 @@ export function invalidateIntegrationCache(): void {
 export async function getIntegrationSecret(key: IntegrationKey): Promise<string | undefined> {
   try {
     const stored = (await loadStored()).get(key);
-    if (stored) return decryptSecret(stored);
+    if (stored) {
+      try {
+        return decryptSecret(stored);
+      } catch {
+        // Ciphertext we cannot open (key rotated, row corrupt) is the same
+        // situation as a missing key: fall through to the environment rather
+        // than taking messaging down.
+        throw new IntegrationConfigError(`Stored credential "${key}" could not be decrypted.`);
+      }
+    }
   } catch (error) {
     // A missing/rotated encryption key or an unreachable database must not take
     // messaging down when environment variables can still satisfy the request.
@@ -134,27 +147,47 @@ export type IntegrationFieldStatus = {
   configured: boolean;
   /** Full value for non-secret fields, last-4 hint for secrets, else null. */
   hint: string | null;
-  source: "stored" | "environment" | "unset";
+  /** `unreadable`: a row exists but this key cannot open it — removable. */
+  source: "stored" | "environment" | "unset" | "unreadable";
 };
 
-/** Masked view for the admin UI. Never returns a full secret. */
+/**
+ * Masked view for the admin UI. Never returns a full secret.
+ *
+ * Deliberately reads through to the database instead of the TTL cache: this is
+ * the owner's only view of what is stored, and a stale "Set"/"Not configured"
+ * is what makes a save or a removal look like it silently failed.
+ */
 export async function getIntegrationStatus(): Promise<IntegrationFieldStatus[]> {
-  const stored = await loadStored().catch(() => new Map<string, string>());
+  const stored = await readStored().catch(() => new Map<string, string>());
   const keys = Object.keys(INTEGRATION_KEYS) as IntegrationKey[];
 
-  return Promise.all(
-    keys.map(async (key) => {
-      const hasStored = stored.has(key);
-      const value = await getIntegrationSecret(key);
-      if (!value) return { key, configured: false, hint: null, source: "unset" as const };
-      return {
-        key,
-        configured: true,
-        hint: NON_SECRET_KEYS.has(key) ? value : `••••${value.slice(-4)}`,
-        source: hasStored ? ("stored" as const) : ("environment" as const),
-      };
-    }),
-  );
+  return keys.map((key): IntegrationFieldStatus => {
+    const ciphertext = stored.get(key);
+    if (ciphertext) {
+      try {
+        const value = decryptSecret(ciphertext);
+        return {
+          key,
+          configured: true,
+          hint: NON_SECRET_KEYS.has(key) ? value : `••••${value.slice(-4)}`,
+          source: "stored",
+        };
+      } catch {
+        // Report the row rather than hiding it, so the owner still gets a
+        // Remove button and can clear it and re-enter the credential.
+        return { key, configured: false, hint: null, source: "unreadable" };
+      }
+    }
+    const fromEnv = process.env[INTEGRATION_KEYS[key]]?.trim() || undefined;
+    if (!fromEnv) return { key, configured: false, hint: null, source: "unset" };
+    return {
+      key,
+      configured: true,
+      hint: NON_SECRET_KEYS.has(key) ? fromEnv : `••••${fromEnv.slice(-4)}`,
+      source: "environment",
+    };
+  });
 }
 
 export async function setIntegrationSecret(

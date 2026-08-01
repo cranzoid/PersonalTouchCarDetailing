@@ -273,10 +273,26 @@ async function sendWithTwilio(msg: OutboundMessage): Promise<string | null> {
       signal: AbortSignal.timeout(10_000),
     },
   );
-  if (!response.ok) throw new Error(`Twilio returned ${response.status}`);
+  if (!response.ok) {
+    // Twilio names the actual problem in the body (20003 = credentials
+    // rejected, 21212 = bad From number); the bare status does not. It echoes
+    // no secrets, and this text reaches only the owner-only integrations
+    // screen through MessageResult.detail — never a log or a stored row.
+    throw new Error(`Twilio returned ${response.status}${await twilioFailureReason(response)}`);
+  }
   const payload = (await response.json()) as { sid?: string };
   if (!payload.sid) throw new Error("Twilio response had no message id");
   return payload.sid;
+}
+
+async function twilioFailureReason(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { code?: number; message?: string };
+    if (!body.message) return "";
+    return body.code ? ` — ${body.message} (code ${body.code})` : ` — ${body.message}`;
+  } catch {
+    return "";
+  }
 }
 
 /** Simple {{placeholder}} template rendering. */
