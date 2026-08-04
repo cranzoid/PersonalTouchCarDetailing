@@ -3,32 +3,12 @@ import { and, eq, gt, isNull } from "drizzle-orm";
 import { db, schema, type Db } from "@/db";
 import { newId } from "@/lib/id";
 import { hashToken } from "@/lib/estimates";
-import {
-  JOB_TRANSITIONS,
-  JOB_STATUSES,
-  QC_CHECKLIST_ITEMS,
-  type JobStatus,
-} from "@/lib/types";
 
 /**
- * Job domain helpers shared by the admin pipeline and the customer
- * additional-work approval portal. Status changes always go through
- * canTransitionJob — the state machine in JOB_TRANSITIONS is the single
- * source of truth, enforced server-side.
+ * Database-backed job helpers. The pure status rules (state machine, legacy
+ * status mapping, QC defaults) live in `@/lib/job-status` so client
+ * components can import them without pulling in the database driver.
  */
-
-export function isJobStatus(value: string): value is JobStatus {
-  return (JOB_STATUSES as readonly string[]).includes(value);
-}
-
-export function canTransitionJob(from: JobStatus, to: JobStatus): boolean {
-  return JOB_TRANSITIONS[from]?.includes(to) ?? false;
-}
-
-/** True when every QC checklist item has been ticked. */
-export function isQcComplete(items: Record<string, boolean>): boolean {
-  return QC_CHECKLIST_ITEMS.every((item) => items[item.key] === true);
-}
 
 /**
  * Creates a single-purpose customer token for approving one additional-work

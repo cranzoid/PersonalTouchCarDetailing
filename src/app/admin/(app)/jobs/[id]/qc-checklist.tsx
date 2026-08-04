@@ -20,6 +20,7 @@ export function QcChecklistForm({
   const [state, setState] = useState<Record<string, boolean>>(items);
   const [noteText, setNoteText] = useState(notes);
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const checkedCount = QC_CHECKLIST_ITEMS.filter((i) => state[i.key]).length;
 
@@ -34,16 +35,35 @@ export function QcChecklistForm({
 
   return (
     <section className="mt-6 rounded-xl border border-ink-800 p-5">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-400">
-          QC checklist
+          QC checklist{" "}
+          <span className="font-normal normal-case tracking-normal text-ink-600">· optional</span>
         </h2>
-        <span className={`text-xs ${completedAt ? "text-emerald-300" : "text-ink-500"}`}>
-          {completedAt
-            ? `Passed ${new Date(completedAt).toLocaleDateString("en-CA")}`
-            : `${checkedCount}/${QC_CHECKLIST_ITEMS.length}`}
-        </span>
+        <div className="flex items-center gap-3">
+          <span className={`text-xs ${completedAt ? "text-emerald-300" : "text-ink-500"}`}>
+            {completedAt
+              ? `Passed ${new Date(completedAt).toLocaleDateString("en-CA")}`
+              : `${checkedCount}/${QC_CHECKLIST_ITEMS.length} ticked`}
+          </span>
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            className="rounded-lg border border-ink-700 px-3 py-1.5 text-xs font-medium text-ink-300 hover:bg-ink-800"
+          >
+            {open ? "Hide" : "Open checklist"}
+          </button>
+        </div>
       </div>
+      {!open && (
+        <p className="mt-2 text-sm text-ink-500">
+          QC passes automatically when the vehicle is marked ready for pickup. Open the checklist
+          only if you want to record what was checked.
+        </p>
+      )}
+      {open && (
+        <>
       <div className="mt-3 grid gap-2 sm:grid-cols-2">
         {QC_CHECKLIST_ITEMS.map((item) => (
           <label key={item.key} className="flex cursor-pointer items-center gap-2 text-sm text-ink-200">
@@ -74,6 +94,8 @@ export function QcChecklistForm({
         </button>
         {error && <p className="text-sm text-red-400">{error}</p>}
       </div>
+        </>
+      )}
     </section>
   );
 }

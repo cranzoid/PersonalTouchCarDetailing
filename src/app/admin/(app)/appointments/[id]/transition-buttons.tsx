@@ -15,14 +15,26 @@ function newIdempotencyKey(): string {
   return `appointment_deposit_${globalThis.crypto.randomUUID()}`;
 }
 
-const ACTIONS: Record<string, { to: "confirmed" | "arrived" | "cancelled" | "no_show" | "completed"; label: string; danger?: boolean; needsReason?: boolean }[]> = {
+const ACTIONS: Record<
+  string,
+  {
+    to: "confirmed" | "arrived" | "cancelled" | "no_show" | "completed";
+    label: string;
+    danger?: boolean;
+    needsReason?: boolean;
+    /** Rendered as a quiet secondary button. */
+    secondary?: boolean;
+  }[]
+> = {
   pending: [
     { to: "confirmed", label: "Confirm" },
     { to: "cancelled", label: "Cancel", danger: true, needsReason: true },
   ],
   deposit_required: [{ to: "cancelled", label: "Cancel", danger: true, needsReason: true }],
   confirmed: [
-    { to: "arrived", label: "Mark Arrived" },
+    // Checking the vehicle in records arrival too, so this is only for the
+    // customer who is here but waiting.
+    { to: "arrived", label: "Mark Arrived (waiting)", secondary: true },
     { to: "no_show", label: "No-show", danger: true },
     { to: "cancelled", label: "Cancel", danger: true, needsReason: true },
   ],
@@ -120,7 +132,9 @@ export function TransitionButtons({
             className={`rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-40 ${
               a.danger
                 ? "border border-red-800 text-red-300 hover:bg-red-950"
-                : "bg-accent-400 text-ink-950 hover:bg-accent-300"
+                : a.secondary
+                  ? "border border-ink-600 text-ink-200 hover:bg-ink-800"
+                  : "bg-accent-400 text-ink-950 hover:bg-accent-300"
             }`}
           >
             {a.label}

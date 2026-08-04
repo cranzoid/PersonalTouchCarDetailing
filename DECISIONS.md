@@ -65,7 +65,26 @@ Phase 1 availability is bay-count-based; staff schedules/skills tables exist
 and the engine has the seam (`requiredSkills`) to add staff-shift filtering.
 **Revisit when:** the business confirms staffing model (Phase 2/3).
 
-## 12. New-ownership content rule
+## 12. Three-stage job pipeline; retired statuses mapped, never rewritten
+Owner feedback: too many clicks between a vehicle arriving and leaving. The job
+pipeline went from ten statuses to `checked_in → in_progress →
+ready_for_pickup → completed`, and check-in now records arrival itself so a
+confirmed appointment becomes a live job in one click. Inspection, QC and
+additional-work approval keep their tables and screens but are optional side
+activities, not stages — QC passes automatically at ready-for-pickup instead of
+gating it behind ten checkboxes.
+
+Because `jobs.status` is a text column (decision 4), the six retired values
+(`inspection`, `awaiting_approval`, `ready`, `paused`, `quality_check`,
+`correction_required`) needed no migration. Live rows are deliberately **not**
+rewritten: `normalizeJobStatus` in `src/lib/job-status.ts` maps pre-work stages
+to `checked_in` and mid-work stages to `in_progress` on read, so jobs that were
+in flight when this shipped keep moving. A backfill is optional cleanup, not a
+prerequisite.
+**Revisit when:** no job row has held a retired status for a full service cycle
+→ the backfill can run and `LEGACY_JOB_STATUS_MAP` can be deleted.
+
+## 13. New-ownership content rule
 No published years-in-business, inherited warranties, testimonials, or
 historical claims anywhere. All such content is settings-driven or explicitly
 marked as pending owner approval. **Fixed product rule, not a tech decision.**

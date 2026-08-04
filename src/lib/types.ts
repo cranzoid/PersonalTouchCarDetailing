@@ -75,31 +75,52 @@ export const APPOINTMENT_BLOCKING_STATUSES: AppointmentStatus[] = [
   "converted",
 ];
 
+/**
+ * The shop floor runs on three working stages plus the handover. Inspection,
+ * QC and additional-work approval still exist as records — they are optional
+ * side activities on a job, not statuses everyone has to click through.
+ */
 export const JOB_STATUSES = [
   "checked_in",
-  "inspection",
-  "awaiting_approval",
-  "ready",
   "in_progress",
-  "paused",
-  "quality_check",
-  "correction_required",
   "ready_for_pickup",
   "completed",
 ] as const;
 export type JobStatus = (typeof JOB_STATUSES)[number];
 
+export const JOB_STATUS_LABELS: Record<JobStatus, string> = {
+  checked_in: "Checked in",
+  in_progress: "In progress",
+  ready_for_pickup: "Ready for pickup",
+  completed: "Completed",
+};
+
+/**
+ * Statuses retired when the pipeline was cut down to three stages. Live rows
+ * are deliberately NOT rewritten — a job that was sitting in `quality_check`
+ * when this shipped keeps its stored value and is read through this map, so
+ * it still renders and can still be moved forward. Normalize with
+ * `normalizeJobStatus` before touching the state machine.
+ */
+export const LEGACY_JOB_STATUS_MAP: Record<string, JobStatus> = {
+  // Pre-work stages all collapse into "checked in".
+  inspection: "checked_in",
+  awaiting_approval: "checked_in",
+  ready: "checked_in",
+  // Anything mid-work or being reworked reads as "in progress".
+  paused: "in_progress",
+  quality_check: "in_progress",
+  correction_required: "in_progress",
+};
+
 /** Legal job status transitions (state machine, enforced server-side). */
 export const JOB_TRANSITIONS: Record<JobStatus, JobStatus[]> = {
-  checked_in: ["inspection", "ready", "in_progress"],
-  inspection: ["awaiting_approval", "ready", "in_progress"],
-  awaiting_approval: ["ready", "in_progress", "inspection"],
-  ready: ["in_progress"],
-  in_progress: ["paused", "quality_check"],
-  paused: ["in_progress"],
-  quality_check: ["correction_required", "ready_for_pickup"],
-  correction_required: ["in_progress"],
-  ready_for_pickup: ["completed"],
+  checked_in: ["in_progress"],
+  // Back to checked_in undoes a premature start; ready_for_pickup is the
+  // normal exit and no longer waits on a QC checklist.
+  in_progress: ["ready_for_pickup", "checked_in"],
+  // Reopening a pickup-ready job replaces the old correction_required stage.
+  ready_for_pickup: ["completed", "in_progress"],
   completed: [],
 };
 

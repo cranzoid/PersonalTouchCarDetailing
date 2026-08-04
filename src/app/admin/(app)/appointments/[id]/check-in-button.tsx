@@ -4,7 +4,10 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { checkInAppointmentAction } from "../../jobs/actions";
 
-/** "Check In" on an arrived appointment: creates the job and opens it. */
+/**
+ * "Check In" on a confirmed or arrived appointment: records arrival, creates
+ * the job and opens it — one click from the vehicle pulling in to a live job.
+ */
 export function CheckInButton({ appointmentId }: { appointmentId: string }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
