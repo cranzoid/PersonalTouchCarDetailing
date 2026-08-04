@@ -10,13 +10,16 @@ import { requireStaff, AuthError } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { getSettings } from "@/lib/settings";
 import { sendMessageTemplate } from "@/lib/messaging";
+import { createAdditionalWorkAccessToken } from "@/lib/jobs";
 import {
   canTransitionJob,
-  createAdditionalWorkAccessToken,
-  isJobStatus,
+  defaultQcItems,
+  isJobOpenForSideWork,
   isQcComplete,
-} from "@/lib/jobs";
-import { JOB_STATUSES } from "@/lib/types";
+  jobStatusLabel,
+  normalizeJobStatus,
+} from "@/lib/job-status";
+import { JOB_STATUSES, JOB_STATUS_LABELS } from "@/lib/types";
 import { putPrivateFile } from "@/lib/storage";
 import { getAppBaseUrl } from "@/lib/urls";
 
@@ -71,8 +74,15 @@ function extractPhotos(formData: FormData): { photos: File[]; error?: string } {
 }
 
 /* ------------------------------------------------------------------ */
-/* Check-in: arrived appointment → job                                 */
+/* Check-in: confirmed/arrived appointment → job                       */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Check-in is one action for staff: a confirmed appointment goes straight to
+ * a job without a separate "Mark Arrived" click. Arrival is still recorded —
+ * it just happens inside the same transaction.
+ */
+const CHECK_IN_FROM: string[] = ["confirmed", "arrived"];
 
 export async function checkInAppointmentAction(
   raw: unknown,
@@ -92,8 +102,11 @@ export async function checkInAppointmentAction(
       const appt = rows[0];
       if (!appt) return { ok: false, error: "Appointment not found" };
       if (appt.jobId) return { ok: false, error: "This appointment is already checked in" };
-      if (appt.status !== "arrived") {
-        return { ok: false, error: "Mark the appointment as arrived before checking in" };
+      if (!CHECK_IN_FROM.includes(appt.status)) {
+        return {
+          ok: false,
+          error: "Only a confirmed appointment can be checked in",
+        };
       }
 
       const jobId = newId("job");
@@ -117,7 +130,15 @@ export async function checkInAppointmentAction(
         action: "job.checked_in",
         entityType: "job",
         entityId: jobId,
-        after: { appointmentId: appt.id, customerId: appt.customerId, vehicleId: appt.vehicleId },
+        before: { appointmentStatus: appt.status },
+        after: {
+          appointmentId: appt.id,
+          customerId: appt.customerId,
+          vehicleId: appt.vehicleId,
+          // Recorded explicitly so a straight-from-confirmed check-in is still
+          // auditable as the moment the vehicle arrived.
+          arrivedAt: new Date().toISOString(),
+        },
       });
       return { ok: true, jobId };
     });
@@ -153,18 +174,41 @@ export async function transitionJobAction(raw: unknown): Promise<ActionResult> {
       const rows = await tx.select().from(schema.jobs).where(eq(schema.jobs.id, jobId)).for("update");
       const job = rows[0];
       if (!job) return { ok: false, error: "Job not found" };
-      if (!isJobStatus(job.status)) return { ok: false, error: "Job has an unknown status" };
-      if (!canTransitionJob(job.status, to)) {
-        return { ok: false, error: `Cannot move a ${job.status.replaceAll("_", " ")} job to ${to.replaceAll("_", " ")}` };
+      // Jobs stored under a retired status are read as their current-stage
+      // equivalent, so work in flight keeps moving without a data rewrite.
+      const from = normalizeJobStatus(job.status);
+      if (!from) return { ok: false, error: "Job has an unknown status" };
+      if (!canTransitionJob(from, to)) {
+        return {
+          ok: false,
+          error: `Cannot move a ${jobStatusLabel(job.status).toLowerCase()} job to ${JOB_STATUS_LABELS[to].toLowerCase()}`,
+        };
       }
 
-      // Pickup is gated on the QC checklist — every item must be ticked.
+      // QC passes by default. Reaching pickup stamps a passed checklist when
+      // nobody opened one, so the record and its timestamp still exist.
       if (to === "ready_for_pickup") {
         const qc = (
           await tx.select().from(schema.qcChecklists).where(eq(schema.qcChecklists.jobId, jobId)).limit(1)
         )[0];
-        if (!qc || !isQcComplete(qc.items)) {
-          return { ok: false, error: "Complete every QC checklist item before marking ready for pickup" };
+        if (!qc) {
+          await tx.insert(schema.qcChecklists).values({
+            id: newId("qc"),
+            jobId,
+            items: defaultQcItems(),
+            completedByStaffId: staff.id,
+            completedAt: new Date(),
+          });
+        } else if (!qc.completedAt) {
+          await tx
+            .update(schema.qcChecklists)
+            .set({
+              // Preserve whatever staff ticked or explicitly left unticked.
+              completedByStaffId: staff.id,
+              completedAt: new Date(),
+              updatedAt: new Date(),
+            })
+            .where(eq(schema.qcChecklists.id, qc.id));
         }
       }
 
@@ -265,8 +309,10 @@ export async function completeInspectionAction(formData: FormData): Promise<Acti
       const rows = await tx.select().from(schema.jobs).where(eq(schema.jobs.id, input.jobId)).for("update");
       const job = rows[0];
       if (!job) return { ok: false, error: "Job not found" };
-      if (!["checked_in", "inspection"].includes(job.status)) {
-        return { ok: false, error: "This job is past the inspection stage" };
+      // Inspection is an optional record, not a pipeline stage — staff can
+      // walk the vehicle any time before it is handed back.
+      if (!isJobOpenForSideWork(job.status)) {
+        return { ok: false, error: "This job is no longer open for an inspection" };
       }
       const existing = await tx
         .select({ id: schema.inspections.id })
@@ -298,10 +344,11 @@ export async function completeInspectionAction(formData: FormData): Promise<Acti
           })),
         );
       }
+      // Deliberately does not change job.status — recording an inspection is
+      // no longer a stage the job has to pass through.
       await tx
         .update(schema.jobs)
         .set({
-          status: "inspection",
           ...(input.mileage !== undefined ? { mileageIn: input.mileage } : {}),
           updatedAt: new Date(),
         })
@@ -406,7 +453,7 @@ export async function createAdditionalWorkAction(
         await tx.select().from(schema.jobs).where(eq(schema.jobs.id, input.jobId)).limit(1)
       )[0];
       if (!job) return { ok: false, error: "Job not found" };
-      if (["completed", "ready_for_pickup"].includes(job.status)) {
+      if (!isJobOpenForSideWork(job.status)) {
         return { ok: false, error: "This job is too far along for additional work" };
       }
       const requestId = newId("awr");
@@ -611,13 +658,17 @@ export async function saveQcChecklistAction(raw: unknown): Promise<ActionResult>
         await tx.select().from(schema.qcChecklists).where(eq(schema.qcChecklists.jobId, input.jobId)).limit(1)
       )[0];
       if (existing) {
+        // A sign-off is never withdrawn by editing the items — the checklist
+        // is a record staff can correct, and completedAt is the moment QC was
+        // signed off (by hand here, or automatically at ready-for-pickup).
+        const signedOff = existing.completedAt ? true : complete;
         await tx
           .update(schema.qcChecklists)
           .set({
             items: input.items,
             notes: input.notes || null,
-            completedByStaffId: complete ? staff.id : null,
-            completedAt: complete ? existing.completedAt ?? new Date() : null,
+            completedByStaffId: existing.completedAt ? existing.completedByStaffId : complete ? staff.id : null,
+            completedAt: signedOff ? existing.completedAt ?? new Date() : null,
             updatedAt: new Date(),
           })
           .where(eq(schema.qcChecklists.id, existing.id));

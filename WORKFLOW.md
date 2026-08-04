@@ -85,6 +85,13 @@ review, and HTTP smoke tests.
 - Appointment arrival/check-in, mobile-oriented inspection, findings, private
   file uploads, additional-work approval, job state machine, timers, notes,
   QC checklist, ready-for-pickup, and completion.
+- **Shortened to three working stages (owner feedback).** A job runs
+  `checked_in → in_progress → ready_for_pickup → completed`. Check-in is one
+  click from a confirmed appointment — it records arrival, creates the job and
+  opens it. Inspection, the QC checklist and additional-work approval remain
+  fully available but are optional side panels rather than stages; QC is
+  stamped as passed automatically when a vehicle is marked ready for pickup.
+  See `DECISIONS.md` §12 for the legacy-status handling.
 - Photos remain private unless explicit public gallery consent is recorded.
 - S3-compatible SigV4 object storage is implemented for production; local disk
   is development-only and storage keys reject traversal.

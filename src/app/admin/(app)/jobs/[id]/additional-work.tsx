@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { StatusBadge } from "@/components/admin";
 import { formatCents } from "@/lib/money";
+import { isJobOpenForSideWork } from "@/lib/job-status";
 import {
   createAdditionalWorkAction,
   sendAdditionalWorkApprovalAction,
@@ -37,7 +38,7 @@ export function AdditionalWorkPanel({
   const [price, setPrice] = useState("");
   const [minutes, setMinutes] = useState("");
   const [lastLink, setLastLink] = useState<{ link: string; delivery: "email" | "sms" | null } | null>(null);
-  const canAdd = !["completed", "ready_for_pickup"].includes(jobStatus);
+  const canAdd = isJobOpenForSideWork(jobStatus);
 
   async function create() {
     const priceCents = Math.round(Number(price) * 100);

@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { InspectionForm } from "./inspection-form";
+import { isJobOpenForSideWork } from "@/lib/job-status";
 import { requirePageStaff } from "@/lib/auth/page";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +20,7 @@ export default async function InspectionPage({ params }: { params: Promise<{ id:
     .from(schema.inspections)
     .where(eq(schema.inspections.jobId, id))
     .limit(1);
-  if (existing || !["checked_in", "inspection"].includes(job.status)) {
+  if (existing || !isJobOpenForSideWork(job.status)) {
     redirect(`/admin/jobs/${id}`);
   }
 

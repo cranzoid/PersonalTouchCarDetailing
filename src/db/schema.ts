@@ -508,8 +508,11 @@ export const jobs = pgTable(
       .notNull()
       .references(() => vehicles.id),
     status: text("status").notNull().default("checked_in"),
-    // checked_in | inspection | awaiting_approval | ready | in_progress | paused |
-    // quality_check | correction_required | ready_for_pickup | completed
+    // checked_in | in_progress | ready_for_pickup | completed
+    // Existing rows may still hold a status retired in the three-stage
+    // pipeline change (inspection, awaiting_approval, ready, paused,
+    // quality_check, correction_required). They are never rewritten — read
+    // them through normalizeJobStatus in src/lib/job-status.ts.
     assignedStaffId: text("assigned_staff_id").references(() => staffUsers.id),
     resourceId: text("resource_id").references(() => resources.id),
     mileageIn: integer("mileage_in"),

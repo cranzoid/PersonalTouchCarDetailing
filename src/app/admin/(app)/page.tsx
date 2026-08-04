@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, asc, count, eq, gte, inArray, lt } from "drizzle-orm";
+import { and, asc, count, eq, gte, inArray, lt, ne } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { StatusBadge } from "@/components/admin";
 import { requirePageStaff } from "@/lib/auth/page";
@@ -62,10 +62,12 @@ export default async function AdminDashboard() {
     .select({ n: count() })
     .from(schema.appointments)
     .where(inArray(schema.appointments.status, ["pending", "deposit_required"]));
+  // Anything not handed back is still in the shop — counting by exclusion also
+  // covers jobs stored under a retired status.
   const [activeJobs] = await db()
     .select({ n: count() })
     .from(schema.jobs)
-    .where(inArray(schema.jobs.status, ["checked_in", "inspection", "in_progress", "quality_check"]));
+    .where(ne(schema.jobs.status, "completed"));
 
   const stats = [
     { label: "New leads", value: newLeads.n, href: "/admin/leads" },

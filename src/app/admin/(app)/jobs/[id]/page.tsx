@@ -6,7 +6,7 @@ import { StatusBadge } from "@/components/admin";
 import { formatCents } from "@/lib/money";
 import { formatInZone } from "@/lib/tz";
 import { getSettings } from "@/lib/settings";
-import { isQcComplete } from "@/lib/jobs";
+import { isJobOpenForSideWork, normalizeJobStatus } from "@/lib/job-status";
 import { JobTransitionButtons } from "./job-transition-buttons";
 import { AdditionalWorkPanel } from "./additional-work";
 import { QcChecklistForm } from "./qc-checklist";
@@ -98,10 +98,10 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             {job.mileageIn !== null ? ` · ${job.mileageIn.toLocaleString("en-CA")} km in` : ""}
           </p>
         </div>
-        <StatusBadge status={job.status} />
+        <StatusBadge status={normalizeJobStatus(job.status) ?? job.status} />
       </div>
 
-      <JobTransitionButtons jobId={job.id} status={job.status} qcComplete={!!qc && isQcComplete(qc.items)} />
+      <JobTransitionButtons jobId={job.id} status={job.status} />
 
       <div className="mt-6 grid gap-6 sm:grid-cols-2">
         <section className="rounded-xl border border-ink-800 p-5">
@@ -140,8 +140,10 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
 
       <section className="mt-6 rounded-xl border border-ink-800 p-5">
         <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-400">Inspection</h2>
-          {!inspection && ["checked_in", "inspection"].includes(job.status) && (
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-400">
+            Inspection <span className="font-normal normal-case tracking-normal text-ink-600">· optional</span>
+          </h2>
+          {!inspection && isJobOpenForSideWork(job.status) && (
             <Link
               href={`/admin/jobs/${job.id}/inspection`}
               className="rounded-lg bg-accent-400 px-3 py-1.5 text-sm font-medium text-ink-950 hover:bg-accent-300"
@@ -179,8 +181,8 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           </div>
         ) : (
           <p className="mt-2 text-sm text-ink-500">
-            {["checked_in", "inspection"].includes(job.status)
-              ? "Not recorded yet — walk the vehicle with the customer before work starts."
+            {isJobOpenForSideWork(job.status)
+              ? "Not recorded. Walk the vehicle with the customer if this job needs a documented condition report — work can start without one."
               : "No inspection was recorded for this job."}
           </p>
         )}

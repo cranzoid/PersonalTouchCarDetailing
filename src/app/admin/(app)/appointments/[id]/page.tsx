@@ -70,7 +70,11 @@ export default async function AppointmentDetailPage({
       {["pending", "deposit_required", "confirmed"].includes(appt.status) && (
         <ReschedulePanel appointmentId={appt.id} maxBookingWindowDays={settings.maxBookingWindowDays} timezone={settings.timezone} />
       )}
-      {appt.status === "arrived" && !appt.jobId && <CheckInButton appointmentId={appt.id} />}
+      {/* Check-in works straight from confirmed — arrival is recorded by the
+          same action, so staff do not need a separate "Mark Arrived" click. */}
+      {["confirmed", "arrived"].includes(appt.status) && !appt.jobId && (
+        <CheckInButton appointmentId={appt.id} />
+      )}
       {appt.jobId && (
         <p className="mt-4 text-sm">
           <Link href={`/admin/jobs/${appt.jobId}`} className="text-accent-300 hover:underline">
