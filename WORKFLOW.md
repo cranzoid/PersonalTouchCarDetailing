@@ -227,6 +227,47 @@ features:
    required consent. Run responsive visual QA in current Safari, Chrome, and
    mobile devices once a browser session is available.
 
+## Running an ad promotion
+
+The "10% off your first detail" offer is applied automatically — the customer
+never types a code. See DECISIONS.md #14 for why it is built this way.
+
+**To launch a campaign**
+
+1. Admin → Settings → Promotion. Tick **only** the detailing packages the offer
+   covers; nothing is discounted until at least one is ticked, and a service
+   added later is never included automatically.
+2. Set the percentage, the customer-facing label, and a **campaign-specific
+   code** — `FIRST10AUG26`, not `FIRST10`. Never re-use a retired code: the
+   claim is stored in the visitor's browser, so changing the code is what
+   invalidates old ad links.
+3. Leave **Expires on** blank unless you have a hard end date (see below), then
+   enable the offer and save.
+4. Point the ad's destination URL at `/book?offer=<CODE>`. Landing anywhere on
+   the site works — the offer follows the visitor to the booking page.
+
+**To end a campaign**
+
+Pause the Meta/Google ad set **and** disable the promotion in the same sitting.
+The site stops honouring an expired offer immediately, but the ad networks do
+not know that — an ad still promising 10% off that the site refuses is worse
+than no ad at all. If you set an expiry date, diary the ad pause for the same
+day.
+
+**Notes**
+
+- Existing bookings are never affected. Every booking locks its discount amount
+  at the time it was taken, so changing or ending the offer cannot rewrite what
+  a customer already agreed to.
+- The offer is for first-time customers who have not yet had a detail
+  *completed* with us. A cancelled or upcoming booking does not use it up.
+- Quote requests that arrive on the offer are flagged in Admin → Leads. Use
+  “Apply current offer” in the estimate builder — it re-checks eligibility.
+- Admin → Reports shows **Discounts given** for the window.
+- Installs seeded before this shipped do not have `{{discountLine}}` in the
+  booking confirmation template. Add it above `Estimated total:` under
+  Admin → Communications so confirmation emails show the saving.
+
 ## Local operation
 
 ```bash

@@ -12,6 +12,23 @@ export default async function SettingsPage() {
   await requirePageStaff("manage_settings");
   const settings = await getSettings();
   const hours = await db().select().from(schema.businessHours);
+  // The promotion section ticks specific services, so the form needs the same
+  // bookable catalog the public booking page offers.
+  const bookableServices = await db()
+    .select({
+      id: schema.services.id,
+      name: schema.services.name,
+      categoryId: schema.services.categoryId,
+      bookingMode: schema.services.bookingMode,
+      basePriceCents: schema.services.basePriceCents,
+    })
+    .from(schema.services)
+    .where(eq(schema.services.active, true))
+    .orderBy(asc(schema.services.sort));
+  const serviceCategories = await db()
+    .select({ id: schema.serviceCategories.id, name: schema.serviceCategories.name })
+    .from(schema.serviceCategories)
+    .orderBy(asc(schema.serviceCategories.sort));
   const [blocks, staff, bays] = await Promise.all([
     db().select().from(schema.scheduleBlocks).where(gt(schema.scheduleBlocks.endsAt, new Date())).orderBy(asc(schema.scheduleBlocks.startsAt)),
     db().select({ id: schema.staffUsers.id, name: schema.staffUsers.name }).from(schema.staffUsers)
@@ -27,7 +44,16 @@ export default async function SettingsPage() {
         calculations. Changes are audited. Fields marked * still need
         confirmed real values from the owner.
       </p>
-      <SettingsForm initial={settings} />
+      <SettingsForm
+        initial={settings}
+        promotableServices={bookableServices
+          .filter((s) => s.bookingMode === "bookable" && s.basePriceCents !== null)
+          .map((s) => ({
+            id: s.id,
+            name: s.name,
+            categoryName: serviceCategories.find((c) => c.id === s.categoryId)?.name ?? "Other",
+          }))}
+      />
       <BusinessHoursForm
         initialHours={hours.map((h) => ({
           weekday: h.weekday,

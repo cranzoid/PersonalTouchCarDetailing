@@ -167,6 +167,15 @@ export type Attribution = {
   firstTouch?: Record<string, string>;
   lastTouch?: Record<string, string>;
   manualSource?: string;
+  /** Raw ?offer= code the visitor arrived on, before it is validated. */
+  offerCode?: string;
+  offerCapturedAt?: string;
+  /**
+   * The offer once the server has resolved it against settings. Recorded on
+   * leads (which have no prices, so no amount) and on appointments alongside
+   * the locked discount columns.
+   */
+  promo?: { code: string; label: string; percentOffBp: number; at: string };
 };
 
 export const leads = pgTable(
@@ -360,6 +369,26 @@ export const appointments = pgTable(
     totalCents: integer("total_cents").notNull().default(0),
     depositRequiredCents: integer("deposit_required_cents").notNull().default(0),
     depositPaidCents: integer("deposit_paid_cents").notNull().default(0),
+    /**
+     * Promotional discount locked at booking. Subtracted from the subtotal
+     * BEFORE tax, exactly as computeInvoiceTotals does, so this row reconciles
+     * with the invoice it later produces:
+     *   subtotal_cents = sum of appointment_services (always gross)
+     *   tax_cents      = tax(subtotal_cents - discount_cents, tax_rate_bp)
+     *   total_cents    = subtotal_cents - discount_cents + tax_cents
+     * Never recalculated — additional work approved at the shop is billed at
+     * full price. Deliberately stores cents, not a rate: a stored percentage
+     * would invite some later code path to recompute and break that promise.
+     */
+    discountCents: integer("discount_cents").notNull().default(0),
+    /** Offer code applied at booking, for campaign reporting and support. */
+    promoCode: text("promo_code"),
+    /**
+     * Customer-facing label as shown at booking, snapshotted for the same
+     * reason tax_label/tax_rate_bp are (DECISIONS.md #6): editing the offer
+     * later must not rewrite what this customer was shown.
+     */
+    promoLabel: text("promo_label"),
     durationMin: integer("duration_min").notNull(),
     customerNotes: text("customer_notes"),
     internalNotes: text("internal_notes"),

@@ -127,6 +127,16 @@ export default async function AppointmentDetailPage({
               <td />
               <td className="py-2 text-right text-ink-200">{formatCents(appt.subtotalCents)}</td>
             </tr>
+            {appt.discountCents > 0 && (
+              <tr>
+                <td className="py-1 text-emerald-300">
+                  {appt.promoLabel ?? "Discount"}
+                  {appt.promoCode ? ` (${appt.promoCode})` : ""}
+                </td>
+                <td />
+                <td className="py-1 text-right text-emerald-300">−{formatCents(appt.discountCents)}</td>
+              </tr>
+            )}
             <tr>
               <td className="py-1 text-ink-400">Tax ({(appt.taxRateBp / 100).toFixed(2)}%)</td>
               <td />

@@ -1,6 +1,12 @@
 import { and, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { percentCents, taxCents } from "@/lib/money";
+import {
+  allocateDiscount,
+  eligibleBaseCents,
+  promotionDiscountCents,
+  type ResolvedPromotion,
+} from "@/lib/promotions";
 import type { BusinessSettings } from "@/lib/settings";
 import type { VehicleCategory } from "@/lib/types";
 
@@ -14,7 +20,15 @@ export type PricedLine = {
 
 export type BookingPricing = {
   lines: PricedLine[];
+  /** Always gross — the sum of the lines, before any discount. */
   subtotalCents: number;
+  /**
+   * Promotional discount, applied to the subtotal BEFORE tax. Required rather
+   * than optional so every construction site has to decide.
+   */
+  discountCents: number;
+  promoCode: string | null;
+  promoLabel: string | null;
   taxCents: number;
   taxRateBp: number;
   totalCents: number;
@@ -23,6 +37,15 @@ export type BookingPricing = {
   durationMin: number;
   /** Normalized union of skills required by every selected service. */
   requiredSkills: string[];
+};
+
+/** A resolved discount, ready to apply. `cents` is authoritative. */
+export type AppliedDiscount = {
+  cents: number;
+  code?: string | null;
+  label?: string | null;
+  /** Per-line split of `cents`, used only to compute percentage deposits. */
+  allocation?: number[];
 };
 
 export class PricingError extends Error {}
@@ -37,8 +60,13 @@ export async function priceBooking(input: {
   addonIds: string[];
   vehicleCategory: VehicleCategory;
   settings: BusinessSettings;
+  /**
+   * Server-resolved promotion. The discount is computed here from the catalog
+   * prices — a caller can never supply an amount.
+   */
+  promo?: ResolvedPromotion | null;
 }): Promise<BookingPricing> {
-  const { serviceIds, addonIds, vehicleCategory, settings } = input;
+  const { serviceIds, addonIds, vehicleCategory, settings, promo } = input;
   if (serviceIds.length === 0) throw new PricingError("Select at least one service");
 
   const services = await db()
@@ -89,16 +117,16 @@ export async function priceBooking(input: {
   }
 
   const lines: PricedLine[] = [];
-  let depositRequiredCents = 0;
-
   for (const svc of services) {
     const adj = adjByService.get(svc.id);
-    const priceCents = svc.basePriceCents! + (adj?.priceDeltaCents ?? 0);
-    const durationMin = svc.baseDurationMin + (adj?.durationDeltaMin ?? 0);
-    lines.push({ serviceId: svc.id, description: svc.name, priceCents, durationMin });
-    if (svc.depositType === "fixed") depositRequiredCents += svc.depositValue;
-    else if (svc.depositType === "percent") depositRequiredCents += percentCents(priceCents, svc.depositValue);
+    lines.push({
+      serviceId: svc.id,
+      description: svc.name,
+      priceCents: svc.basePriceCents! + (adj?.priceDeltaCents ?? 0),
+      durationMin: svc.baseDurationMin + (adj?.durationDeltaMin ?? 0),
+    });
   }
+  const serviceLineCount = lines.length;
   for (const addon of addonRows) {
     lines.push({
       addonId: addon.id,
@@ -108,8 +136,34 @@ export async function priceBooking(input: {
     });
   }
 
+  // The discount is computed once, over the eligible slice of the cart, and
+  // then apportioned back onto those lines purely so percentage deposits can
+  // be charged on what the customer actually owes.
+  const discountCents = promo
+    ? promotionDiscountCents(eligibleBaseCents(lines, promo.eligibleServiceIds), promo.percentOffBp)
+    : 0;
+  const allocation = promo
+    ? allocateDiscount(lines, promo.eligibleServiceIds, discountCents)
+    : new Array(lines.length).fill(0);
+
+  let depositRequiredCents = 0;
+  for (let i = 0; i < serviceLineCount; i++) {
+    const svc = services.find((s) => s.id === lines[i].serviceId)!;
+    if (svc.depositType === "fixed") {
+      // A flat deposit is a no-show hold, not a share of the price, so a
+      // promotion does not shrink it.
+      depositRequiredCents += svc.depositValue;
+    } else if (svc.depositType === "percent") {
+      depositRequiredCents += percentCents(lines[i].priceCents - allocation[i], svc.depositValue);
+    }
+  }
+
   return {
-    ...computeTotals(lines, settings.taxRateBp, depositRequiredCents),
+    ...computeTotals(lines, settings.taxRateBp, depositRequiredCents, {
+      cents: discountCents,
+      code: promo?.code ?? null,
+      label: promo?.label ?? null,
+    }),
     requiredSkills: [...new Set(services.flatMap((service) => service.requiredSkills.map(normalizeSkill)).filter(Boolean))],
   };
 }
@@ -190,17 +244,29 @@ export function computeTotals(
   lines: PricedLine[],
   taxRateBp: number,
   depositRequiredCents = 0,
+  discount: AppliedDiscount = { cents: 0 },
 ): BookingPricing {
   const subtotalCents = lines.reduce((sum, l) => sum + l.priceCents, 0);
   const durationMin = lines.reduce((sum, l) => sum + l.durationMin, 0);
-  const tax = taxCents(subtotalCents, taxRateBp);
+  // Discount before tax, clamped to the subtotal — the same ordering and the
+  // same clamp as computeInvoiceTotals, so an appointment and the invoice it
+  // becomes agree to the cent.
+  const discountCents = Math.min(Math.max(0, discount.cents), subtotalCents);
+  const taxableCents = subtotalCents - discountCents;
+  const tax = taxCents(taxableCents, taxRateBp);
+  const totalCents = taxableCents + tax;
   return {
     lines,
     subtotalCents,
+    discountCents,
+    promoCode: discount.code ?? null,
+    promoLabel: discount.label ?? null,
     taxCents: tax,
     taxRateBp,
-    totalCents: subtotalCents + tax,
-    depositRequiredCents,
+    totalCents,
+    // A deposit can never exceed what is owed. This also closes a pre-existing
+    // hole where a fixed deposit could outrun a small job's total.
+    depositRequiredCents: Math.min(depositRequiredCents, totalCents),
     durationMin,
     requiredSkills: [],
   };

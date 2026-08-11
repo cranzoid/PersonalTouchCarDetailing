@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeTotals } from "../src/lib/pricing";
+import { computeInvoiceTotals } from "../src/lib/invoices";
 import { taxCents, percentCents } from "../src/lib/money";
 
 describe("taxCents", () => {
@@ -48,4 +49,72 @@ describe("computeTotals", () => {
     expect(Number.isInteger(t.taxCents)).toBe(true);
     expect(t.taxCents).toBe(433); // 3333 * 0.13 = 433.29
   });
+
+  it("applies a discount before tax, not after", () => {
+    const t = computeTotals(lines, 1300, 0, { cents: 4180 }); // 10% of 41800
+    expect(t.subtotalCents).toBe(41800); // subtotal stays gross
+    expect(t.discountCents).toBe(4180);
+    expect(t.taxCents).toBe(4891); // 13% of 37620
+    // The whole point: taxing the gross would give 5434.
+    expect(t.taxCents).not.toBe(5434);
+    expect(t.totalCents).toBe(42511);
+  });
+
+  it("clamps a discount larger than the subtotal", () => {
+    const t = computeTotals(lines, 1300, 0, { cents: 999_999 });
+    expect(t.discountCents).toBe(41800);
+    expect(t.taxCents).toBe(0);
+    expect(t.totalCents).toBe(0);
+  });
+
+  it("never lets the deposit exceed what is owed", () => {
+    // A fixed deposit larger than a heavily discounted total.
+    const t = computeTotals(lines, 1300, 50000, { cents: 41800 });
+    expect(t.totalCents).toBe(0);
+    expect(t.depositRequiredCents).toBe(0);
+  });
+
+  it("carries the promo code and label through", () => {
+    const t = computeTotals(lines, 1300, 0, { cents: 100, code: "FIRST10AUG26", label: "First Detail Offer" });
+    expect(t.promoCode).toBe("FIRST10AUG26");
+    expect(t.promoLabel).toBe("First Detail Offer");
+  });
+
+  it("defaults to no discount so existing callers are unaffected", () => {
+    const t = computeTotals(lines, 1300);
+    expect(t.discountCents).toBe(0);
+    expect(t.promoCode).toBeNull();
+    expect(t.totalCents).toBe(47234);
+  });
+});
+
+/**
+ * The booking total and the invoice it later becomes must agree to the cent —
+ * otherwise a deposit paid against the appointment cannot reconcile with the
+ * final bill. This pins the two implementations together permanently.
+ */
+describe("booking/invoice parity", () => {
+  const cases = [
+    { price: 41800, discount: 4180, rate: 1300 },
+    { price: 29900, discount: 0, rate: 1300 },
+    { price: 3333, discount: 333, rate: 1300 },
+    { price: 12500, discount: 12500, rate: 1300 },
+    { price: 50000, discount: 5000, rate: 0 },
+  ];
+
+  for (const { price, discount, rate } of cases) {
+    it(`agrees for ${price} less ${discount} at ${rate}bp`, () => {
+      const booking = computeTotals(
+        [{ description: "Service", priceCents: price, durationMin: 60 }],
+        rate,
+        0,
+        { cents: discount },
+      );
+      const invoice = computeInvoiceTotals([{ quantity: 1, unitPriceCents: price }], discount, rate);
+      expect(booking.subtotalCents).toBe(invoice.subtotalCents);
+      expect(booking.discountCents).toBe(invoice.discountCents);
+      expect(booking.taxCents).toBe(invoice.taxCents);
+      expect(booking.totalCents).toBe(invoice.totalCents);
+    });
+  }
 });

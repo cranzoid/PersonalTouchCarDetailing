@@ -13,6 +13,11 @@ const auth = vi.hoisted(() => ({
 auth.requireStaff.mockResolvedValue(auth.actor);
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+// The public quote action rate-limits by request headers, which only exist
+// inside a request scope. Limiting itself is covered by rate-limit.test.ts.
+vi.mock("@/lib/rate-limit", () => ({
+  consumeRateLimit: vi.fn(async () => ({ allowed: true, remaining: 5 })),
+}));
 vi.mock("@/lib/auth/session", () => ({
   requireStaff: auth.requireStaff,
   AuthError: class AuthError extends Error {},
@@ -25,6 +30,7 @@ import {
   convertLeadAction,
   updateLeadNotesAction,
 } from "../src/app/admin/(app)/leads/actions";
+import { submitQuoteAction } from "../src/app/(public)/quote/actions";
 
 async function resetDb() {
   await db().execute(sql`
@@ -69,6 +75,83 @@ async function insertStaff(active: boolean) {
   });
   return id;
 }
+
+/** Submits a public quote request carrying a claimed ad offer code. */
+async function submitQuoteWithOffer(offerCode: string | undefined) {
+  const fd = new FormData();
+  fd.set(
+    "payload",
+    JSON.stringify({
+      name: "Avery Morgan",
+      email: "avery@example.com",
+      serviceIds: [],
+      conditionDescription: "Swirls on the hood",
+      marketingConsent: false,
+      attribution: offerCode ? { source: "meta_ads", offerCode } : { source: "meta_ads" },
+    }),
+  );
+  return submitQuoteAction(fd);
+}
+
+async function setPromotion(promotion: Record<string, unknown>) {
+  await db()
+    .insert(schema.businessSettings)
+    .values({ key: "promotion", value: promotion })
+    .onConflictDoUpdate({ target: schema.businessSettings.key, set: { value: promotion } });
+}
+
+describe("quote requests carrying an ad offer", () => {
+  beforeEach(async () => {
+    await db().execute(sql`
+      TRUNCATE quote_requests, leads, business_settings, rate_limit_buckets, communications CASCADE
+    `);
+  });
+
+  // The pool is closed once for the whole file by the suite below.
+
+  const running = {
+    enabled: true,
+    code: "FIRST10AUG26",
+    label: "First Detail Offer",
+    percentOffBp: 1000,
+    expiresOn: "",
+    firstTimeOnly: true,
+    eligibleServiceIds: ["svc_detail"],
+  };
+
+  it("records the offer the business is actually running, not the raw claim", async () => {
+    await setPromotion(running);
+    const res = await submitQuoteWithOffer("first10aug26");
+    expect(res.ok).toBe(true);
+
+    const [lead] = await db().select().from(schema.leads);
+    // Resolved server-side: label and percentage come from settings, never the
+    // browser. No amount — a quote has no prices yet.
+    expect(lead.attribution?.promo).toMatchObject({
+      code: "FIRST10AUG26",
+      label: "First Detail Offer",
+      percentOffBp: 1000,
+    });
+  });
+
+  it("records no offer when the promotion is disabled or the code is stale", async () => {
+    await setPromotion({ ...running, enabled: false });
+    expect((await submitQuoteWithOffer("FIRST10AUG26")).ok).toBe(true);
+    expect((await db().select().from(schema.leads))[0].attribution?.promo).toBeUndefined();
+
+    await db().execute(sql`TRUNCATE leads, rate_limit_buckets CASCADE`);
+    await setPromotion(running);
+    expect((await submitQuoteWithOffer("RETIRED_CODE")).ok).toBe(true);
+    expect((await db().select().from(schema.leads))[0].attribution?.promo).toBeUndefined();
+  });
+
+  it("keeps the rest of the attribution intact", async () => {
+    await setPromotion(running);
+    await submitQuoteWithOffer("FIRST10AUG26");
+    const [lead] = await db().select().from(schema.leads);
+    expect(lead.attribution?.source).toBe("meta_ads");
+  });
+});
 
 describe("lead operations", () => {
   beforeEach(resetDb);

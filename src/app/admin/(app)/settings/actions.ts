@@ -40,6 +40,30 @@ const settingsInput = z.object({
   notifyOnNewAppointment: z.boolean(),
   staffNotifyPhones: z.array(z.string().trim().min(1).max(30)).max(10),
   staffNotifyEmails: z.array(z.string().trim().email().max(200)).max(10),
+  promotion: z
+    .object({
+      enabled: z.boolean(),
+      code: z
+        .string()
+        .trim()
+        .toUpperCase()
+        .regex(/^[A-Z0-9][A-Z0-9_-]{1,23}$/, "Use 2-24 letters, digits, dashes or underscores"),
+      label: z.string().trim().min(1).max(60),
+      percentOffBp: z.number().int().min(0).max(10000),
+      expiresOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).or(z.literal("")),
+      firstTimeOnly: z.boolean(),
+      eligibleServiceIds: z.array(z.string().trim().min(1).max(64)).max(50),
+    })
+    // An enabled offer with no percentage or no eligible services would either
+    // do nothing or, worse, read as "applies to everything". Refuse both.
+    .refine((p) => !p.enabled || p.percentOffBp > 0, {
+      message: "An enabled offer needs a percentage above zero",
+      path: ["percentOffBp"],
+    })
+    .refine((p) => !p.enabled || p.eligibleServiceIds.length > 0, {
+      message: "Tick at least one service the offer applies to",
+      path: ["eligibleServiceIds"],
+    }),
 });
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
@@ -103,7 +127,12 @@ export async function updateSettingsAction(raw: unknown): Promise<ActionResult> 
   try {
     const staff = await requireStaff("manage_settings");
     const parsed = settingsInput.safeParse(raw);
-    if (!parsed.success) return { ok: false, error: "Invalid values — please check the fields" };
+    if (!parsed.success) {
+      // Surface the first specific complaint — the promotion rules ("tick at
+      // least one service") are otherwise invisible behind a generic message.
+      const first = parsed.error.issues[0]?.message;
+      return { ok: false, error: first || "Invalid values — please check the fields" };
+    }
     const input = parsed.data;
 
     const before = await getSettings();

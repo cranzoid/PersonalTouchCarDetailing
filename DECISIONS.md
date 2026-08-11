@@ -88,3 +88,46 @@ prerequisite.
 No published years-in-business, inherited warranties, testimonials, or
 historical claims anywhere. All such content is settings-driven or explicitly
 marked as pending owner approval. **Fixed product rule, not a tech decision.**
+
+## 14. Ad promotions: one offer, locked in cents, eligibility checked twice
+The "10% off your first detail" ad applies itself — the code rides in the ad URL
+(`/book?offer=CODE`), is captured by the existing attribution component so it
+survives landing on the homepage first, and the customer never types anything.
+Consequential choices:
+
+- **One active promotion in `business_settings`** (jsonb, no migration), not a
+  promotions table. Staff can change or kill the offer without a deploy.
+- **Eligible services are an explicit opt-in list, failing closed.** An empty
+  list discounts nothing. A category rule would have silently enrolled ceramic
+  coating, tint and PPF the moment someone re-categorised a service.
+- **The discount is locked in cents on `appointments.discount_cents`** and never
+  recalculated; additional work approved at the shop is billed at full price.
+  The percentage is deliberately *not* stored — storing a rate invites a later
+  code path to recompute it. The label is snapshotted for the same reason
+  `tax_label` is (decision 6).
+- **A dedicated column, not a negative line item.** The estimate→appointment
+  path uses a negative line, but a discount there would surface as *work* on the
+  technician job sheet, the appointment services table and the deposit SMS.
+- **"First-time" means first _fulfilled_ detail**: a prior appointment for an
+  eligible service whose job reached ready-for-pickup/completed. A cancelled,
+  no-show or still-upcoming booking does not consume the offer. A second guard
+  blocks a customer who already holds an unfulfilled discounted booking, which
+  is what stops three discounted bookings in one sitting.
+- **Eligibility is re-checked inside the booking transaction**, after the
+  existing bay/staff `FOR UPDATE` locks (decision 3). Those locks already
+  serialize every booking, so the race needs no new lock. Losing the re-check
+  rolls back the whole transaction — no appointment, no customer, no vehicle —
+  and the customer confirms the corrected total on a second press.
+- **No public "is this email a customer?" endpoint.** Warning a returning
+  customer as they type would need an enumeration oracle; the two-phase confirm
+  gives the same guarantee without one.
+- **Codes are campaign-scoped** (`FIRST10AUG26`, never `FIRST10`). Claims persist
+  in localStorage with no separate expiry, so changing the code is the real kill
+  switch; re-using a retired one would honour stale claims.
+- **The quote → estimate path enforces the same rules.** Staff may type any
+  figure into the discount field, but the "Apply current offer" button re-checks
+  eligibility server-side.
+
+**Revisit when:** the business wants several offers at once, usage caps, or
+per-campaign revenue reporting → promote the settings blob to a `promotions`
+table and join `appointments.promo_code` for the breakdown.

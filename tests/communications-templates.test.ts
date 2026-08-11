@@ -63,6 +63,18 @@ describe("message template validation", () => {
     ).toBeNull();
   });
 
+  it("accepts the promotional discount line on booking confirmations", () => {
+    // The contract map gates staff edits, so a variable the booking action
+    // supplies but the map omits would be rejected in the admin UI.
+    expect(
+      validateTemplateContent("booking_confirmation", {
+        channel: "email",
+        subject: "Booking confirmed — {{businessName}}",
+        body: "Hi {{firstName}}, you're booked for {{services}}.\n{{discountLine}}Estimated total: {{total}}",
+      }),
+    ).toBeNull();
+  });
+
   it("does not invent a contract for an unknown existing key", () => {
     expect(
       validateTemplateContent("existing_custom_key", {

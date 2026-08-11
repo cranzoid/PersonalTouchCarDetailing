@@ -33,6 +33,7 @@ export default async function NewEstimatePage({
     vehicle: { year?: number; make?: string; model?: string; category?: string } | null;
     requestedServiceIds: string[];
     conditionDescription: string;
+    promo: { code: string; label: string; percentOffBp: number } | null;
   } | null = null;
   if (quoteRequestId) {
     const qr = (
@@ -50,6 +51,15 @@ export default async function NewEstimatePage({
         vehicle: qr.vehicleInfo ?? null,
         requestedServiceIds: qr.requestedServiceIds,
         conditionDescription: qr.conditionDescription ?? "",
+        // Recorded when the quote came in, so staff can see the ad promise
+        // this customer was shown.
+        promo: lead?.attribution?.promo
+          ? {
+              code: lead.attribution.promo.code,
+              label: lead.attribution.promo.label,
+              percentOffBp: lead.attribution.promo.percentOffBp,
+            }
+          : null,
       };
     }
   }

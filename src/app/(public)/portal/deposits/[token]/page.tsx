@@ -106,6 +106,9 @@ export default async function AppointmentDepositPage({
           <div className="flex justify-between gap-4"><dt className="text-ink-400">Customer</dt><dd className="text-right text-ink-200">{customer?.firstName} {customer?.lastName}</dd></div>
           <div className="flex justify-between gap-4"><dt className="text-ink-400">Vehicle</dt><dd className="text-right text-ink-200">{[vehicle?.year, vehicle?.make, vehicle?.model].filter(Boolean).join(" ")}</dd></div>
           <div className="flex justify-between gap-4"><dt className="text-ink-400">Services</dt><dd className="max-w-sm text-right text-ink-200">{lines.map((line) => line.description).join(", ")}</dd></div>
+          {appointment.discountCents > 0 && (
+            <div className="flex justify-between gap-4"><dt className="text-emerald-300">{appointment.promoLabel ?? "Discount"}</dt><dd className="text-right text-emerald-300">−{formatCents(appointment.discountCents, settings.currency)}</dd></div>
+          )}
           <div className="border-t border-ink-700 pt-3 flex justify-between gap-4"><dt className="text-ink-300">Estimated total</dt><dd className="font-medium text-white">{formatCents(appointment.totalCents, settings.currency)}</dd></div>
           <div className="flex justify-between gap-4"><dt className="font-medium text-ink-200">Deposit due</dt><dd className="text-lg font-semibold text-accent-300">{formatCents(outstandingCents, settings.currency)}</dd></div>
         </dl>

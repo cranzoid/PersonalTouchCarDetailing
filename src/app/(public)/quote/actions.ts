@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db, schema } from "@/db";
 import { newId } from "@/lib/id";
 import { getSettings } from "@/lib/settings";
+import { resolveActivePromotion } from "@/lib/promotions";
 import { sendMessageTemplate } from "@/lib/messaging";
 import { inArray } from "drizzle-orm";
 import { VEHICLE_CATEGORIES } from "@/lib/types";
@@ -78,6 +79,26 @@ export async function submitQuoteAction(formData: FormData): Promise<QuoteResult
   try {
     const leadId = newId("lead");
     const quoteRequestId = newId("qr");
+    // Resolve the claimed offer server-side so the lead records what the
+    // business is actually running, not whatever string the browser held. No
+    // amount is stored: a quote has no prices yet.
+    const settings = await getSettings();
+    const attribution = (input.attribution ?? {}) as Record<string, unknown>;
+    const promo = resolveActivePromotion(
+      settings,
+      typeof attribution.offerCode === "string" ? attribution.offerCode : undefined,
+    );
+    const attributionToStore = promo
+      ? {
+          ...attribution,
+          promo: {
+            code: promo.code,
+            label: promo.label,
+            percentOffBp: promo.percentOffBp,
+            at: new Date().toISOString(),
+          },
+        }
+      : input.attribution;
 
     await db().insert(schema.leads).values({
       id: leadId,
@@ -87,7 +108,7 @@ export async function submitQuoteAction(formData: FormData): Promise<QuoteResult
       kind: "quote",
       status: "new",
       message: input.conditionDescription,
-      attribution: (input.attribution ?? null) as never,
+      attribution: (attributionToStore ?? null) as never,
       marketingConsent: input.marketingConsent,
       marketingConsentAt: input.marketingConsent ? new Date() : null,
       marketingConsentSource: input.marketingConsent ? "public_quote_form" : null,
@@ -126,7 +147,6 @@ export async function submitQuoteAction(formData: FormData): Promise<QuoteResult
       }
     }
 
-    const settings = await getSettings();
     await sendMessageTemplate({
       templateKey: "lead_ack",
       recipient: input,

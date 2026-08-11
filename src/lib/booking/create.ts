@@ -5,11 +5,31 @@ import { audit } from "@/lib/audit";
 import type { BusinessSettings } from "@/lib/settings";
 import type { Attribution } from "@/db/schema";
 import { priceBooking, type BookingPricing } from "@/lib/pricing";
+import { isFirstTimeDetailCustomer, type ResolvedPromotion } from "@/lib/promotions";
 import { VEHICLE_CATEGORIES, type VehicleCategory } from "@/lib/types";
 import { createAppointmentDepositAccessToken } from "@/lib/appointment-deposits";
 import { computeDaySlots, loadDayContext, pickFreeBay, pickFreeStaff, type Interval } from "./availability";
 
 export class BookingError extends Error {}
+
+/**
+ * The promotion the customer was shown no longer applies — they became
+ * ineligible, or the offer changed between page load and submit.
+ *
+ * Thrown from inside the booking transaction, so nothing is written: no
+ * appointment, no customer, no vehicle. The caller re-prices and asks the
+ * customer to confirm the corrected total. A price must never change silently
+ * underneath someone.
+ */
+export class OfferChangedError extends BookingError {
+  constructor(readonly reason: "returning" | "expired") {
+    super(
+      reason === "returning"
+        ? "This offer is for first-time customers only, so it does not apply to this booking."
+        : "This offer is no longer available.",
+    );
+  }
+}
 
 export type BookingRequest = {
   customer: {
@@ -36,6 +56,11 @@ export type BookingRequest = {
   policiesAccepted: boolean;
   settings: BusinessSettings;
   /**
+   * The promotion priced into `pricing`, so eligibility can be re-checked
+   * under the booking lock. Absent means no promotion was applied.
+   */
+  promo?: ResolvedPromotion | null;
+  /**
    * Staff-only: book outside the minimum-notice / maximum-window rules, for
    * walk-ins being recorded after the fact or same-day jobs. Ignored for
    * customer bookings — see the actor check in createAppointmentInTransaction.
@@ -46,7 +71,8 @@ export type BookingRequest = {
 
 type BookingActor = { type: "customer" } | { type: "staff"; id: string };
 
-type BookingTx = Pick<Db, "execute" | "insert" | "update">;
+// `select` is needed for the in-transaction promotion eligibility re-check.
+type BookingTx = Pick<Db, "execute" | "insert" | "update" | "select">;
 type CreatedAppointment = {
   appointmentId: string;
   customerId: string;
@@ -98,6 +124,22 @@ export async function createAppointmentInTransaction(
     // Re-validate the slot from live data (post-lock). loadDayContext uses the
     // global db() handle, which is safe: the lock above guarantees no
     // concurrent booking transaction can commit between here and our insert.
+    // Promotion eligibility, re-checked under the lock above. Those two
+    // FOR UPDATE statements serialize every booking transaction, so a second
+    // parallel attempt by the same person blocks here and then sees the
+    // winner's committed rows — no extra lock or unique index needed.
+    // Staff-created bookings are exempt: they carry their own pricing.
+    if (
+      actor.type === "customer" &&
+      req.promo?.firstTimeOnly &&
+      req.pricing.discountCents > 0 &&
+      !(await isFirstTimeDetailCustomer(tx, req.customer, req.promo.eligibleServiceIds))
+    ) {
+      // The caller re-prices through priceBooking() rather than adjusting
+      // totals here — that stays the one pricing authority.
+      throw new OfferChangedError("returning");
+    }
+
     const { ctx, bayIds } = await loadDayContext({
       dateISO: req.dateISO,
       workDurationMin: req.pricing.durationMin,
@@ -164,6 +206,9 @@ export async function createAppointmentInTransaction(
       resourceId: bayIds[bayIdx],
       assignedStaffId: assignedStaffId ?? null,
       subtotalCents: req.pricing.subtotalCents,
+      discountCents: req.pricing.discountCents,
+      promoCode: req.pricing.promoCode,
+      promoLabel: req.pricing.promoLabel,
       taxCents: req.pricing.taxCents,
       taxRateBp: req.pricing.taxRateBp,
       totalCents: req.pricing.totalCents,
@@ -203,6 +248,8 @@ export async function createAppointmentInTransaction(
         assignedStaffId: assignedStaffId ?? null,
         requiredSkills: req.pricing.requiredSkills,
         totalCents: req.pricing.totalCents,
+        discountCents: req.pricing.discountCents,
+        promoCode: req.pricing.promoCode,
       },
     });
 
@@ -255,6 +302,9 @@ export async function createStaffAppointment(input: {
       throw new BookingError("Vehicle category is invalid");
     }
 
+    // No `promo` argument: public ad offers never apply to a booking staff
+    // take on someone's behalf. Staff discount through the estimate/invoice
+    // discount field, which is theirs to set and is separately audited.
     const pricing = await priceBooking({
       serviceIds: input.serviceIds,
       addonIds: input.addonIds,

@@ -150,6 +150,15 @@ export default async function ReportsPage({
             value={String(report.tax.invoiceCount)}
             note="Sent, paid, overdue or refunded"
           />
+          <Kpi
+            label="Discounts given"
+            value={formatCents(report.discounts.discountCents, report.currency)}
+            note={
+              report.discounts.discountRate !== null
+                ? `${(report.discounts.discountRate * 100).toFixed(1)}% of sales, across ${report.discounts.invoiceCount} invoice${report.discounts.invoiceCount === 1 ? "" : "s"}`
+                : "No invoices issued in this window"
+            }
+          />
         </div>
         {report.tax.exemptReasons.length > 0 && (
           <div className="mt-4 overflow-x-auto rounded-2xl border border-ink-700">

@@ -64,7 +64,7 @@ export default async function LeadsPage({
                 <tr><td colSpan={5} className="px-4 py-8 text-center text-ink-500">No leads yet.</td></tr>
               )}
               {leads.map((l) => {
-                const attr = l.attribution as Record<string, unknown> | null;
+                const attr = l.attribution;
                 return (
                   <tr key={l.id} className="border-t border-ink-800 align-top hover:bg-ink-900/40">
                     <td className="px-4 py-3">
@@ -78,7 +78,14 @@ export default async function LeadsPage({
                       {l.phone && <p>{l.phone}</p>}
                     </td>
                     <td className="px-4 py-3 capitalize text-ink-300">{l.kind}</td>
-                    <td className="px-4 py-3 text-ink-400">{(attr?.source as string) ?? "—"}</td>
+                    <td className="px-4 py-3 text-ink-400">
+                      {(attr?.source as string) ?? "—"}
+                      {attr?.promo && (
+                        <span className="ml-2 rounded bg-emerald-950/40 px-1.5 py-0.5 text-xs text-emerald-300">
+                          {attr.promo.code}
+                        </span>
+                      )}
+                    </td>
                     <td className="px-4 py-3">
                       <LeadStatusSelect leadId={l.id} status={l.status} />
                     </td>

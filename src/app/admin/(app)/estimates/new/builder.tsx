@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatCents, taxCents } from "@/lib/money";
 import { VEHICLE_CATEGORIES, VEHICLE_CATEGORY_LABELS } from "@/lib/types";
-import { createEstimateAction } from "../actions";
+import { applyPromotionToEstimateAction, createEstimateAction } from "../actions";
 
 type ServiceOption = {
   id: string;
@@ -21,6 +21,8 @@ type Prefill = {
   vehicle: { year?: number; make?: string; model?: string; category?: string } | null;
   requestedServiceIds: string[];
   conditionDescription: string;
+  /** The ad offer this quote arrived on, if any. */
+  promo: { code: string; label: string; percentOffBp: number } | null;
 } | null;
 
 type Line = {
@@ -78,6 +80,33 @@ export function EstimateBuilder({
   const [serviceToAdd, setServiceToAdd] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [offerBusy, setOfferBusy] = useState(false);
+  const [offerNote, setOfferNote] = useState<{ ok: boolean; text: string } | null>(null);
+
+  /**
+   * Fills the discount field from the running offer. The server re-checks
+   * eligibility, so this cannot quietly discount a returning customer.
+   */
+  async function applyOffer() {
+    setOfferBusy(true);
+    setOfferNote(null);
+    const res = await applyPromotionToEstimateAction({
+      email: email || undefined,
+      phone: phone || undefined,
+      lines: lines.map((l) => ({
+        serviceId: l.serviceId,
+        quantity: l.quantity,
+        unitPriceCents: toCents(l.unitPrice),
+      })),
+    });
+    setOfferBusy(false);
+    if (!res.ok) {
+      setOfferNote({ ok: false, text: res.error });
+      return;
+    }
+    setDiscount((res.discountCents / 100).toFixed(2));
+    setOfferNote({ ok: true, text: `${res.label} applied — ${formatCents(res.discountCents)} off.` });
+  }
 
   const totals = useMemo(() => {
     const subtotal = lines.reduce((sum, l) => sum + l.quantity * toCents(l.unitPrice), 0);
@@ -262,12 +291,33 @@ export function EstimateBuilder({
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-ink-300">Pricing</h2>
         <div className="grid gap-3 sm:grid-cols-3">
           <label className="block"><span className={label}>Discount ($)</span>
-            <input className={input} inputMode="decimal" value={discount} onChange={(e) => setDiscount(e.target.value)} /></label>
+            <input className={input} inputMode="decimal" value={discount} onChange={(e) => setDiscount(e.target.value)} />
+            <button
+              type="button"
+              onClick={() => void applyOffer()}
+              disabled={offerBusy || lines.length === 0}
+              className="mt-2 rounded-lg border border-ink-600 px-3 py-1.5 text-xs text-ink-200 hover:border-accent-400 disabled:opacity-40"
+            >
+              {offerBusy ? "Checking…" : "Apply current offer"}
+            </button>
+          </label>
           <label className="block"><span className={label}>Deposit required ($)</span>
             <input className={input} inputMode="decimal" value={deposit} onChange={(e) => setDeposit(e.target.value)} /></label>
           <label className="block"><span className={label}>Valid for (days)</span>
             <input className={input} type="number" min={1} max={365} value={validDays} onChange={(e) => setValidDays(e.target.value)} /></label>
         </div>
+        {prefill?.promo && (
+          <p className="mt-3 rounded-xl border border-emerald-400/30 bg-emerald-950/20 p-3 text-xs text-emerald-200">
+            This quote came in on {prefill.promo.code} — {prefill.promo.label},{" "}
+            {prefill.promo.percentOffBp / 100}% off. Use “Apply current offer” so the customer gets
+            what the ad promised; it checks they qualify first.
+          </p>
+        )}
+        {offerNote && (
+          <p className={`mt-3 text-xs ${offerNote.ok ? "text-emerald-300" : "text-amber-300"}`}>
+            {offerNote.text}
+          </p>
+        )}
         <div className="mt-4 rounded-xl border border-ink-800 p-4 text-sm text-ink-300">
           <p>Subtotal: <strong className="text-white">{formatCents(totals.subtotal)}</strong></p>
           {totals.disc > 0 && <p>Discount: −{formatCents(totals.disc)}</p>}
