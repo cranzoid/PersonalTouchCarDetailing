@@ -1,16 +1,23 @@
 import type { NextConfig } from "next";
 import { resolve } from "path";
 
+// Meta Pixel loads fbevents.js from connect.facebook.net, beacons events to
+// www.facebook.com, and uses a tracking <img> on www.facebook.com for the
+// noscript fallback. Nothing else in the CSP changes for it.
+const META_PIXEL_SCRIPT_SRC = "https://connect.facebook.net";
+const META_PIXEL_CONNECT_SRC = "https://www.facebook.com https://connect.facebook.net";
+const META_PIXEL_IMG_SRC = "https://www.facebook.com";
+
 const scriptPolicy = process.env.NODE_ENV === "production"
-  ? "script-src 'self' 'unsafe-inline'"
-  : "script-src 'self' 'unsafe-inline' 'unsafe-eval'";
+  ? `script-src 'self' 'unsafe-inline' ${META_PIXEL_SCRIPT_SRC}`
+  : `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${META_PIXEL_SCRIPT_SRC}`;
 const contentSecurityPolicy = [
   "default-src 'self'",
   scriptPolicy,
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
+  `img-src 'self' data: blob: ${META_PIXEL_IMG_SRC}`,
   "font-src 'self' data:",
-  "connect-src 'self'",
+  `connect-src 'self' ${META_PIXEL_CONNECT_SRC}`,
   "media-src 'self'",
   "object-src 'none'",
   "base-uri 'self'",

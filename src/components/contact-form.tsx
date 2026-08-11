@@ -2,6 +2,7 @@
 
 import { useId, useState } from "react";
 import { getStoredAttribution } from "@/components/attribution";
+import { trackMetaLead } from "@/components/meta-pixel";
 import { submitContactAction, type ContactResult } from "@/app/(public)/contact/actions";
 
 export function ContactForm({ kind = "contact" }: { kind?: "contact" | "fleet" }) {
@@ -23,6 +24,10 @@ export function ContactForm({ kind = "contact" }: { kind?: "contact" | "fleet" }
     });
     setSubmitting(false);
     setResult(res);
+    // Conversion: the lead row was created server-side. Not fired on errors.
+    if (res.ok) {
+      trackMetaLead({ content_name: kind === "fleet" ? "Fleet Enquiry" : "Contact Enquiry" });
+    }
   }
 
   if (result?.ok) {
