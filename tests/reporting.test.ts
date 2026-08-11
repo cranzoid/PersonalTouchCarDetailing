@@ -6,6 +6,7 @@ import {
   groupRevenueBySource,
   resolvePaymentSource,
   summarizeRevenue,
+  summarizeDiscounts,
   summarizeTax,
   summarizePaymentMethods,
 } from "../src/lib/reporting";
@@ -248,6 +249,33 @@ const invoice = (over: Partial<{
   taxExempt: false,
   taxExemptReason: null,
   ...over,
+});
+
+describe("summarizeDiscounts", () => {
+  it("totals what was given away and the share of sales it represents", () => {
+    const summary = summarizeDiscounts([
+      invoice({ subtotalCents: 10000, discountCents: 1000 }),
+      invoice({ subtotalCents: 30000, discountCents: 3000 }),
+      invoice({ subtotalCents: 10000, discountCents: 0 }),
+    ]);
+    expect(summary.discountCents).toBe(4000);
+    expect(summary.invoiceCount).toBe(2); // only the two that carried one
+    expect(summary.discountRate).toBeCloseTo(4000 / 50000);
+  });
+
+  it("ignores drafts and cancellations, matching the tax summary", () => {
+    const summary = summarizeDiscounts([
+      invoice({ status: "draft", discountCents: 5000 }),
+      invoice({ status: "cancelled", discountCents: 5000 }),
+      invoice({ subtotalCents: 10000, discountCents: 1000 }),
+    ]);
+    expect(summary.discountCents).toBe(1000);
+  });
+
+  it("reports a null rate rather than dividing by zero", () => {
+    expect(summarizeDiscounts([]).discountRate).toBeNull();
+    expect(summarizeDiscounts([invoice({ status: "draft" })]).discountRate).toBeNull();
+  });
 });
 
 describe("summarizeTax", () => {

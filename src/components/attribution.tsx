@@ -17,7 +17,18 @@ export type StoredAttribution = {
   fbclid?: string;
   firstTouch?: Record<string, string>;
   lastTouch?: Record<string, string>;
+  /**
+   * Ad offer code from ?offer=. Stored here rather than in its own module so
+   * it survives the same way every other ad signal does — a visitor can land
+   * on the homepage from the ad and still get the offer when they reach the
+   * booking page. It is only ever a claim: the server decides what it is worth.
+   */
+  offerCode?: string;
+  offerCapturedAt?: string;
 };
+
+/** Offer codes are uppercase alphanumerics; anything else is ignored. */
+const OFFER_CODE = /^[A-Z0-9][A-Z0-9_-]{1,23}$/;
 
 /**
  * Captures marketing attribution on landing (UTM params, click ids, referrer)
@@ -34,13 +45,17 @@ export function AttributionCapture() {
       }
       const gclid = params.get("gclid") ?? undefined;
       const fbclid = params.get("fbclid") ?? undefined;
-      const hasSignal = Object.keys(utm).length > 0 || gclid || fbclid || document.referrer;
+      const rawOffer = params.get("offer")?.trim().toUpperCase();
+      const offer = rawOffer && OFFER_CODE.test(rawOffer) ? rawOffer : undefined;
+      const hasSignal =
+        Object.keys(utm).length > 0 || gclid || fbclid || offer || document.referrer;
 
       const existing: StoredAttribution = JSON.parse(localStorage.getItem(KEY) ?? "{}");
       const touch: Record<string, string> = {
         ...utm,
         ...(gclid ? { gclid } : {}),
         ...(fbclid ? { fbclid } : {}),
+        ...(offer ? { offer } : {}),
         ...(document.referrer ? { referrer: document.referrer } : {}),
         landingPage: window.location.pathname,
         at: new Date().toISOString(),
@@ -61,6 +76,9 @@ export function AttributionCapture() {
         utm: Object.keys(utm).length > 0 ? utm : existing.utm,
         gclid: gclid ?? existing.gclid,
         fbclid: fbclid ?? existing.fbclid,
+        // Last touch wins: a newer campaign supersedes an older code.
+        offerCode: offer ?? existing.offerCode,
+        offerCapturedAt: offer ? new Date().toISOString() : existing.offerCapturedAt,
         firstTouch: existing.firstTouch ?? (hasSignal ? touch : undefined),
         lastTouch: hasSignal ? touch : existing.lastTouch,
       };

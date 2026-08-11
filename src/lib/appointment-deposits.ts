@@ -127,6 +127,9 @@ export async function sendAppointmentDepositRequest(
       `Your appointment is not confirmed until the ${formatCents(appointment.depositRequiredCents, settings.currency)} deposit is paid.`,
       `Pay securely: ${depositUrl}`,
       "",
+      ...(appointment.discountCents > 0
+        ? [`${appointment.promoLabel ?? "Discount"}: -${formatCents(appointment.discountCents, settings.currency)}.`]
+        : []),
       `Estimated total: ${formatCents(appointment.totalCents, settings.currency)}.`,
       `— ${settings.businessName}`,
     ].join("\n"),

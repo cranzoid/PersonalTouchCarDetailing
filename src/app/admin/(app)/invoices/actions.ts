@@ -95,7 +95,12 @@ export async function createInvoiceFromJobAction(
       // With `||` it silently fell back to the 13% settings rate, which made
       // tax exemption impossible on job-derived invoices.
       const taxRateBp = appointment?.taxRateBp ?? settings.taxRateBp;
-      const totals = computeInvoiceTotals(lines, 0, taxRateBp);
+      // The promotional discount locked when the customer booked. Carried
+      // across as a fixed amount, never recalculated: additional work approved
+      // at the shop is billed at full price, and computeInvoiceTotals clamps it
+      // to the subtotal.
+      const discountCents = appointment?.discountCents ?? 0;
+      const totals = computeInvoiceTotals(lines, discountCents, taxRateBp);
       const depositAppliedCents = Math.min(appointment?.depositPaidCents ?? 0, totals.totalCents);
 
       const number = await nextInvoiceNumber(tx);
@@ -108,13 +113,16 @@ export async function createInvoiceFromJobAction(
         jobId: job.id,
         status: "draft",
         subtotalCents: totals.subtotalCents,
-        discountCents: 0,
+        discountCents: totals.discountCents,
         taxRateBp,
         taxLabel: settings.taxLabel,
         taxRegistrationNumber: settings.taxRegistrationNumber || null,
         taxCents: totals.taxCents,
         totalCents: totals.totalCents,
         depositAppliedCents,
+        notes: appointment?.promoLabel
+          ? `${appointment.promoLabel}${appointment.promoCode ? ` (${appointment.promoCode})` : ""} applied at booking.`
+          : null,
       });
       await tx.insert(schema.invoiceLineItems).values(
         lines.map((line, i) => ({
@@ -136,7 +144,14 @@ export async function createInvoiceFromJobAction(
         action: "invoice.created",
         entityType: "invoice",
         entityId: invoiceId,
-        after: { number, jobId, totalCents: totals.totalCents, lines: lines.length },
+        after: {
+          number,
+          jobId,
+          totalCents: totals.totalCents,
+          discountCents: totals.discountCents,
+          promoCode: appointment?.promoCode ?? null,
+          lines: lines.length,
+        },
       });
       return { ok: true, invoiceId };
     });
@@ -270,7 +285,14 @@ export async function createConsolidatedInvoiceAction(
         return { ok: false, error: "Selected jobs use different tax rates and cannot share one invoice" };
       }
       const taxRateBp = taxRates.values().next().value ?? settings.taxRateBp;
-      const totals = computeInvoiceTotals(lines, 0, taxRateBp);
+      // Each appointment's locked discount rides with its own lines. Normally
+      // zero here — a first-time offer and a fleet account rarely meet — but
+      // the invoice must not silently drop the money when they do.
+      const discountCents = appointmentRows.reduce(
+        (sum, appointment) => sum + appointment.discountCents,
+        0,
+      );
+      const totals = computeInvoiceTotals(lines, discountCents, taxRateBp);
       const deposits = appointmentRows.reduce((sum, appointment) => sum + appointment.depositPaidCents, 0);
       const depositAppliedCents = Math.min(deposits, totals.totalCents);
       const number = await nextInvoiceNumber(tx);
@@ -284,14 +306,19 @@ export async function createConsolidatedInvoiceAction(
         jobId: null,
         status: "draft",
         subtotalCents: totals.subtotalCents,
-        discountCents: 0,
+        discountCents: totals.discountCents,
         taxRateBp,
         taxLabel: settings.taxLabel,
         taxRegistrationNumber: settings.taxRegistrationNumber || null,
         taxCents: totals.taxCents,
         totalCents: totals.totalCents,
         depositAppliedCents,
-        notes: `Consolidated fleet invoice for ${selectedJobs.length} job${selectedJobs.length === 1 ? "" : "s"}.`,
+        notes: [
+          `Consolidated fleet invoice for ${selectedJobs.length} job${selectedJobs.length === 1 ? "" : "s"}.`,
+          ...[...new Set(appointmentRows.map((a) => a.promoLabel).filter(Boolean))].map(
+            (label) => `${label} applied at booking.`,
+          ),
+        ].join(" "),
       });
       await tx.insert(schema.invoiceLineItems).values(lines.map((line, sort) => ({
         id: newId("ili"),

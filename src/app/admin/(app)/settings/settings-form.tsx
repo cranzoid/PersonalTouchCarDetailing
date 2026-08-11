@@ -24,7 +24,15 @@ const CLOCK_OPTIONS = Array.from({ length: 96 }, (_, index) => {
   return { value, label: formatHHMM12(value) };
 });
 
-export function SettingsForm({ initial }: { initial: BusinessSettings }) {
+export type PromotableService = { id: string; name: string; categoryName: string };
+
+export function SettingsForm({
+  initial,
+  promotableServices = [],
+}: {
+  initial: BusinessSettings;
+  promotableServices?: PromotableService[];
+}) {
   const [form, setForm] = useState({
     businessName: initial.businessName,
     legalEntityName: initial.legalEntityName,
@@ -49,8 +57,16 @@ export function SettingsForm({ initial }: { initial: BusinessSettings }) {
     // Comma-separated in the UI, split into arrays on save.
     staffNotifyPhones: initial.staffNotifyPhones.join(", "),
     staffNotifyEmails: initial.staffNotifyEmails.join(", "),
+    // Percent in the UI, basis points on save — same convention as the tax rate.
+    promoPercent: (initial.promotion.percentOffBp / 100).toFixed(2),
+    promoCode: initial.promotion.code,
+    promoLabel: initial.promotion.label,
+    promoExpiresOn: initial.promotion.expiresOn,
   });
   const [notifyOnNewAppointment, setNotifyOnNewAppointment] = useState(initial.notifyOnNewAppointment);
+  const [promoEnabled, setPromoEnabled] = useState(initial.promotion.enabled);
+  const [promoFirstTimeOnly, setPromoFirstTimeOnly] = useState(initial.promotion.firstTimeOnly);
+  const [promoServiceIds, setPromoServiceIds] = useState<string[]>(initial.promotion.eligibleServiceIds);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
@@ -82,6 +98,15 @@ export function SettingsForm({ initial }: { initial: BusinessSettings }) {
       notifyOnNewAppointment,
       staffNotifyPhones: splitList(form.staffNotifyPhones),
       staffNotifyEmails: splitList(form.staffNotifyEmails),
+      promotion: {
+        enabled: promoEnabled,
+        code: form.promoCode.trim().toUpperCase(),
+        label: form.promoLabel.trim(),
+        percentOffBp: Math.round(Number(form.promoPercent) * 100),
+        expiresOn: form.promoExpiresOn,
+        firstTimeOnly: promoFirstTimeOnly,
+        eligibleServiceIds: promoServiceIds,
+      },
     });
     setBusy(false);
     setMsg(res.ok ? { ok: true, text: "Settings saved." } : { ok: false, text: res.error });
@@ -126,6 +151,106 @@ export function SettingsForm({ initial }: { initial: BusinessSettings }) {
           {field("taxRatePct", "Tax rate % (Ontario HST = 13)")}
           {field("taxRegistrationNumber", "HST registration number *")}
         </div>
+      </section>
+      <section>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-ink-300">Promotion</h2>
+        <label className="flex items-center gap-2 text-sm text-ink-200">
+          <input
+            type="checkbox"
+            checked={promoEnabled}
+            onChange={(e) => setPromoEnabled(e.target.checked)}
+          />
+          Run an automatic offer for visitors arriving from an ad
+        </label>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          {field("promoLabel", "Customer-facing label", { placeholder: "First Detail Offer" })}
+          {field("promoPercent", "Percent off (10 = 10%)")}
+          {field("promoCode", "Offer code for the ad URL", { placeholder: "FIRST10AUG26" })}
+          {field("promoExpiresOn", "Expires on (blank = no expiry)", { type: "date" })}
+        </div>
+        <label className="mt-3 flex items-center gap-2 text-sm text-ink-200">
+          <input
+            type="checkbox"
+            checked={promoFirstTimeOnly}
+            onChange={(e) => setPromoFirstTimeOnly(e.target.checked)}
+          />
+          First-time customers only (no completed detail with us yet)
+        </label>
+
+        <fieldset className="mt-4">
+          <legend className="mb-2 text-xs text-ink-400">
+            Services the offer applies to — nothing is discounted until you tick something
+          </legend>
+          {promotableServices.length === 0 ? (
+            <p className="text-xs text-ink-500">No bookable services found.</p>
+          ) : (
+            <div className="grid gap-1.5 sm:grid-cols-2">
+              {promotableServices.map((service) => {
+                const on = promoServiceIds.includes(service.id);
+                return (
+                  <label key={service.id} className="flex items-start gap-2 text-sm text-ink-200">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={on}
+                      onChange={() =>
+                        setPromoServiceIds(
+                          on
+                            ? promoServiceIds.filter((id) => id !== service.id)
+                            : [...promoServiceIds, service.id],
+                        )
+                      }
+                    />
+                    <span>
+                      {service.name}
+                      <span className="block text-xs text-ink-500">{service.categoryName}</span>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+        </fieldset>
+
+        {promoEnabled && (
+          <div className="mt-4 rounded-lg border border-ink-700 bg-ink-950/60 p-3 text-xs text-ink-300">
+            <p>
+              Point the ad at{" "}
+              <code className="text-accent-300">
+                /book?offer={form.promoCode.trim().toUpperCase() || "CODE"}
+              </code>
+              . Customers never type it — the discount applies by itself.
+            </p>
+            {promoServiceIds.length > 0 && (
+              <p className="mt-1">
+                Customers will see <span className="text-emerald-300">
+                  {form.promoLabel || "the offer"} −{form.promoPercent || "0"}%
+                </span>{" "}
+                on {promoServiceIds.length} service{promoServiceIds.length === 1 ? "" : "s"}.
+              </p>
+            )}
+            {Number(form.promoPercent) > 25 && (
+              <p className="mt-1 text-amber-300">
+                {Number(form.promoPercent) >= 100
+                  ? "At 100% the total is zero, which also removes any deposit requirement."
+                  : "That is a steep discount — double-check the percentage."}
+              </p>
+            )}
+            {form.promoExpiresOn && (
+              <p className="mt-1 text-amber-300">
+                Meta and Google will keep running the ad after {form.promoExpiresOn}. Pause the ad set
+                the same day you let this expire.
+              </p>
+            )}
+          </div>
+        )}
+        <p className="mt-2 text-xs text-ink-500">
+          Only ticked services get the discount — a service added later is never included
+          automatically. Changing any of this never affects bookings already taken: every booking
+          locks its discount amount at the time it was made. Use a campaign-specific code
+          (FIRST10AUG26, not FIRST10) and never re-use a retired one — changing the code is what
+          stops old ad links from being honoured.
+        </p>
       </section>
       <section>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-ink-300">Booking rules</h2>

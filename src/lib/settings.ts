@@ -52,6 +52,39 @@ export type BusinessSettings = {
   notifyOnNewAppointment: boolean;
   staffNotifyPhones: string[];
   staffNotifyEmails: string[];
+  /** Ad-driven promotion. See src/lib/promotions.ts for how it is resolved. */
+  promotion: Promotion;
+};
+
+/**
+ * A single active ad promotion ("10% off your first detail"). Marketing copy
+ * only — safe to sit in business_settings, which is loaded into public server
+ * components.
+ *
+ * The customer never types the code: it rides in the ad URL as ?offer=CODE and
+ * is applied automatically. Keep codes campaign-scoped (FIRST10AUG26, not
+ * FIRST10) — the claim is persisted in the visitor's browser with no separate
+ * expiry, so re-using a retired code would silently honour stale claims.
+ * Changing the code is therefore the real kill switch.
+ */
+export type Promotion = {
+  enabled: boolean;
+  /** Matched case-insensitively against the ?offer= parameter. */
+  code: string;
+  /** Customer-facing line label, e.g. "First Detail Offer". */
+  label: string;
+  /** Percent off in basis points (1000 = 10%) — same convention as taxRateBp. */
+  percentOffBp: number;
+  /** Last valid business-local day, YYYY-MM-DD. Empty means no expiry. */
+  expiresOn: string;
+  firstTimeOnly: boolean;
+  /**
+   * Services the offer applies to. EMPTY MEANS NOTHING IS ELIGIBLE — the offer
+   * fails closed so a new service is never enrolled by accident. The ad says
+   * "detail", so ceramic coating, tint and PPF must be ticked in deliberately
+   * or not at all.
+   */
+  eligibleServiceIds: string[];
 };
 
 export const SETTINGS_DEFAULTS: BusinessSettings = {
@@ -83,6 +116,17 @@ export const SETTINGS_DEFAULTS: BusinessSettings = {
   notifyOnNewAppointment: true,
   staffNotifyPhones: [],
   staffNotifyEmails: [],
+  // Ships disabled with nothing eligible: merging this never changes a price
+  // until staff switch it on and tick the packages it covers.
+  promotion: {
+    enabled: false,
+    code: "FIRST10AUG26",
+    label: "First Detail Offer",
+    percentOffBp: 1000,
+    expiresOn: "",
+    firstTimeOnly: true,
+    eligibleServiceIds: [],
+  },
 };
 
 export async function getSettings(): Promise<BusinessSettings> {

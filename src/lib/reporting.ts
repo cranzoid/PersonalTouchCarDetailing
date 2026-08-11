@@ -102,7 +102,17 @@ export type ReportingSnapshot = {
   utilization: UtilizationSummary;
   sourceRevenue: SourceRevenue[];
   tax: TaxSummary;
+  discounts: DiscountSummary;
   paymentMethods: PaymentMethodTotal[];
+};
+
+export type DiscountSummary = {
+  /** Issued invoices that carried a discount. */
+  invoiceCount: number;
+  /** Total given away. */
+  discountCents: number;
+  /** Discount as a share of gross subtotal; null when nothing was issued. */
+  discountRate: number | null;
 };
 
 /** Statuses that mean an invoice was actually issued to a customer. */
@@ -116,6 +126,24 @@ type TaxInvoiceLike = {
   taxExempt: boolean;
   taxExemptReason: string | null;
 };
+
+/**
+ * What promotions and manual discounts cost over the window.
+ *
+ * Accrual, matching summarizeTax: a discount is a price reduction recorded
+ * when the invoice is issued, not a cash event, so it does not belong beside
+ * the cash-basis summarizeRevenue().
+ */
+export function summarizeDiscounts(rows: readonly TaxInvoiceLike[]): DiscountSummary {
+  const issued = rows.filter((row) => ISSUED_INVOICE_STATUSES.has(row.status));
+  const discountCents = issued.reduce((sum, row) => sum + row.discountCents, 0);
+  const grossCents = issued.reduce((sum, row) => sum + row.subtotalCents, 0);
+  return {
+    invoiceCount: issued.filter((row) => row.discountCents > 0).length,
+    discountCents,
+    discountRate: grossCents > 0 ? discountCents / grossCents : null,
+  };
+}
 
 /**
  * Accrual-basis tax position: what was charged on invoices issued in the
@@ -840,6 +868,7 @@ export async function getReportingSnapshot(days: ReportDays, now = new Date()): 
       appointments: utilizationAppointments,
     }),
     tax: summarizeTax(taxInvoiceRows),
+    discounts: summarizeDiscounts(taxInvoiceRows),
     paymentMethods: summarizePaymentMethods(paymentRows),
   };
 }

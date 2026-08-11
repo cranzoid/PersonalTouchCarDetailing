@@ -1,7 +1,8 @@
 "use client";
 
-import { useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { getStoredAttribution } from "@/components/attribution";
+import { trackMetaLead } from "@/components/meta-pixel";
 import { formatCents } from "@/lib/money";
 import { localDateISO } from "@/lib/tz";
 import { VEHICLE_CATEGORIES, VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
@@ -27,6 +28,13 @@ export type WizardAddon = {
   durationMin: number;
 };
 
+export type WizardPromo = {
+  code: string;
+  label: string;
+  percentOffBp: number;
+  eligibleServiceIds: string[];
+};
+
 const STEPS = ["Service", "Vehicle", "Add-ons", "Time", "Details"] as const;
 const focusRing = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-950";
 
@@ -38,6 +46,8 @@ export function BookingWizard({
   preselectSlug,
   maxBookingWindowDays,
   timezone,
+  promo = null,
+  offerFromUrl,
 }: {
   services: WizardService[];
   addons: WizardAddon[];
@@ -46,6 +56,9 @@ export function BookingWizard({
   preselectSlug?: string;
   maxBookingWindowDays: number;
   timezone: string;
+  /** The offer currently running, resolved server-side. */
+  promo?: WizardPromo | null;
+  offerFromUrl?: string;
 }) {
   const idPrefix = useId();
   const preselected = services.find((s) => s.slug === preselectSlug);
@@ -63,8 +76,23 @@ export function BookingWizard({
   const [policiesAccepted, setPoliciesAccepted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<BookingResult | null>(null);
+  // Set once the server has told us the offer does not apply after all, so the
+  // preview stops promising a discount the booking will not honour.
+  const [offerWithdrawn, setOfferWithdrawn] = useState(false);
+  // The visitor's claim: from this URL, or stored when they landed on an
+  // earlier page from the same ad. localStorage is only readable after mount.
+  const [claimedCode, setClaimedCode] = useState<string | undefined>(offerFromUrl);
+  useEffect(() => {
+    if (claimedCode) return;
+    const stored = getStoredAttribution().offerCode;
+    if (stored) setClaimedCode(stored);
+  }, [claimedCode]);
 
   const service = services.find((s) => s.id === serviceId) ?? null;
+  // A claim is worth something only against the offer the server is running.
+  const claimsOffer =
+    !!promo && !!claimedCode && claimedCode.trim().toUpperCase() === promo.code && !offerWithdrawn;
+  const serviceQualifies = !!service && !!promo && promo.eligibleServiceIds.includes(service.id);
   const eligibleAddons = useMemo(
     () => (service ? addons.filter((a) => service.addonIds.includes(a.id)) : []),
     [service, addons],
@@ -74,7 +102,8 @@ export function BookingWizard({
   const preview = useMemo(() => {
     if (!service) return null;
     const adj = service.adjustments[vehicleCategory];
-    let subtotal = service.basePriceCents + (adj?.priceDeltaCents ?? 0);
+    const servicePrice = service.basePriceCents + (adj?.priceDeltaCents ?? 0);
+    let subtotal = servicePrice;
     let duration = service.baseDurationMin + (adj?.durationDeltaMin ?? 0);
     for (const id of selectedAddons) {
       const a = addons.find((x) => x.id === id);
@@ -83,9 +112,17 @@ export function BookingWizard({
         duration += a.durationMin;
       }
     }
-    const tax = Math.round((subtotal * taxRateBp) / 10000);
-    return { subtotal, tax, total: subtotal + tax, duration };
-  }, [service, vehicleCategory, selectedAddons, addons, taxRateBp]);
+    // Mirrors the server: the offer applies to the eligible service line only,
+    // never to add-ons, and comes off before tax. Math.round matches
+    // percentCents/taxCents so the two arrive at the same cent.
+    const discount =
+      claimsOffer && serviceQualifies
+        ? Math.min(Math.round((servicePrice * promo!.percentOffBp) / 10000), servicePrice)
+        : 0;
+    const taxable = subtotal - discount;
+    const tax = Math.round((taxable * taxRateBp) / 10000);
+    return { subtotal, discount, tax, total: taxable + tax, duration };
+  }, [service, vehicleCategory, selectedAddons, addons, taxRateBp, claimsOffer, serviceQualifies, promo]);
 
   async function loadSlots(date: string) {
     if (!service || !date) return;
@@ -130,9 +167,23 @@ export function BookingWizard({
       customerNotes: contact.notes || undefined,
       policiesAccepted: true as const,
       attribution: getStoredAttribution(),
+      promoCode: claimsOffer ? claimedCode : undefined,
+      // What the customer is looking at right now. If the server disagrees it
+      // books nothing and returns the corrected total for them to confirm.
+      expectedDiscountCents: preview?.discount ?? 0,
     });
     setSubmitting(false);
+    // Nothing was booked: drop the discount from the preview so the button and
+    // the summary show the real price before they press confirm again.
+    if (!res.ok && res.kind === "offer_changed") {
+      setOfferWithdrawn(true);
+      setResult(res);
+      return;
+    }
     setResult(res);
+    // Conversion: the appointment was created server-side and has a reference.
+    // Fired once per successful booking, not on step navigation or errors.
+    if (res.ok) trackMetaLead({ content_name: "Booking", content_category: service.name });
   }
 
   if (result?.ok) {
@@ -417,7 +468,11 @@ export function BookingWizard({
                 }
                 className={`min-h-11 rounded-xl bg-accent-400 px-6 py-3 text-sm font-semibold text-ink-950 shadow-lg shadow-accent-500/15 hover:bg-accent-300 disabled:cursor-not-allowed disabled:opacity-40 ${focusRing}`}
               >
-                {submitting ? "Booking…" : "Confirm Booking"}
+                {submitting
+                  ? "Booking…"
+                  : offerWithdrawn && preview
+                    ? `Confirm at ${formatCents(preview.total)}`
+                    : "Confirm Booking"}
               </button>
             </div>
             <p className="text-xs text-ink-500">
@@ -432,6 +487,11 @@ export function BookingWizard({
         <div className="overflow-hidden rounded-[2rem] border border-accent-500/25 bg-gradient-to-br from-[#0B2A4A] to-ink-950 p-6 shadow-2xl shadow-black/25">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-300">Live estimate</p>
           <h3 className="mt-2 text-xl font-semibold text-white">Your booking</h3>
+          {claimsOffer && serviceQualifies && (
+            <p className="mt-3 rounded-xl border border-emerald-400/30 bg-emerald-950/25 px-3 py-2 text-xs font-medium text-emerald-200">
+              {promo!.percentOffBp / 100}% off applied automatically — no code needed.
+            </p>
+          )}
           {!service && <p className="mt-3 text-sm text-ink-500">Select a service to begin.</p>}
           {service && preview && (
             <div className="mt-4 space-y-2 text-sm">
@@ -449,11 +509,31 @@ export function BookingWizard({
               })}
               <div className="my-2 border-t border-ink-700" />
               <Row label="Subtotal" value={formatCents(preview.subtotal)} />
+              {preview.discount > 0 && (
+                <Row
+                  label={`${promo!.label} (${service.name})`}
+                  value={`−${formatCents(preview.discount)}`}
+                  tone="saving"
+                />
+              )}
               <Row label={taxLabel} value={formatCents(preview.tax)} />
-              <div className="flex justify-between font-semibold text-white">
+              <div aria-live="polite" className="flex justify-between font-semibold text-white">
                 <span>Estimated total</span>
                 <span className="text-accent-300">{formatCents(preview.total)}</span>
               </div>
+              {claimsOffer && !serviceQualifies && (
+                <p className="rounded-xl border border-ink-700 bg-ink-950/50 p-3 text-xs text-ink-300">
+                  The {promo!.label} applies to our detailing packages, so it doesn&apos;t come off
+                  this service.
+                </p>
+              )}
+              {offerWithdrawn && (
+                <p className="rounded-xl border border-amber-400/30 bg-amber-950/20 p-3 text-xs text-amber-200">
+                  The {promo?.label ?? "offer"} is for first-time detailing customers, so it
+                  doesn&apos;t apply to this booking. Nothing has been booked yet — the total above
+                  is what you&apos;ll pay.
+                </p>
+              )}
               <p className="pt-2 text-xs text-ink-500">
                 Approx. {Math.floor(preview.duration / 60)}h{preview.duration % 60 ? ` ${preview.duration % 60}m` : ""} of work.
                 Final price confirmed at drop-off.
@@ -531,9 +611,17 @@ function StepNav({
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({
+  label,
+  value,
+  tone = "default",
+}: {
+  label: string;
+  value: string;
+  tone?: "default" | "saving";
+}) {
   return (
-    <div className="flex justify-between text-ink-300">
+    <div className={`flex justify-between ${tone === "saving" ? "text-emerald-300" : "text-ink-300"}`}>
       <span>{label}</span>
       <span>{value}</span>
     </div>

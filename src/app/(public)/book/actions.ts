@@ -1,10 +1,12 @@
 "use server";
 
 import { z } from "zod";
+import { db } from "@/db";
 import { getSettings } from "@/lib/settings";
 import { priceBooking, PricingError } from "@/lib/pricing";
+import { isFirstTimeDetailCustomer, resolveActivePromotion } from "@/lib/promotions";
 import { getAvailableSlots } from "@/lib/booking/availability";
-import { createAppointment, BookingError } from "@/lib/booking/create";
+import { createAppointment, BookingError, OfferChangedError } from "@/lib/booking/create";
 import { sendMessageTemplate } from "@/lib/messaging";
 import { formatCents } from "@/lib/money";
 import { formatInZone } from "@/lib/tz";
@@ -28,6 +30,10 @@ const attributionSchema = z
     fbclid: z.string().max(200).optional(),
     firstTouch: z.record(z.string(), z.string().max(500)).optional(),
     lastTouch: z.record(z.string(), z.string().max(500)).optional(),
+    // Unknown keys are stripped by this schema, so the ad offer has to be
+    // declared here or it never reaches the server.
+    offerCode: z.string().max(64).optional(),
+    offerCapturedAt: z.string().max(40).optional(),
   })
   .optional();
 
@@ -99,6 +105,13 @@ const bookingInputSchema = z.object({
   customerNotes: z.string().trim().max(2000).optional(),
   policiesAccepted: z.literal(true),
   attribution: attributionSchema,
+  /** Offer the browser claims to have arrived on. Validated server-side. */
+  promoCode: z.string().trim().max(64).optional(),
+  /**
+   * What the customer was shown. If the server computes anything else the
+   * booking is refused rather than silently repriced.
+   */
+  expectedDiscountCents: z.number().int().min(0).max(10_000_000).optional(),
 });
 
 export type BookingResult =
@@ -112,7 +125,22 @@ export type BookingResult =
       depositUrl: string | null;
       confirmationDelivery: "email" | "sms" | null;
     }
-  | { ok: false; error: string };
+  | {
+      /**
+       * The offer no longer applies. Nothing was booked — the wizard shows the
+       * corrected total and the customer confirms again.
+       */
+      ok: false;
+      kind: "offer_changed";
+      error: string;
+      totals: {
+        subtotalCents: number;
+        discountCents: number;
+        taxCents: number;
+        totalCents: number;
+      };
+    }
+  | { ok: false; kind?: undefined; error: string };
 
 export async function submitBookingAction(raw: unknown): Promise<BookingResult> {
   const rate = await consumeRateLimit("booking-submit", { limit: 5, windowMs: 60 * 60_000 });
@@ -125,12 +153,42 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
   try {
     const settings = await getSettings();
     // Server-side authority: recompute price/duration; never trust the client.
+    // The browser supplies only a claimed offer code — the percentage, the
+    // eligible services and the resulting cents all come from settings.
+    const claimed = input.promoCode ?? input.attribution?.offerCode;
+    let promo = resolveActivePromotion(settings, claimed);
+    if (promo?.firstTimeOnly && !(await isFirstTimeDetailCustomer(db(), input.customer, promo.eligibleServiceIds))) {
+      promo = null;
+    }
     const pricing = await priceBooking({
       serviceIds: input.serviceIds,
       addonIds: input.addonIds,
       vehicleCategory: input.vehicleCategory,
       settings,
+      promo,
     });
+
+    // The customer must never be charged a total they were not shown. If the
+    // offer moved between page load and submit, stop and re-confirm.
+    if (
+      input.expectedDiscountCents !== undefined &&
+      input.expectedDiscountCents !== pricing.discountCents
+    ) {
+      return {
+        ok: false,
+        kind: "offer_changed",
+        error:
+          pricing.discountCents === 0
+            ? "This offer does not apply to this booking — it is for first-time detailing customers. Please review the updated total."
+            : "The offer changed while you were booking. Please review the updated total.",
+        totals: {
+          subtotalCents: pricing.subtotalCents,
+          discountCents: pricing.discountCents,
+          taxCents: pricing.taxCents,
+          totalCents: pricing.totalCents,
+        },
+      };
+    }
     // Validate external-link configuration before committing a booking that
     // requires online confirmation, avoiding an orphaned unpaid reservation.
     const baseUrl = pricing.depositRequiredCents > 0 ? getAppBaseUrl() : null;
@@ -141,9 +199,20 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
       dateISO: input.dateISO,
       startMs: input.startMs,
       customerNotes: input.customerNotes,
-      attribution: input.attribution,
+      attribution: promo
+        ? {
+            ...input.attribution,
+            promo: {
+              code: promo.code,
+              label: promo.label,
+              percentOffBp: promo.percentOffBp,
+              at: new Date().toISOString(),
+            },
+          }
+        : input.attribution,
       policiesAccepted: input.policiesAccepted,
       settings,
+      promo,
     });
 
     const whenLabel = formatInZone(new Date(input.startMs), settings.timezone, {
@@ -179,6 +248,12 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
             time: "",
             services: pricing.lines.map((l) => l.description).join(", "),
             vehicle: `${input.vehicle.make} ${input.vehicle.model}`,
+            // Empty when no offer applied, so the template renders cleanly
+            // either way — same idiom as {{balanceLine}} on receipts.
+            discountLine:
+              pricing.discountCents > 0
+                ? `${pricing.promoLabel}: -${formatCents(pricing.discountCents)}\n`
+                : "",
             total: formatCents(pricing.totalCents),
           },
           relatedEntityType: "appointment",
@@ -212,6 +287,33 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
       confirmationDelivery: delivery,
     };
   } catch (err) {
+    // Lost the eligibility re-check inside the booking transaction: nothing was
+    // written, so re-price without the offer and let the customer confirm the
+    // real total.
+    if (err instanceof OfferChangedError) {
+      try {
+        const settings = await getSettings();
+        const repriced = await priceBooking({
+          serviceIds: input.serviceIds,
+          addonIds: input.addonIds,
+          vehicleCategory: input.vehicleCategory,
+          settings,
+        });
+        return {
+          ok: false,
+          kind: "offer_changed",
+          error: err.message,
+          totals: {
+            subtotalCents: repriced.subtotalCents,
+            discountCents: repriced.discountCents,
+            taxCents: repriced.taxCents,
+            totalCents: repriced.totalCents,
+          },
+        };
+      } catch {
+        return { ok: false, error: err.message };
+      }
+    }
     if (err instanceof PricingError || err instanceof BookingError) {
       return { ok: false, error: err.message };
     }

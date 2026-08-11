@@ -4,6 +4,8 @@ import { and, asc, desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { StatusBadge } from "@/components/admin";
 import { requirePageStaff } from "@/lib/auth/page";
+import { isFirstTimeDetailCustomer } from "@/lib/promotions";
+import { getSettings } from "@/lib/settings";
 import { LeadStatusSelect } from "../status-select";
 import { LeadOperations } from "./lead-operations";
 
@@ -25,6 +27,15 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     .from(schema.staffUsers)
     .orderBy(desc(schema.staffUsers.active), asc(schema.staffUsers.name));
   const assigned = lead.assignedStaffId ? staff.find((user) => user.id === lead.assignedStaffId) : undefined;
+  // Resolved here rather than exposed as a public endpoint: "is this address
+  // one of your customers?" is only ever answered to signed-in staff.
+  const offerEligible = lead.attribution?.promo
+    ? await isFirstTimeDetailCustomer(
+        db(),
+        { email: lead.email, phone: lead.phone },
+        (await getSettings()).promotion.eligibleServiceIds,
+      )
+    : false;
   const communications = await db()
     .select()
     .from(schema.communications)
@@ -153,6 +164,25 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           preferredContact: lead.email ? "email" : "phone",
         }}
       />
+
+      {lead.attribution?.promo && (
+        <section
+          className={`mt-8 rounded-xl border p-5 ${
+            offerEligible
+              ? "border-emerald-400/30 bg-emerald-950/20"
+              : "border-amber-400/30 bg-amber-950/20"
+          }`}
+        >
+          <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-400">Ad offer</h2>
+          <p className={`mt-2 text-sm ${offerEligible ? "text-emerald-200" : "text-amber-200"}`}>
+            Arrived on <strong>{lead.attribution.promo.code}</strong> —{" "}
+            {lead.attribution.promo.label}, {lead.attribution.promo.percentOffBp / 100}% off.{" "}
+            {offerEligible
+              ? "Eligible — apply it when you build the estimate."
+              : "Not eligible: this customer has had a detail with us before, or already holds a discounted booking."}
+          </p>
+        </section>
+      )}
 
       <section className="mt-8 rounded-xl border border-ink-800 p-5">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-400">Attribution</h2>

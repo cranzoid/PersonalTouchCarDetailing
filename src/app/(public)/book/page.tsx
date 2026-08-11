@@ -2,6 +2,7 @@ import { asc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { Container, SectionHeading } from "@/components/ui";
 import { getSettings } from "@/lib/settings";
+import { activePromotion } from "@/lib/promotions";
 import { BookingWizard, type WizardAddon, type WizardService } from "./wizard";
 
 export const metadata = { title: "Book an Appointment" };
@@ -10,10 +11,15 @@ export const dynamic = "force-dynamic";
 export default async function BookPage({
   searchParams,
 }: {
-  searchParams: Promise<{ service?: string }>;
+  searchParams: Promise<{ service?: string; offer?: string }>;
 }) {
-  const { service: preselectSlug } = await searchParams;
+  const { service: preselectSlug, offer } = await searchParams;
   const settings = await getSettings();
+  // Resolved server-side so the page can never advertise something the server
+  // would refuse to honour. The wizard decides whether this visitor *claims*
+  // it — from the URL, or from a code stored when they landed on an earlier
+  // page — but the percentage and eligible services always come from here.
+  const promo = activePromotion(settings);
 
   const services = await db()
     .select()
@@ -75,6 +81,17 @@ export default async function BookPage({
         preselectSlug={preselectSlug}
         maxBookingWindowDays={settings.maxBookingWindowDays}
         timezone={settings.timezone}
+        promo={
+          promo
+            ? {
+                code: promo.code,
+                label: promo.label,
+                percentOffBp: promo.percentOffBp,
+                eligibleServiceIds: promo.eligibleServiceIds,
+              }
+            : null
+        }
+        offerFromUrl={offer}
       />
     </Container>
   );

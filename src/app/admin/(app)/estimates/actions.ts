@@ -8,6 +8,11 @@ import { newId } from "@/lib/id";
 import { requireStaff, AuthError } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { getSettings } from "@/lib/settings";
+import {
+  activePromotion,
+  isFirstTimeDetailCustomer,
+  promotionDiscountCents,
+} from "@/lib/promotions";
 import { sendMessageTemplate } from "@/lib/messaging";
 import { formatInZone } from "@/lib/tz";
 import {
@@ -23,6 +28,80 @@ import { getAppBaseUrl } from "@/lib/urls";
 export type ActionResult<T = Record<string, never>> =
   | ({ ok: true } & T)
   | { ok: false; error: string };
+
+/* ------------------------------------------------------------------ */
+/* Promotion                                                           */
+/* ------------------------------------------------------------------ */
+
+const applyOfferSchema = z.object({
+  email: z.string().trim().max(200).optional(),
+  phone: z.string().trim().max(30).optional(),
+  lines: z
+    .array(
+      z.object({
+        serviceId: z.string().nullable().optional(),
+        quantity: z.number().int().min(1).max(99),
+        unitPriceCents: z.number().int().min(0).max(10_000_000),
+      }),
+    )
+    .max(50),
+});
+
+/**
+ * Works out what the running offer is worth on an estimate in progress.
+ *
+ * The eligibility rules are identical to the booking flow — same resolver,
+ * same first-time check — so a returning customer cannot get the offer by
+ * requesting a quote instead of booking. Staff can still type any figure into
+ * the discount field; what must not happen is the *offer button* applying
+ * silently to someone who does not qualify.
+ */
+export async function applyPromotionToEstimateAction(
+  raw: unknown,
+): Promise<ActionResult<{ discountCents: number; label: string }>> {
+  try {
+    await requireStaff("manage_estimates");
+    const parsed = applyOfferSchema.safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Invalid request" };
+    const input = parsed.data;
+
+    const settings = await getSettings();
+    const promo = activePromotion(settings);
+    if (!promo) return { ok: false, error: "No offer is running right now." };
+
+    if (
+      promo.firstTimeOnly &&
+      !(await isFirstTimeDetailCustomer(db(), input, promo.eligibleServiceIds))
+    ) {
+      return {
+        ok: false,
+        error: `${promo.label} is for first-time detailing customers, and this customer has had a detail with us before.`,
+      };
+    }
+
+    // Eligible service lines only — never add-ons or custom lines, matching
+    // what the booking flow discounts.
+    const base = input.lines.reduce(
+      (sum, line) =>
+        line.serviceId && promo.eligibleServiceIds.includes(line.serviceId)
+          ? sum + line.quantity * line.unitPriceCents
+          : sum,
+      0,
+    );
+    if (base <= 0) {
+      return { ok: false, error: `${promo.label} only applies to the detailing packages it covers.` };
+    }
+    return {
+      ok: true,
+      discountCents: promotionDiscountCents(base, promo.percentOffBp),
+      label: promo.label,
+    };
+  } catch (err) {
+    if (err instanceof AuthError) return { ok: false, error: err.message };
+    console.error("applyPromotionToEstimateAction failed", err);
+    return { ok: false, error: "Something went wrong" };
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* Create                                                              */
@@ -440,6 +519,13 @@ export async function convertEstimateAction(
           pricing: {
             lines: pricedLines,
             subtotalCents: totals.subtotalCents - totals.discountCents,
+            // A staff-authored estimate discount is already carried as a
+            // negative line above, so the lines are net and the appointment's
+            // own promotional discount stays zero. Setting it here would
+            // double-count it against the same money.
+            discountCents: 0,
+            promoCode: null,
+            promoLabel: null,
             taxCents: totals.taxCents,
             taxRateBp: estimate.taxRateBp,
             totalCents: totals.totalCents,

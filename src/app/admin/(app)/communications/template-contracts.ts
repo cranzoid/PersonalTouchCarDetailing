@@ -14,6 +14,8 @@ export const TEMPLATE_VARIABLES: Readonly<Record<string, readonly string[]>> = {
     "time",
     "services",
     "vehicle",
+    // Renders the promotional discount line, or nothing when none applied.
+    "discountLine",
     "total",
   ],
   appointment_reminder: ["businessName", "date", "time"],

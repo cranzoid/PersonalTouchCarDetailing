@@ -6,7 +6,7 @@ import { SETTINGS_DEFAULTS, type BusinessSettings } from "../src/lib/settings";
 import { zonedToUtc, zonedWeekday } from "../src/lib/tz";
 import { createAppointment, createStaffAppointment, type BookingRequest } from "../src/lib/booking/create";
 import { rescheduleAppointment } from "../src/lib/booking/reschedule";
-import type { BookingPricing } from "../src/lib/pricing";
+import { priceBooking, type BookingPricing } from "../src/lib/pricing";
 import {
   createCustomerPortalToken,
   portalOwnsCustomer,
@@ -34,6 +34,9 @@ const openUtc = zonedToUtc(tz, y, m, d, 9, 0);
 const pricing: BookingPricing = {
   lines: [{ description: "Test Detail", priceCents: 10000, durationMin: 60 }],
   subtotalCents: 10000,
+  discountCents: 0,
+  promoCode: null,
+  promoLabel: null,
   taxCents: 1300,
   taxRateBp: 1300,
   totalCents: 11300,
@@ -403,6 +406,203 @@ describe("createAppointment concurrency", () => {
     const attempts = await Promise.allSettled([1, 2, 3].map((n) => createAppointment(request(n))));
     expect(attempts.filter((a) => a.status === "fulfilled")).toHaveLength(1);
     expect(await db().select().from(schema.appointments)).toHaveLength(1);
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* Ad promotion eligibility                                          */
+  /* ---------------------------------------------------------------- */
+
+  const promo = {
+    code: "FIRST10AUG26",
+    label: "First Detail Offer",
+    percentOffBp: 1000,
+    firstTimeOnly: true,
+    eligibleServiceIds: ["svc_booking_test"],
+  };
+
+  /** A booking priced as the action would price it, with the offer applied. */
+  function discountedRequest(n: number, overrides: Partial<BookingRequest> = {}): BookingRequest {
+    return {
+      ...request(n),
+      pricing: {
+        ...pricing,
+        lines: [{ serviceId: "svc_booking_test", description: "Test Detail", priceCents: 10000, durationMin: 60 }],
+        discountCents: 1000,
+        promoCode: promo.code,
+        promoLabel: promo.label,
+        taxCents: 1170, // 13% of 9000
+        totalCents: 10170,
+      },
+      promo,
+      ...overrides,
+    };
+  }
+
+  /** Marks an appointment as a detail that actually happened. */
+  async function markFulfilled(appointmentId: string, customerId: string, vehicleId: string) {
+    await db().insert(schema.jobs).values({
+      id: newId("job"),
+      appointmentId,
+      customerId,
+      vehicleId,
+      status: "ready_for_pickup",
+    });
+  }
+
+  it("applies the offer for a first-time customer", async () => {
+    const res = await createAppointment(discountedRequest(1));
+    const [appt] = await db().select().from(schema.appointments)
+      .where(sql`${schema.appointments.id} = ${res.appointmentId}`);
+    expect(appt.discountCents).toBe(1000);
+    expect(appt.promoCode).toBe("FIRST10AUG26");
+    expect(appt.promoLabel).toBe("First Detail Offer");
+    expect(appt.subtotalCents).toBe(10000); // subtotal stays gross
+    expect(appt.totalCents).toBe(10170);
+  });
+
+  it("refuses the offer once a detail has actually been fulfilled, writing nothing", async () => {
+    const first = await createAppointment(discountedRequest(1));
+    await markFulfilled(first.appointmentId, first.customerId, first.vehicleId);
+
+    const before = await db().select().from(schema.appointments);
+    await expect(
+      createAppointment(discountedRequest(1, { startMs: zonedToUtc(tz, y, m, d, 13, 0).getTime() })),
+    ).rejects.toThrow(/first-time customers/);
+    // Rolled back completely — no orphan customer or vehicle row either.
+    expect(await db().select().from(schema.appointments)).toHaveLength(before.length);
+    const customers = await db().select().from(schema.customers);
+    expect(customers).toHaveLength(1);
+  });
+
+  it("still treats a cancelled prior booking as a first detail", async () => {
+    const first = await createAppointment(discountedRequest(1));
+    await db().update(schema.appointments).set({ status: "cancelled", discountCents: 0 })
+      .where(sql`${schema.appointments.id} = ${first.appointmentId}`);
+
+    const second = await createAppointment(
+      discountedRequest(1, { startMs: zonedToUtc(tz, y, m, d, 13, 0).getTime() }),
+    );
+    const [appt] = await db().select().from(schema.appointments)
+      .where(sql`${schema.appointments.id} = ${second.appointmentId}`);
+    expect(appt.discountCents).toBe(1000);
+  });
+
+  it("refuses a second discounted booking while the first is still unfulfilled", async () => {
+    await createAppointment(discountedRequest(1));
+    // Nothing fulfilled yet, but the offer is already spent.
+    await expect(
+      createAppointment(discountedRequest(1, { startMs: zonedToUtc(tz, y, m, d, 13, 0).getTime() })),
+    ).rejects.toThrow(/first-time customers/);
+  });
+
+  it("matches a returning customer across email case and phone formatting", async () => {
+    const first = await createAppointment({
+      ...discountedRequest(1),
+      customer: { firstName: "Case", lastName: "Test", email: "T1@Example.com", phone: "905-679-0143" },
+    });
+    await markFulfilled(first.appointmentId, first.customerId, first.vehicleId);
+
+    await expect(
+      createAppointment({
+        ...discountedRequest(1, { startMs: zonedToUtc(tz, y, m, d, 13, 0).getTime() }),
+        customer: { firstName: "Case", lastName: "Test", email: "t1@example.com", phone: "(905) 679 0143" },
+      }),
+    ).rejects.toThrow(/first-time customers/);
+  });
+
+  it("lets a fulfilled non-detail service keep the customer eligible", async () => {
+    await db().insert(schema.services).values({
+      id: "svc_coating_test",
+      categoryId: "cat_booking_test",
+      name: "Ceramic Coating",
+      slug: "ceramic-coating-test",
+      basePriceCents: 90000,
+      baseDurationMin: 60,
+      bookingMode: "bookable",
+    });
+    // A prior coating, fulfilled — but coating is not on the offer.
+    const coating = await createAppointment({
+      ...request(1),
+      pricing: {
+        ...pricing,
+        lines: [{ serviceId: "svc_coating_test", description: "Ceramic Coating", priceCents: 90000, durationMin: 60 }],
+      },
+    });
+    await markFulfilled(coating.appointmentId, coating.customerId, coating.vehicleId);
+
+    const detail = await createAppointment(
+      discountedRequest(1, { startMs: zonedToUtc(tz, y, m, d, 13, 0).getTime() }),
+    );
+    const [appt] = await db().select().from(schema.appointments)
+      .where(sql`${schema.appointments.id} = ${detail.appointmentId}`);
+    expect(appt.discountCents).toBe(1000);
+  });
+
+  it("gives the offer to exactly one of two parallel bookings by the same person", async () => {
+    const attempts = await Promise.allSettled([
+      createAppointment(discountedRequest(1)),
+      createAppointment(discountedRequest(1, { startMs: zonedToUtc(tz, y, m, d, 13, 0).getTime() })),
+    ]);
+    // Whichever loses the eligibility race must have written nothing.
+    const discounted = (await db().select().from(schema.appointments)).filter((a) => a.discountCents > 0);
+    expect(discounted).toHaveLength(1);
+    expect(attempts.filter((a) => a.status === "fulfilled")).toHaveLength(1);
+  });
+
+  it("never applies an ad offer to a staff-created booking", async () => {
+    const customerId = newId("cus");
+    const vehicleId = newId("veh");
+    await db().insert(schema.customers).values({ id: customerId, firstName: "Walk", lastName: "In" });
+    await db().insert(schema.vehicles).values({ id: vehicleId, customerId, make: "Honda", model: "Civic", category: "sedan" });
+    const res = await createStaffAppointment({
+      customerId,
+      vehicleId,
+      serviceIds: ["svc_booking_test"],
+      addonIds: [],
+      dateISO,
+      startMs: openUtc.getTime(),
+      settings: { ...settings, promotion: { ...settings.promotion, enabled: true, eligibleServiceIds: ["svc_booking_test"] } },
+      staffId: "usr_staff_test",
+    });
+    const [appt] = await db().select().from(schema.appointments)
+      .where(sql`${schema.appointments.id} = ${res.appointmentId}`);
+    expect(appt.discountCents).toBe(0);
+    expect(appt.promoCode).toBeNull();
+  });
+
+  it("discounts only the eligible service line, not add-ons or other services", async () => {
+    await db().insert(schema.services).values({
+      id: "svc_coating_price",
+      categoryId: "cat_booking_test",
+      name: "Ceramic Coating",
+      slug: "ceramic-coating-price",
+      basePriceCents: 90000,
+      baseDurationMin: 60,
+      bookingMode: "bookable",
+    });
+    await db().insert(schema.addons).values({
+      id: "add_engine_bay",
+      name: "Engine Bay",
+      priceCents: 6000,
+      durationMin: 30,
+    });
+    await db().insert(schema.serviceAddons).values({
+      id: newId("add"),
+      serviceId: "svc_booking_test",
+      addonId: "add_engine_bay",
+    });
+
+    const priced = await priceBooking({
+      serviceIds: ["svc_booking_test", "svc_coating_price"],
+      addonIds: ["add_engine_bay"],
+      vehicleCategory: "sedan",
+      settings,
+      promo,
+    });
+    expect(priced.subtotalCents).toBe(10000 + 90000 + 6000);
+    // 10% of the detail only.
+    expect(priced.discountCents).toBe(1000);
+    expect(priced.totalCents).toBe(106000 - 1000 + Math.round(105000 * 0.13));
   });
 
   it("rejects an overlapping later booking but allows an adjacent one", async () => {
