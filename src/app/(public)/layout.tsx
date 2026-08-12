@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { Container, ButtonLink } from "@/components/ui";
 import { AttributionCapture } from "@/components/attribution";
 import { MetaPixel } from "@/components/meta-pixel";
+import { GoogleTag } from "@/components/google-tag";
 import { getPublicSettings } from "@/lib/settings";
 
 // Public pages read business settings and service data from PostgreSQL. Render
@@ -43,6 +44,7 @@ export default async function PublicLayout({ children }: { children: ReactNode }
     <div className="flex min-h-screen flex-col bg-ink-950">
       <AttributionCapture />
       <MetaPixel />
+      <GoogleTag />
       <header className="sticky top-0 z-50 border-b border-[#D8D1C4] bg-[#F8F5EE]/95 shadow-[0_8px_30px_rgba(3,15,27,0.1)] backdrop-blur-xl">
         <Container className="flex h-20 items-center justify-between gap-6">
           <Link href="/" aria-label="Personal Touch Car Detailing home" className="shrink-0 rounded-lg">
