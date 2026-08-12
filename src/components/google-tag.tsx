@@ -24,6 +24,26 @@ function isExcluded(pathname: string) {
   return EXCLUDED_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
+const BOOK_APPOINTMENT_CONVERSION_SEND_TO = "AW-18382460932/LXRwCLDY3eAcEISwuL1E";
+
+/**
+ * Fires the Google Ads "Book appointment" conversion. Call only after a
+ * confirmed server success, never on a button click -- same rule as
+ * trackMetaLead.
+ */
+export function trackBookAppointmentConversion() {
+  try {
+    if (typeof window === "undefined" || typeof window.gtag !== "function") return;
+    window.gtag("event", "conversion", {
+      send_to: BOOK_APPOINTMENT_CONVERSION_SEND_TO,
+      value: 1.0,
+      currency: "CAD",
+    });
+  } catch {
+    // analytics is best-effort; never surface to the customer
+  }
+}
+
 // The official base snippet. Config runs once on load; the effect below
 // covers client-side route changes, which gtag does not see on its own.
 const INIT_SNIPPET = `window.dataLayer = window.dataLayer || [];

@@ -3,6 +3,7 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { getStoredAttribution } from "@/components/attribution";
 import { trackMetaLead } from "@/components/meta-pixel";
+import { trackBookAppointmentConversion } from "@/components/google-tag";
 import { formatCents } from "@/lib/money";
 import { localDateISO } from "@/lib/tz";
 import { VEHICLE_CATEGORIES, VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
@@ -183,7 +184,10 @@ export function BookingWizard({
     setResult(res);
     // Conversion: the appointment was created server-side and has a reference.
     // Fired once per successful booking, not on step navigation or errors.
-    if (res.ok) trackMetaLead({ content_name: "Booking", content_category: service.name });
+    if (res.ok) {
+      trackMetaLead({ content_name: "Booking", content_category: service.name });
+      trackBookAppointmentConversion();
+    }
   }
 
   if (result?.ok) {
