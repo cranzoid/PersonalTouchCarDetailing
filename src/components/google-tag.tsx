@@ -25,6 +25,7 @@ function isExcluded(pathname: string) {
 }
 
 const BOOK_APPOINTMENT_CONVERSION_SEND_TO = "AW-18382460932/LXRwCLDY3eAcEISwuL1E";
+const REQUEST_QUOTE_CONVERSION_SEND_TO = "AW-18382460932/yecgCLbloeEcEISwuL1E";
 
 /**
  * Fires the Google Ads "Book appointment" conversion. Call only after a
@@ -39,6 +40,19 @@ export function trackBookAppointmentConversion() {
       value: 1.0,
       currency: "CAD",
     });
+  } catch {
+    // analytics is best-effort; never surface to the customer
+  }
+}
+
+/**
+ * Fires the Google Ads "Request quote" conversion. Call only after a
+ * confirmed server success, never on form submit itself.
+ */
+export function trackRequestQuoteConversion() {
+  try {
+    if (typeof window === "undefined" || typeof window.gtag !== "function") return;
+    window.gtag("event", "conversion", { send_to: REQUEST_QUOTE_CONVERSION_SEND_TO });
   } catch {
     // analytics is best-effort; never surface to the customer
   }

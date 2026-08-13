@@ -3,6 +3,7 @@
 import { useId, useState } from "react";
 import { getStoredAttribution } from "@/components/attribution";
 import { trackMetaLead } from "@/components/meta-pixel";
+import { trackRequestQuoteConversion } from "@/components/google-tag";
 import { VEHICLE_CATEGORIES, VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
 import { submitQuoteAction, type QuoteResult } from "./actions";
 
@@ -63,7 +64,10 @@ export function QuoteForm({
     setResult(res);
     // Conversion: the quote request was persisted server-side and has a
     // reference. Never fired on validation errors or on opening the form.
-    if (res.ok) trackMetaLead({ content_name: "Quote Request" });
+    if (res.ok) {
+      trackMetaLead({ content_name: "Quote Request" });
+      trackRequestQuoteConversion();
+    }
   }
 
   if (result?.ok) {
