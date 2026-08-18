@@ -8,7 +8,8 @@ import { audit } from "@/lib/audit";
 import { hashPassword } from "@/lib/auth/password";
 import { AuthError, requireStaff } from "@/lib/auth/session";
 import { newId } from "@/lib/id";
-import { STAFF_ROLES } from "@/lib/types";
+import { validatePayTerms } from "@/lib/payroll";
+import { PAY_TYPES, STAFF_ROLES } from "@/lib/types";
 
 export type ActionResult<T extends object = object> =
   | ({ ok: true } & T)
@@ -32,6 +33,16 @@ const updateStaffSchema = z.object({
 const resetPasswordSchema = z.object({
   staffUserId: z.string().min(1),
   password: passwordSchema,
+});
+
+const moneySchema = z.number().int().min(0).max(100_000_000);
+
+const payTermsSchema = z.object({
+  staffUserId: z.string().min(1),
+  payType: z.enum(PAY_TYPES),
+  hourlyRateCents: moneySchema,
+  dailyRateCents: moneySchema,
+  monthlySalaryCents: moneySchema,
 });
 
 const staffSchedulingSchema = z.object({
@@ -270,6 +281,81 @@ export async function updateStaffSchedulingAction(raw: unknown): Promise<ActionR
   } catch (err) {
     if (err instanceof AuthError) return { ok: false, error: err.message };
     console.error("updateStaffSchedulingAction failed", err);
+    return { ok: false, error: "Something went wrong" };
+  }
+}
+
+/**
+ * Pay type and rates. Owner-only, like every other change on this screen.
+ *
+ * Changing a rate is deliberately NOT retroactive: `timesheets.pay_earned_cents`
+ * was frozen the day each shift was saved, exactly as an invoice freezes its
+ * prices, so a raise today cannot rewrite what someone earned last month. Only
+ * days recorded from here on use the new rate.
+ *
+ * All three rate columns are stored whatever the pay type is, so moving someone
+ * from hourly to salaried and back does not silently erase their hourly rate.
+ * Only the rate the pay type uses is ever read — see computeDayPayCents.
+ */
+export async function updateStaffPayAction(raw: unknown): Promise<ActionResult> {
+  try {
+    const actor = await requireStaff("manage_staff");
+    const parsed = payTermsSchema.safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Check the pay type and rate" };
+    const input = parsed.data;
+    const problem = validatePayTerms(input);
+    if (problem) return { ok: false, error: problem };
+
+    const result = await db().transaction(async (tx): Promise<ActionResult> => {
+      const [target] = await tx
+        .select()
+        .from(schema.staffUsers)
+        .where(eq(schema.staffUsers.id, input.staffUserId))
+        .for("update");
+      if (!target) return { ok: false, error: "Staff user not found" };
+
+      await tx
+        .update(schema.staffUsers)
+        .set({
+          payType: input.payType,
+          hourlyRateCents: input.hourlyRateCents,
+          dailyRateCents: input.dailyRateCents,
+          monthlySalaryCents: input.monthlySalaryCents,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.staffUsers.id, target.id));
+
+      await audit(tx, {
+        actorType: "staff",
+        actorId: actor.id,
+        action: "staff.pay_updated",
+        entityType: "staff_user",
+        entityId: target.id,
+        before: {
+          payType: target.payType,
+          hourlyRateCents: target.hourlyRateCents,
+          dailyRateCents: target.dailyRateCents,
+          monthlySalaryCents: target.monthlySalaryCents,
+        },
+        after: {
+          payType: input.payType,
+          hourlyRateCents: input.hourlyRateCents,
+          dailyRateCents: input.dailyRateCents,
+          monthlySalaryCents: input.monthlySalaryCents,
+        },
+      });
+      return { ok: true };
+    });
+
+    if (result.ok) {
+      revalidatePath("/admin/staff");
+      revalidatePath("/admin/timesheets");
+      revalidatePath("/admin/reports/payroll");
+    }
+    return result;
+  } catch (err) {
+    if (err instanceof AuthError) return { ok: false, error: err.message };
+    console.error("updateStaffPayAction failed", err);
     return { ok: false, error: "Something went wrong" };
   }
 }

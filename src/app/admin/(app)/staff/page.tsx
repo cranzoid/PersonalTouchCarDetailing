@@ -1,6 +1,8 @@
 import { asc, desc } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requirePageStaff } from "@/lib/auth/page";
+import { getSettings } from "@/lib/settings";
+import type { PayType } from "@/lib/types";
 import { StaffManager } from "./staff-manager";
 
 export const dynamic = "force-dynamic";
@@ -15,11 +17,16 @@ export default async function StaffPage() {
       role: schema.staffUsers.role,
       active: schema.staffUsers.active,
       skills: schema.staffUsers.skills,
+      payType: schema.staffUsers.payType,
+      hourlyRateCents: schema.staffUsers.hourlyRateCents,
+      dailyRateCents: schema.staffUsers.dailyRateCents,
+      monthlySalaryCents: schema.staffUsers.monthlySalaryCents,
       createdAt: schema.staffUsers.createdAt,
     })
     .from(schema.staffUsers)
     .orderBy(desc(schema.staffUsers.active), asc(schema.staffUsers.name));
   const schedules = await db().select().from(schema.staffSchedules).orderBy(asc(schema.staffSchedules.weekday));
+  const settings = await getSettings();
 
   return (
     <div className="max-w-5xl">
@@ -29,8 +36,10 @@ export default async function StaffPage() {
       </p>
       <StaffManager
         currentStaffId={currentStaff.id}
+        currency={settings.currency}
         initialStaff={staff.map((user) => ({
           ...user,
+          payType: user.payType as PayType,
           createdAt: user.createdAt.toISOString(),
           shifts: schedules.filter((shift) => shift.staffUserId === user.id).map((shift) => ({
             weekday: shift.weekday,

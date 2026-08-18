@@ -50,6 +50,13 @@
       "when": 1787050532292,
       "tag": "0006_bookkeeping",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787084480469,
+      "tag": "0007_labour",
+      "breakpoints": true
     }
   ]
 }

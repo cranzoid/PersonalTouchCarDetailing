@@ -44,7 +44,8 @@ export type IdPrefix =
   | "sch" // staff schedule row
   | "exc" // expense category
   | "exp" // expense
-  | "rbl"; // recurring bill
+  | "rbl" // recurring bill
+  | "tsh"; // timesheet day
 
 export function newId(prefix: IdPrefix): string {
   return `${prefix}_${randomId()}`;

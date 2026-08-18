@@ -2,8 +2,9 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { STAFF_ROLES, type StaffRole } from "@/lib/types";
-import { createStaffAction, resetStaffPasswordAction, updateStaffAction, updateStaffSchedulingAction } from "./actions";
+import { formatCents } from "@/lib/money";
+import { PAY_TYPES, PAY_TYPE_LABELS, STAFF_ROLES, type PayType, type StaffRole } from "@/lib/types";
+import { createStaffAction, resetStaffPasswordAction, updateStaffAction, updateStaffPayAction, updateStaffSchedulingAction } from "./actions";
 
 type StaffSummary = {
   id: string;
@@ -13,6 +14,10 @@ type StaffSummary = {
   active: boolean;
   createdAt: string;
   skills: string[];
+  payType: PayType;
+  hourlyRateCents: number;
+  dailyRateCents: number;
+  monthlySalaryCents: number;
   shifts: Array<{ weekday: number; start: string; end: string }>;
 };
 
@@ -20,11 +25,20 @@ const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Frida
 
 const inputClass = "w-full rounded-lg border border-ink-600 bg-ink-950 px-3 py-2 text-sm text-white";
 
+/** Rates are entered in dollars and stored in integer cents, like every other amount. */
+function toCents(dollars: string): number {
+  const value = Number(dollars);
+  return Number.isFinite(value) && value > 0 ? Math.round(value * 100) : 0;
+}
+const toDollars = (cents: number) => (cents === 0 ? "" : (cents / 100).toFixed(2));
+
 export function StaffManager({
   currentStaffId,
+  currency,
   initialStaff,
 }: {
   currentStaffId: string;
+  currency: string;
   initialStaff: StaffSummary[];
 }) {
   const router = useRouter();
@@ -85,7 +99,7 @@ export function StaffManager({
         </p>
         <div className="mt-3 space-y-3">
           {initialStaff.map((user) => (
-            <StaffRow key={user.id} user={user} isCurrent={user.id === currentStaffId} />
+            <StaffRow key={user.id} user={user} currency={currency} isCurrent={user.id === currentStaffId} />
           ))}
         </div>
       </section>
@@ -93,7 +107,7 @@ export function StaffManager({
   );
 }
 
-function StaffRow({ user, isCurrent }: { user: StaffSummary; isCurrent: boolean }) {
+function StaffRow({ user, currency, isCurrent }: { user: StaffSummary; currency: string; isCurrent: boolean }) {
   const router = useRouter();
   const [role, setRole] = useState(user.role as StaffRole);
   const [active, setActive] = useState(user.active);
@@ -102,6 +116,12 @@ function StaffRow({ user, isCurrent }: { user: StaffSummary; isCurrent: boolean 
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [skills, setSkills] = useState(user.skills.join(", "));
+  const [payType, setPayType] = useState<PayType>(user.payType);
+  const [rate, setRate] = useState({
+    hourly: toDollars(user.hourlyRateCents),
+    daily: toDollars(user.dailyRateCents),
+    monthly: toDollars(user.monthlySalaryCents),
+  });
   const [shifts, setShifts] = useState(WEEKDAYS.map((_, weekday) => {
     const existing = user.shifts.find((shift) => shift.weekday === weekday);
     return { weekday, enabled: Boolean(existing), start: existing?.start ?? "09:00", end: existing?.end ?? "17:00" };
@@ -130,6 +150,27 @@ function StaffRow({ user, isCurrent }: { user: StaffSummary; isCurrent: boolean 
     else {
       setPassword("");
       setMessage(isCurrent ? "Password updated. Your sessions were revoked; sign in again." : "Password updated and sessions revoked.");
+      router.refresh();
+    }
+  }
+
+  async function savePay() {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    const result = await updateStaffPayAction({
+      staffUserId: user.id,
+      payType,
+      // All three rates are sent whatever the pay type is, so switching someone
+      // to salaried and back does not wipe the hourly rate they had before.
+      hourlyRateCents: toCents(rate.hourly),
+      dailyRateCents: toCents(rate.daily),
+      monthlySalaryCents: toCents(rate.monthly),
+    });
+    setBusy(false);
+    if (!result.ok) setError(result.error);
+    else {
+      setMessage("Pay updated. Hours already logged keep the rate they were saved at.");
       router.refresh();
     }
   }
@@ -179,6 +220,47 @@ function StaffRow({ user, isCurrent }: { user: StaffSummary; isCurrent: boolean 
           <input type="password" minLength={12} maxLength={200} autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} className={`${inputClass} mt-1`} />
         </label>
         <button onClick={() => void resetPassword()} disabled={busy || password.length < 12} className="rounded-lg border border-amber-800 px-4 py-2 text-sm text-amber-300 hover:bg-amber-950/30 disabled:opacity-40">Reset password</button>
+      </div>
+      <div className="mt-4 border-t border-ink-800 pt-4">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-ink-400">Pay</h3>
+        <p className="mt-1 text-xs text-ink-500">
+          Changing a rate is not retroactive: hours already logged keep the rate they were saved at,
+          the same way an invoice keeps its prices.
+        </p>
+        <div className="mt-3 flex flex-wrap items-end gap-3">
+          <label className="text-xs text-ink-400">
+            Pay type
+            <select value={payType} onChange={(event) => setPayType(event.target.value as PayType)} disabled={busy} className={`${inputClass} mt-1`}>
+              {PAY_TYPES.map((item) => <option key={item} value={item}>{PAY_TYPE_LABELS[item]}</option>)}
+            </select>
+          </label>
+          {/* Only the rate this pay type actually uses is shown; the other two
+              keep their stored values and are simply not read. */}
+          <label className="text-xs text-ink-400">
+            {payType === "hourly" ? "Rate per hour" : payType === "daily_fixed" ? "Rate per day worked" : "Salary per month"}
+            <input
+              type="number"
+              step="0.01"
+              min="0"
+              inputMode="decimal"
+              value={payType === "hourly" ? rate.hourly : payType === "daily_fixed" ? rate.daily : rate.monthly}
+              onChange={(event) => setRate((current) => ({
+                ...current,
+                [payType === "hourly" ? "hourly" : payType === "daily_fixed" ? "daily" : "monthly"]: event.target.value,
+              }))}
+              disabled={busy}
+              className={`${inputClass} mt-1`}
+            />
+          </label>
+          <button onClick={() => void savePay()} disabled={busy} className="rounded-lg border border-ink-600 px-4 py-2 text-sm text-ink-200 hover:border-accent-500 disabled:opacity-40">Save pay</button>
+        </div>
+        <p className="mt-2 text-xs text-ink-500">
+          {payType === "monthly_fixed"
+            ? `${formatCents(toCents(rate.monthly), currency)} accrues every month this account is active, whether or not hours are logged.`
+            : payType === "daily_fixed"
+              ? `${formatCents(toCents(rate.daily), currency)} for any day with hours logged, however many.`
+              : `${formatCents(toCents(rate.hourly), currency)} per hour logged.`}
+        </p>
       </div>
       <div className="mt-4 border-t border-ink-800 pt-4">
         <h3 className="text-xs font-semibold uppercase tracking-wider text-ink-400">Skills &amp; weekly shifts</h3>

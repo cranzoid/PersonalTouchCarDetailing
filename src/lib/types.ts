@@ -161,6 +161,34 @@ export const QC_CHECKLIST_ITEMS = [
 ] as const;
 
 /* ------------------------------------------------------------------ */
+/* Labour                                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * How a staff member is paid. Drives both the per-day figure a timesheet
+ * freezes and how the payroll report accrues what is owed:
+ *
+ *   hourly        — minutes x hourly_rate, earned day by day
+ *   daily_fixed   — a flat day rate for any day worked at all
+ *   monthly_fixed — a salary that accrues per calendar month, not per day
+ */
+export const PAY_TYPES = ["hourly", "daily_fixed", "monthly_fixed"] as const;
+export type PayType = (typeof PAY_TYPES)[number];
+
+export const PAY_TYPE_LABELS: Record<PayType, string> = {
+  hourly: "Hourly",
+  daily_fixed: "Fixed daily rate",
+  monthly_fixed: "Monthly salary",
+};
+
+/** Which rate field a pay type actually uses; the others stay hidden and unused. */
+export const PAY_TYPE_RATE_FIELD: Record<PayType, "hourlyRateCents" | "dailyRateCents" | "monthlySalaryCents"> = {
+  hourly: "hourlyRateCents",
+  daily_fixed: "dailyRateCents",
+  monthly_fixed: "monthlySalaryCents",
+};
+
+/* ------------------------------------------------------------------ */
 /* Bookkeeping                                                         */
 /* ------------------------------------------------------------------ */
 
