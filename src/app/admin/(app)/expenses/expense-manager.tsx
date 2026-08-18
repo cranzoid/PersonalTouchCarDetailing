@@ -17,7 +17,7 @@ import {
 } from "./actions";
 
 type Category = { id: string; name: string; isPayroll: boolean; active: boolean };
-type StaffOption = { id: string; name: string };
+type StaffOption = { id: string; name: string; active: boolean };
 type CategoryTotal = { categoryId: string; name: string; amountCents: number; count: number };
 
 type ExpenseRow = {
@@ -26,6 +26,7 @@ type ExpenseRow = {
   categoryId: string;
   categoryName: string;
   paidTo: string | null;
+  staffUserId: string | null;
   staffName: string | null;
   description: string | null;
   amountCents: number;
@@ -421,11 +422,13 @@ function AddExpense({
               className={`${input} mt-1`}
             >
               <option value="">Select a staff member…</option>
-              {staff.map((member) => (
-                <option key={member.id} value={member.id}>
-                  {member.name}
-                </option>
-              ))}
+              {staff
+                .filter((member) => member.active)
+                .map((member) => (
+                  <option key={member.id} value={member.id}>
+                    {member.name}
+                  </option>
+                ))}
             </select>
           </label>
         ) : (
@@ -527,7 +530,7 @@ function ExpenseListRow({
     expenseDate: row.expenseDate.slice(0, 10),
     categoryId: row.categoryId,
     paidTo: row.paidTo ?? "",
-    staffUserId: staff.find((member) => member.name === row.staffName)?.id ?? "",
+    staffUserId: row.staffUserId ?? "",
     description: row.description ?? "",
     amount: toDollars(row.amountCents),
     taxPaid: toDollars(row.taxPaidCents),
@@ -651,11 +654,14 @@ function ExpenseListRow({
                   className={`${input} mt-1`}
                 >
                   <option value="">Select a staff member…</option>
-                  {staff.map((member) => (
-                    <option key={member.id} value={member.id}>
-                      {member.name}
-                    </option>
-                  ))}
+                  {staff
+                    .filter((member) => member.active || member.id === form.staffUserId)
+                    .map((member) => (
+                      <option key={member.id} value={member.id}>
+                        {member.name}
+                        {member.active ? "" : " (no longer active)"}
+                      </option>
+                    ))}
                 </select>
               </label>
             ) : (

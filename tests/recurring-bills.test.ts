@@ -4,7 +4,13 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
 import { eq } from "drizzle-orm";
 import { db, getPool, schema } from "../src/db";
-import { generateRecurringBills, getBooksSnapshot, monthKey } from "../src/lib/books";
+import {
+  generateRecurringBills,
+  getBooksSnapshot,
+  getPeriodWindow,
+  listExpenses,
+  monthKey,
+} from "../src/lib/books";
 import { newId } from "../src/lib/id";
 
 const TZ = "America/Toronto";
@@ -191,5 +197,33 @@ describe("getBooksSnapshot", () => {
 
     expect((await getBooksSnapshot("month", 2026, 8)).pnl.expenses.totalCents).toBe(0);
     expect((await getBooksSnapshot("month", 2026, 9)).pnl.expenses.totalCents).toBe(5_000);
+  });
+});
+
+describe("listExpenses", () => {
+  it("returns the staff id, not just the displayed name", async () => {
+    // The edit form needs the id. Re-deriving it from the name is what broke
+    // the spreadsheet's payroll balance whenever someone typed a name slightly
+    // differently, and it also loses staff who share a name.
+    const staffId = newId("usr");
+    await db().insert(schema.staffUsers).values({
+      id: staffId,
+      name: "Sam Rivera",
+      email: "sam-rivera@ptcd.local",
+      passwordHash: "x",
+      role: "technician",
+    });
+    await db().insert(schema.expenses).values({
+      id: newId("exp"),
+      expenseDate: new Date("2026-08-12T16:00:00Z"),
+      categoryId: rentCategoryId,
+      staffUserId: staffId,
+      amountCents: 90_000,
+      taxPaidCents: 0,
+    });
+
+    const [row] = await listExpenses(getPeriodWindow("month", 2026, 8, TZ));
+    expect(row.staffUserId).toBe(staffId);
+    expect(row.staffName).toBe("Sam Rivera");
   });
 });

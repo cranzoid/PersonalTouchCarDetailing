@@ -1,4 +1,4 @@
-import { asc, eq } from "drizzle-orm";
+import { asc, desc } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requirePageStaff } from "@/lib/auth/page";
 import {
@@ -59,11 +59,17 @@ export default async function ExpensesPage({
       })
       .from(schema.expenseCategories)
       .orderBy(asc(schema.expenseCategories.sort), asc(schema.expenseCategories.name)),
+    // Deactivated staff are included: a past payroll expense still points at
+    // them, and dropping them from the options would blank the link the moment
+    // anyone opened that row to edit it.
     db()
-      .select({ id: schema.staffUsers.id, name: schema.staffUsers.name })
+      .select({
+        id: schema.staffUsers.id,
+        name: schema.staffUsers.name,
+        active: schema.staffUsers.active,
+      })
       .from(schema.staffUsers)
-      .where(eq(schema.staffUsers.active, true))
-      .orderBy(asc(schema.staffUsers.name)),
+      .orderBy(desc(schema.staffUsers.active), asc(schema.staffUsers.name)),
     listExpenses(period),
   ]);
 

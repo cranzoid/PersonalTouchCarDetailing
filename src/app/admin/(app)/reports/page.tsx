@@ -3,7 +3,6 @@ import { PeriodNav } from "@/components/period-nav";
 import { requirePageStaff } from "@/lib/auth/page";
 import { getBooksSnapshot, type PeriodKind } from "@/lib/books";
 import { getSettings } from "@/lib/settings";
-import { localDateISO } from "@/lib/tz";
 import { formatCents } from "@/lib/money";
 import { PAYMENT_PROVIDER_LABELS } from "@/lib/payment-labels";
 import {
@@ -12,7 +11,7 @@ import {
   REPORT_DAY_OPTIONS,
   type FunnelStage,
 } from "@/lib/reporting";
-import { formatInZone } from "@/lib/tz";
+import { formatInZone, localDateISO } from "@/lib/tz";
 
 export const dynamic = "force-dynamic";
 

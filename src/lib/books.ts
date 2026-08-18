@@ -433,6 +433,7 @@ export type ExpenseListRow = {
   categoryId: string;
   categoryName: string;
   paidTo: string | null;
+  staffUserId: string | null;
   staffName: string | null;
   description: string | null;
   amountCents: number;
@@ -453,6 +454,7 @@ export async function listExpenses(period: Period, categoryId?: string): Promise
       categoryId: schema.expenses.categoryId,
       categoryName: schema.expenseCategories.name,
       paidTo: schema.expenses.paidTo,
+      staffUserId: schema.expenses.staffUserId,
       staffName: schema.staffUsers.name,
       description: schema.expenses.description,
       amountCents: schema.expenses.amountCents,
