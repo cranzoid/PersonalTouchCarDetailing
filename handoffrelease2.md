@@ -6,7 +6,7 @@ need to start Release 3. The original build spec
 is **not in this repository**, so every formula and requirement Release 3
 depends on is reproduced here verbatim.
 
-Written 2026-08-19, immediately after Release 2 was built. It supersedes the
+Written 2026-08-19, immediately after Release 2 went live. It supersedes the
 Release 1 handoff, which it replaces in full.
 
 ---
@@ -284,10 +284,19 @@ Both halves are pinned by tests.
 
 ---
 
-## 6. Release 2 — Labour and payroll (BUILT, NOT YET DEPLOYED)
+## 6. Release 2 — SHIPPED and LIVE (2026-08-19)
 
-Branch `release-2-labour-payroll`. Retires the tracker's `Worker Hours` and
-`Payroll Payout` tabs. **Not yet staged or swapped — see §10.**
+PR #13, squashed to `de5eced`. Deployed via stage → verify → swap; restore point
+`2026-08-18T20:55:23Z`. Retires the tracker's `Worker Hours` and `Payroll Payout`
+tabs.
+
+The additive-migration guarantee was tested for real and held: with `0007`
+already applied to the production database, the **old** build kept serving
+normally — healthy, public pages 200, and `404` on the two routes it did not yet
+know — while staging served the same routes as `307` on the same database. After
+the swap, production was verified healthy with the service catalog and sitemap
+byte-identical to the pre-deploy baseline, and the six package prices unchanged
+($200 / $175 / $150 / $70 / $50 / $30).
 
 ### 6.1 Migration `drizzle/0007_labour.sql` — additive only, verified
 
@@ -416,7 +425,7 @@ frozen `pay_earned_cents` surviving a later rate change; matching by id when two
 staff share a name; totals equalling the sum of the lines; and DST-safe week
 arithmetic.
 
-### 6.5 Verified in a running production build
+### 6.5 Verified before release, in a running production build
 
 `npm run build && PORT=3131 npm run start`, owner session minted per §9.2:
 
@@ -659,7 +668,7 @@ Both operations require `main`. The workflow is `workflow_dispatch` only.
 
 ## 11. Rollout to the owners (spec §9)
 
-Release 2 is built, so this can start once it is deployed and §8.2 is done.
+Release 2 is live, so this can start as soon as §8.2 is done.
 
 1. **Parallel run for two weeks** — both sheet and CRM.
 2. **Reconcile a full month end to end.**
@@ -686,8 +695,9 @@ a job · print a receipt · where this month's profit is · logging hours), and 
 
 1. Read `DECISIONS.md` §15–§17, then `src/lib/books.ts` and `src/lib/payroll.ts`
    with their tests — they are the template for Release 3's shape.
-2. **Deploy Release 2 first** (§10) unless the owner wants counter pricing
-   pulled forward; the two releases are independent.
+2. Chase the owner on §8.2 (pay types and rates). Release 2 is live but records
+   nothing until those are entered, and hours logged against a $0.00 rate freeze
+   at $0.00 and have to be re-entered.
 3. Build Release 3 per §7, keeping migration `0008` additive-only (§3.1), and
    remember it is the only release that touches live financial write paths.
 4. Release per §10, verifying production on the migrated database *before* the
