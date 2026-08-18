@@ -276,6 +276,74 @@ the dashboard, so the money strip and the bills card are gated inside the page
 as well as hidden from the navigation — a technician gets a 404 on Expenses and
 a 403 on the CSV export.
 
+## Labour and payroll (Release 2)
+
+Hours worked and what each person is owed now live in the CRM too, retiring the
+tracker's **Worker Hours** and **Payroll Payout** tabs.
+
+**Where things are**
+
+- **Admin → Staff** — each person's pay type (hourly, fixed daily rate, or
+  monthly salary) and the one rate that type uses. Owner-only, and audited.
+- **Admin → Hours** — the week grid. One box per person per day, entered in
+  hours; step back and forward a week at a time. Built for a phone, because it
+  is filled in standing in the shop.
+- **Admin → Payroll** — per person for a month, quarter or year: hours, days,
+  earned, already paid, and the balance still owed. **Record payout** on a row
+  with a balance writes the expense for you.
+- **Admin → Reports** — the payroll variance sits under the Profit & loss.
+
+**How pay is worked out**
+
+| Pay type | What a day earns |
+|---|---|
+| Hourly | hours x the hourly rate |
+| Fixed daily rate | the whole day rate for any time logged at all |
+| Monthly salary | nothing per day — the salary accrues per calendar month |
+
+Pay is calculated **when the day is saved** and then frozen, exactly the way an
+invoice keeps the prices it was issued at. Giving someone a raise today does not
+rewrite what they earned last month; only days entered from then on use the new
+rate.
+
+**Two things that will not match the spreadsheet, and should not**
+
+- A **monthly salary accrues every month the person is active**, even a month
+  with no hours logged at all. The sheet posted the salary only if some row
+  existed for that month, so one job logged on the 2nd accrued the full $3,000
+  and a quiet month accrued nothing.
+- **Payouts are matched to a staff member, never to a name typed in "Paid To".**
+  In the sheet, one typo silently broke the balance and nothing showed that it
+  had.
+
+**Recording a payout**
+
+Use the button on the payroll report. It creates a normal expense in a payroll
+category, so it lands in the ledger, the P&L and the audit trail like any other
+payment — there is no separate payroll ledger to reconcile. The balance is
+earned minus paid, so it returns to zero once the payout is recorded.
+
+Wages claim **no HST input credit** — the payout form records zero tax. Source
+deductions are between the owners and their accountant; the CRM records what
+left the bank.
+
+**Who can do what**
+
+- `manage_staff` (owner) — set pay types and rates.
+- `manage_timesheets` (owner, manager) — enter hours. The grid shows what
+  everyone earned, so it is deliberately narrower than expense access, and an
+  accountant does not get it. Technicians logging only their own hours would
+  need an own-row-only gate, which is not built.
+- `view_financial_reports` (owner, manager, accountant) — read the payroll
+  report. Recording a payout additionally needs `manage_expenses`.
+
+**First-run task for the owners**
+
+Nobody has a rate yet: the migration starts everyone as hourly at $0.00, which
+earns nothing, so no payroll can be invented for staff whose terms have not been
+entered. Open Admin → Staff and set each person's pay type and rate before
+logging hours.
+
 ## Running an ad promotion
 
 The "10% off your first detail" offer is applied automatically — the customer

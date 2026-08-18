@@ -23,6 +23,14 @@ export const PERMISSIONS = {
   /** Recording what the business spends. Reception and technicians are
    * deliberately excluded — cost data is owner/manager/bookkeeper only. */
   manage_expenses: ["owner", "manager", "accountant"],
+  /**
+   * Logging hours worked. Narrower than manage_expenses on purpose: the week
+   * grid shows what every staff member earned, which is pay data, but entering
+   * hours is a shop-floor task the manager does daily. The accountant does not
+   * need it — they read the payroll report — and a technician logging only
+   * their own hours would need its own own-row-only gate, which is not built.
+   */
+  manage_timesheets: ["owner", "manager"],
   view_private_files: ["owner", "manager", "reception", "technician"],
   view_dashboard: ["owner", "manager", "reception", "technician", "accountant"],
 } as const satisfies Record<string, readonly StaffRole[]>;

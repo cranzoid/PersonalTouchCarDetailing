@@ -1,12 +1,13 @@
-# Handoff — Excel tracker retirement, after Release 1
+# Handoff — Excel tracker retirement, after Release 2
 
 **Read this file first and in full.** It is designed to be the only document you
-need to start Release 2. The original build spec
+need to start Release 3. The original build spec
 (`Car_Detailing_Business_Tracker_PRO_empty.xlsx` → `car-detailing-crm-build-spec.md`)
-is **not in this repository**, so every formula and requirement Releases 2 and 3
-depend on is reproduced here verbatim.
+is **not in this repository**, so every formula and requirement Release 3
+depends on is reproduced here verbatim.
 
-Written 2026-08-18, immediately after Release 1 went live.
+Written 2026-08-19, immediately after Release 2 was built. It supersedes the
+Release 1 handoff, which it replaces in full.
 
 ---
 
@@ -36,8 +37,9 @@ lead / quote / direct booking
 ```
 
 **Read these before writing code:** `BUILD.md` (product spec), `DECISIONS.md`
-(architecture decision log — §15 and §16 are Release 1), `WORKFLOW.md` (state and
-operations, including a "Bookkeeping" section for the owners).
+(architecture decision log — §15 and §16 are Release 1, §17 is Release 2),
+`WORKFLOW.md` (state and operations, including the "Bookkeeping" and "Labour and
+payroll" sections for the owners).
 
 ---
 
@@ -56,7 +58,8 @@ caps, multi-year, per-vehicle-tier pricing, plus attribution, photos, booking
 state and payment status from its own "feature gaps" section).
 
 The genuinely missing part is what `BUILD.md` §10 had explicitly placed out of
-scope: **bookkeeping and payroll**. That is what these three releases deliver.
+scope: **bookkeeping and payroll**. Releases 1 and 2 have now delivered both.
+Release 3 is the remainder.
 
 ### Two things in the spec that must NOT be built as written
 
@@ -92,15 +95,18 @@ must be:
   backfills them.
 - Readable by the **currently deployed** build, which knows nothing about it.
 
-Release 1's `drizzle/0006_bookkeeping.sql` is the reference example: three
-`CREATE TABLE`s and nothing else. This was verified live — production kept
-serving normally on the migrated database before the swap.
+`drizzle/0006_bookkeeping.sql` (three `CREATE TABLE`s) and
+`drizzle/0007_labour.sql` (one `CREATE TABLE` plus four defaulted `ADD COLUMN`s
+on `staff_users`) are the reference examples. Defaulted column adds do not
+rewrite the table in PG11+, and Drizzle emits explicit column lists, so the
+running production build never sees the new columns.
 
 ### 3.2 Never migrate money
 
 No backfill, recompute, or rewrite of `invoices`, `payments`, `estimates`, or
 `appointments`. Frozen financial history is the product (`DECISIONS.md` §6, marked
-*not reversible cheaply*).
+*not reversible cheaply*). Release 2 extends the same rule to
+`timesheets.pay_earned_cents`.
 
 ### 3.3 Backups
 
@@ -130,7 +136,7 @@ az postgres flexible-server restore \
 - **Enum-ish columns are `text`**; allowed values live in `src/lib/types.ts` and
   are enforced by Zod at boundaries (`DECISIONS.md` §4).
 - **Pure math is extracted and unit-tested**, with database work confined to
-  loaders. Follow `src/lib/books.ts` / `tests/books.test.ts`.
+  loaders. Follow `src/lib/books.ts` / `src/lib/payroll.ts` and their tests.
 - **Every server action calls `requireStaff(permission)`** and writes `audit()`
   in the same transaction as the mutation. Hiding a button is never the security
   boundary.
@@ -211,7 +217,7 @@ expenses            id, expense_date timestamptz, category_id→expense_categori
 Indexes: `expenses_date_idx`, `expenses_category_idx`, `expenses_staff_idx`, and
 **`expenses_recurring_period_uq` UNIQUE on (`recurring_bill_id`, `period_month`)**.
 
-### 5.3 Design decisions Release 2 must respect
+### 5.3 Design decisions that still bind
 
 - **Months are business-local `YYYY-MM` text, not dates.** A bill belongs to a
   calendar month, not an instant, so there is no timezone to get wrong.
@@ -222,24 +228,20 @@ Indexes: `expenses_date_idx`, `expenses_category_idx`, `expenses_staff_idx`, and
   one row. There is a concurrency test for this.
 - **Seeded bills ship INACTIVE.** Their amounts are samples from the tracker;
   generating expense rows from an unconfirmed figure would invent financial
-  history. **This is an outstanding owner task — see §8.**
+  history. **This is still an outstanding owner task — see §8.**
 - **Expenses are hard-`DELETE`d**, unlike invoices/payments. An expense is
   internal bookkeeping, not a document issued to a customer, and the owners
   expect a mistyped row to vanish as it would in a spreadsheet. The whole row is
   written to `audit_log.before` first, so the ledger stays reconstructible.
 - **Payroll expenses are keyed by `staff_user_id`, never by a name string.**
-  The spreadsheet matched payroll on a typed name in "Paid To", so one typo
-  silently broke the balance. A bug of exactly this shape was caught in review of
-  Release 1 and fixed; `listExpenses` returns `staffUserId` and forms use it
-  directly. **Release 2's payroll report depends on this — never match on name.**
+  Release 2's payroll report depends on this — never match on name.
 - **Accounting basis, stated on the report screen:** sales accrue on **invoices
   issued** (the same set `summarizeTax` builds an HST return from, so the P&L and
   the tax report can never disagree); expenses count on the **date paid**.
 - **Cost data is gated *inside* the page**, not merely hidden from the nav —
-  `view_dashboard` includes technicians. Verified: a technician gets 404 on
-  Expenses/Reports/Bookkeeping and 403 on the CSV export.
+  `view_dashboard` includes technicians.
 
-### 5.4 The code you will build on
+### 5.4 The code Release 3 builds on
 
 **`src/lib/books.ts`** — all pure and unit-tested except the loaders at the
 bottom. Reuse these rather than writing new ones:
@@ -249,18 +251,18 @@ bottom. Reuse these rather than writing new ones:
 | `getPeriodWindow(kind, year, index, tz)` | Whole calendar month/quarter/year as a half-open UTC range. DST-safe. |
 | `priorYearPeriod(period, tz)` | Same period one year earlier, for YoY. |
 | `monthKey(date, tz)` | Business-local `"YYYY-MM"` for an instant. |
-| `monthKeysInPeriod(period)` | Every `"YYYY-MM"` a period touches — **Release 2 needs this for `months_spanned`.** |
+| `monthKeysInPeriod(period)` | Every `"YYYY-MM"` a period touches. |
 | `monthStartDate(month, tz)` | First business-local day of a `"YYYY-MM"`. |
 | `summarizeExpenses(rows, categories)` | Totals by category + input tax credits. |
-| `computeProfitAndLoss(invoices, expenseSummary)` | The P&L. **Release 2 extends this with payroll reconciliation.** |
+| `computeProfitAndLoss(invoices, expenseSummary)` | The P&L. |
 | `computeTaxPosition(pnl)` | Collected − input credits = net owing. |
 | `validateExpenseInput(input, category)` | Blocking rules, owner-facing wording. |
-| `taxIncludedInCents(amountCents, taxRateBp)` | HST *within* a tax-inclusive total: `amount × rate / (10000 + rate)`. |
+| `taxIncludedInCents(amountCents, taxRateBp)` | HST *within* a tax-inclusive total. |
 | `getBooksSnapshot(kind, year, index)` | Full P&L + tax + YoY for a period. |
 | `listExpenses(period, categoryId?)` | Ledger rows with category and staff resolved. |
 | `generateRecurringBills(now)` | The idempotent monthly generator. |
 
-**Other files touched by Release 1:**
+**Other files from Release 1:**
 
 - `src/app/admin/(app)/expenses/{page,expense-manager,actions,confirm-bills-card}.tsx`
 - `src/app/admin/(app)/settings/bookkeeping/{page,bookkeeping-manager,actions}.tsx`
@@ -282,16 +284,14 @@ Both halves are pinned by tests.
 
 ---
 
-## 6. Release 2 — Labour and payroll (NEXT — NOT STARTED)
+## 6. Release 2 — Labour and payroll (BUILT, NOT YET DEPLOYED)
 
-Goal: the owners stop using the tracker's `Worker Hours` and `Payroll Payout`
-tabs.
+Branch `release-2-labour-payroll`. Retires the tracker's `Worker Hours` and
+`Payroll Payout` tabs. **Not yet staged or swapped — see §10.**
 
-### 6.1 Migration `drizzle/0007_labour.sql` — additive only
+### 6.1 Migration `drizzle/0007_labour.sql` — additive only, verified
 
-**Extend `staff_users`** (defaulted columns are safe on a hot table in PG11+, and
-Drizzle emits explicit column lists so the running production build never sees
-them):
+Four defaulted columns on `staff_users`:
 
 ```
 pay_type             text    NOT NULL DEFAULT 'hourly'   -- hourly | daily_fixed | monthly_fixed
@@ -300,27 +300,44 @@ daily_rate_cents     integer NOT NULL DEFAULT 0
 monthly_salary_cents integer NOT NULL DEFAULT 0
 ```
 
-**New `timesheets` table** — one row per staff member per day:
+Everyone therefore starts hourly at a **zero** rate, which earns nothing — the
+defaults cannot invent payroll for staff whose terms nobody has entered yet.
+
+New `timesheets` table, one row per staff member per day:
 
 ```
 id, work_date timestamptz, staff_user_id → staff_users,
 minutes integer, pay_earned_cents integer, notes,
 created_by_staff_id, created_at, updated_at
-UNIQUE (staff_user_id, work_date)
+UNIQUE (staff_user_id, work_date)   -- timesheets_staff_day_uq
 ```
 
-**Store integer minutes, not decimal hours.** The spec says `decimal(5,2)`, but
-this codebase has a no-floats rule and already counts time in `durationMin`
-everywhere. Display as hours.
+Plus `timesheets_date_idx` and `timesheets_staff_idx`. The unique index is on a
+brand-new empty table, so it cannot fail against production rows.
 
-Add `PAY_TYPES` to `src/lib/types.ts` and `"ts"` (or similar) to `IdPrefix`.
+`PAY_TYPES`, `PAY_TYPE_LABELS` and `PAY_TYPE_RATE_FIELD` are in
+`src/lib/types.ts`; `"tsh"` was added to `IdPrefix`.
 
 `staff_schedules` is **not** this table — it is a weekly *shift template* used by
-the availability engine and carries no money. Leave it alone.
+the availability engine and carries no money. It was left alone.
 
-### 6.2 New `src/lib/payroll.ts` — pure, unit-tested
+### 6.2 `src/lib/payroll.ts` — pure, unit-tested
 
-**Per-day pay (spec §4.3), exactly:**
+Same shape as `books.ts`: everything above the loaders is pure.
+
+| Export | Use |
+|---|---|
+| `computeDayPayCents(terms, minutes)` | What one day earned (spec §4.3). |
+| `computePayroll({staff, timesheets, payments, monthsSpanned})` | Lines per person + totals. |
+| `validatePayTerms(input)` / `validateTimesheetMinutes(m)` | Blocking rules, owner-facing wording. |
+| `workDateToUtc(day, tz)` | A calendar day as the stored instant (noon business-local). |
+| `addDaysISO` / `weekDays` / `weekStartISO` / `weekLabel` | Bare calendar arithmetic, UTC, DST-proof. |
+| `formatMinutesAsHours(minutes)` | Display only. |
+| `getPayrollSnapshot(period)` | Loader: the payroll position for a calendar period. |
+| `getTimesheetWeek(mondayISO)` | Loader: one week of the grid. |
+| `listPayrollStaff()` | Loader: staff with pay terms, inactive included. |
+
+Per-day pay, exactly as the spec's §4.3 table:
 
 ```
 hourly:        pay = round(minutes / 60 × hourly_rate_cents)
@@ -328,81 +345,97 @@ daily_fixed:   pay = minutes > 0 ? daily_rate_cents : 0
 monthly_fixed: pay = 0                    # nothing accrues per day
 ```
 
-Compute at save time and store in `timesheets.pay_earned_cents` — the rate must
-be frozen the same way invoice prices are, so a later raise never rewrites what
-someone earned last month.
-
-**Monthly payroll reconciliation (spec §4.4):**
+Reconciliation, per person and summed into the totals:
 
 ```
-payroll_earned_variable = Σ timesheets.pay_earned in month
-payroll_accrued_fixed   = Σ staff.monthly_salary WHERE pay_type='monthly_fixed' AND active
-total_payroll_earned    = payroll_earned_variable + payroll_accrued_fixed
-payroll_paid            = Σ expenses.amount WHERE category.is_payroll
-payroll_variance        = total_payroll_earned − payroll_paid   # > 0 means still owed
+variable_earned = Σ timesheets.pay_earned in period
+fixed_accrued   = monthly_salary × months_spanned, for ACTIVE monthly_fixed staff
+earned          = variable_earned + fixed_accrued
+paid            = Σ expenses.amount WHERE category.is_payroll AND staff_id matches
+balance         = earned − paid          # > 0 means still owed
 ```
 
-> **Fix the spreadsheet's accrual bug.** `Monthly Summary!B36` posts the *entire*
-> monthly salary if any single row exists for that month — one job logged on the
-> 2nd accrues the full $3,000. **Accrue monthly-fixed salary for every month the
-> staff member is active, independent of activity.** Write a test for a month
-> with zero timesheet rows.
+**The spreadsheet's accrual bug is fixed.** `Monthly Summary!B36` posted the
+entire monthly salary if any single row existed for that month. Here a salary
+accrues for **every month the staff member is active, independent of activity**;
+a month with zero timesheet rows is pinned by a test.
 
-**Payroll payout for a date range (spec §4.6), per active staff member:**
+Three decisions worth knowing before you extend this:
 
-```
-hours_or_days = Σ timesheets.minutes in range
-earned        = Σ timesheets.pay_earned in range
-              + (pay_type = 'monthly_fixed' ? monthly_salary × months_spanned(range) : 0)
-already_paid  = Σ expenses.amount WHERE category.is_payroll
-                  AND staff_id = this staff AND in range
-balance       = earned − already_paid
-```
-
-Use `monthKeysInPeriod` from `books.ts` for `months_spanned`. Match `already_paid`
-on **`staff_user_id`** — never a name string (§5.3).
+- **Pay is frozen at save time.** `saveTimesheetWeekAction` computes
+  `pay_earned_cents` from the rate as it stands and stores it, the way an
+  invoice snapshots prices. The week grid submits **only changed cells**, so
+  re-saving a week never re-freezes settled days at a newer rate.
+- **`computePayroll` derives its totals by summing its lines**, rather than
+  extending `computeProfitAndLoss` as the Release 1 handoff sketched. Salary
+  accrual needs the staff table and the period's month count, neither of which
+  that function receives; summing the lines makes the per-person table and the
+  variance under the P&L incapable of disagreeing.
+- **A payroll expense naming nobody** is reported as `unassignedPaidCents` with
+  a visible warning, not silently dropped from the total paid.
 
 ### 6.3 UI
 
-- **`/admin/staff`** — pay type and rate fields. Owner-only (`manage_staff`).
-  Show only the rate field relevant to the chosen pay type.
-- **Hours entry** — one row per staff member per day. This is a *daily* task, so
-  favour a week grid over a one-row-at-a-time form. Mobile-first: it is filled in
-  standing in the shop.
-- **`/admin/reports/payroll`** (or a section in Reports) — per staff member for a
-  date range: hours/days, earned, already paid, balance.
-- **"Record payout" button** — creates the expense row directly, pre-filled with
-  the payroll category, the staff member, the balance, and today's date. **Reuse
-  `createExpenseAction`** from `src/app/admin/(app)/expenses/actions.ts`; do not
-  write a second expense-insert path.
+- **`/admin/staff`** — pay type + the one rate that type uses, owner-only
+  (`manage_staff`), audited as `staff.pay_updated`. All three rate columns are
+  stored whatever the type is, so switching to salaried and back does not erase
+  an hourly rate.
+- **`/admin/timesheets`** — the week grid. A card per staff member, seven day
+  boxes (2 cols on a phone, 7 on a laptop), hours in / minutes stored, live pay
+  preview, sticky save bar. Deactivated staff are hidden unless they already
+  have hours that week. Zero minutes deletes the day rather than storing an
+  empty shift — a zero row would still read as a day worked and a day rate pays
+  by the day.
+- **`/admin/reports/payroll`** — per person for a month/quarter/year: hours,
+  days, earned, paid, balance, with the shared `PeriodNav`.
+- **"Record payout"** on any row with a balance — a dialog prefilled with the
+  payroll category, the staff member, the balance and today's date. It calls
+  **`createExpenseAction`** from `src/app/admin/(app)/expenses/actions.ts`.
+  There is deliberately no second expense-insert path. Wages record
+  `taxPaidCents: 0` — a payout claims no input tax credit.
+- **`/admin/reports`** — payroll earned / paid out / variance under the P&L,
+  linking through to the full report.
 
-  > The spec is emphatic about this: in the sheet the owner must read an
-  > instruction line and go type it on another tab. "That round trip is exactly
-  > the kind of friction that kills adoption."
+**Permissions:** new `manage_timesheets: ["owner", "manager"]` for hours entry —
+narrower than `manage_expenses` because the grid shows what everyone earned, and
+an accountant has no reason to enter hours. The payroll report is
+`view_financial_reports`; recording a payout additionally needs
+`manage_expenses`; rates are `manage_staff`. **A technician logging their own
+hours is deliberately NOT built** — it needs an own-row-only gate, not a
+widened permission.
 
-- Add the payroll variance to the P&L section in `/admin/reports`.
+### 6.4 Tests — 41 added, 320 passing
 
-**Permissions:** reuse `manage_expenses` for the payout action and
-`view_financial_reports` for the report. Rates are `manage_staff` (owner only).
-Consider whether a technician should log *their own* hours — if so that needs a
-new narrow permission, not `manage_expenses`.
+`tests/payroll.test.ts` (33) and `tests/timesheet-actions.test.ts` (8) cover:
+all three pay types; `daily_fixed` paying a full day for any `minutes > 0`;
+`monthly_fixed` accruing nothing per day; salary accrual in a month with **zero**
+timesheet rows; salary × months for quarters and years; balance returning to
+zero after a payout; the `UNIQUE (staff_user_id, work_date)` constraint
+rejecting a duplicate day; the upsert converging instead of double-counting;
+frozen `pay_earned_cents` surviving a later rate change; matching by id when two
+staff share a name; totals equalling the sum of the lines; and DST-safe week
+arithmetic.
 
-### 6.4 Tests — `tests/payroll.test.ts`
+### 6.5 Verified in a running production build
 
-- All three pay types, including `daily_fixed` paying a full day for any
-  `minutes > 0` and `monthly_fixed` accruing nothing per day.
-- Monthly-fixed accrual in a month with **zero** timesheet rows (the bug fix).
-- Balance after a recorded payout returns to zero.
-- The `UNIQUE (staff_user_id, work_date)` constraint rejecting a duplicate day.
-- A frozen `pay_earned_cents` surviving a later change to the staff rate.
+`npm run build && PORT=3131 npm run start`, owner session minted per §9.2:
+
+- `/admin/timesheets` and `/admin/reports/payroll` return 200 for an owner,
+  307 anonymous.
+- **Gating:** technician → 404 on Hours, Payroll, Reports, Expenses and Staff.
+  Accountant → 200 on Payroll/Reports/Expenses, **404 on Hours and Staff**.
+- **Arithmetic end to end:** an hourly owner at $22.00/h with 8h + 7.5h logged
+  and a $100.00 payout reported 15.5h, 2 days, $341.00 earned, $100.00 paid,
+  $241.00 balance; a salaried technician with **no timesheet rows at all**
+  accrued the full $3,000.00. Totals $3,341.00 / $100.00 / $3,241.00, matching
+  on the payroll report and in the Reports variance block.
 
 ---
 
 ## 7. Release 3 — Payment-method tax and hygiene (NOT STARTED)
 
-Independent of Release 2 — it can be pulled forward if counter pricing matters
-more than payroll. **This is the only release that touches live financial write
-paths.** Treat it with more care than the other two.
+Independent of Release 2. **This is the only release that touches live financial
+write paths.** Treat it with more care than the other two.
 
 ### 7.1 The pricing rule (spec §2)
 
@@ -512,8 +545,11 @@ public booking. Duplicates already exist in production.
    $220, Electric $180, Natural Gas $120, Phone & Internet $145). The owner must
    open **Admin → Settings → Categories & bills**, check each against a real
    invoice, and turn it on. Until then the generator creates nothing — by design.
-2. **Staff list, pay types and rates** — needed before Release 2 can be seeded
-   with anything real.
+2. **Set every staff member's pay type and rate** in **Admin → Staff**. Release 2
+   ships everyone as hourly at $0.00, which earns nothing, so payroll stays
+   empty and correct until the real terms are entered. Do this **before** anyone
+   logs hours — pay is frozen at save time, so days entered against a $0.00 rate
+   stay at $0.00 and have to be re-entered.
 3. **Package prices** were confirmed correct against the live site on 2026-08-18
    (#1 $200, #2 $175, #3 $150, #4 $70, #5 $50, #6 $30 sedan). No action.
 
@@ -532,6 +568,11 @@ reproducing on a clean `main`. Verify against a production build instead:
 npm run build && PORT=3100 npm run start
 ```
 
+> A stale `next-server` from an earlier session can still be holding the port,
+> in which case the new build silently never starts and every new route 404s
+> against the *old* one. Check `npm run start`'s own log for `EADDRINUSE` before
+> believing a 404, or just pick a fresh port.
+
 ### 9.2 Getting an authenticated admin session
 
 Server-action login over curl does not work. Mint a session directly. The cookie
@@ -547,9 +588,8 @@ psql "postgres://localhost/ptcd_dev?host=/tmp" -c \
 curl -H "Cookie: ptcd_session=$TOKEN" http://localhost:3100/admin/expenses
 ```
 
-To check permission gating, insert a second `staff_users` row with
-`role='technician'` and confirm it gets 404 on the money screens and 403 on
-`/api/reports/export`.
+To check permission gating, insert further `staff_users` rows with
+`role='technician'` and `role='accountant'` and confirm the matrix in §6.5.
 
 ### 9.3 Local setup and the quality gate
 
@@ -562,7 +602,7 @@ npm run db:seed
 
 ```bash
 TEST=1 npm run db:migrate       # tests refuse any database not named exactly ptcd_test
-TEST=1 npm test                 # 279 passing as of Release 1
+TEST=1 npm test                 # 320 passing as of Release 2
 ./node_modules/.bin/tsc --noEmit
 npm run build
 npm audit --omit=dev --audit-level=high    # the CI gate; 2 moderate postcss advisories
@@ -600,7 +640,9 @@ gh run view <RUN_ID> --log | grep "Pre-deploy restore point"
 1. Staging is healthy — `https://app-ptcd-prod-7mutra-staging.azurewebsites.net/api/health`.
 2. **Production is still healthy on the already-migrated database**, while it is
    still running the *old* build. This is the additive-migration guarantee being
-   tested for real, and it is the check most worth doing.
+   tested for real, and it is the check most worth doing. For `0007` this
+   specifically means production keeps serving with four unknown columns on
+   `staff_users`.
 3. The public catalog is unchanged from a baseline captured before staging.
 
 ```bash
@@ -608,7 +650,8 @@ gh workflow run "Azure release" -f operation=swap --ref main
 ```
 
 Then re-verify production pages, health, catalog, and that new admin routes
-return `307` (auth redirect) rather than `404`.
+(`/admin/timesheets`, `/admin/reports/payroll`) return `307` (auth redirect)
+rather than `404`.
 
 Both operations require `main`. The workflow is `workflow_dispatch` only.
 
@@ -616,7 +659,7 @@ Both operations require `main`. The workflow is `workflow_dispatch` only.
 
 ## 11. Rollout to the owners (spec §9)
 
-Once Release 2 lands, before the spreadsheet is retired:
+Release 2 is built, so this can start once it is deployed and §8.2 is done.
 
 1. **Parallel run for two weeks** — both sheet and CRM.
 2. **Reconcile a full month end to end.**
@@ -629,20 +672,23 @@ Expect exactly two divergences, and confirm each is the CRM being right:
 - **The sheet's tip field.** `Daily Jobs!AA` folds tips into "Net Sales",
   inflating revenue, average-per-car and margin. The CRM has no tip field
   anywhere and never will.
-- **The sheet's monthly-salary accrual bug** (§6.2).
+- **The sheet's monthly-salary accrual bug** (§6.2). A month where a salaried
+  person logged no hours will show $0 in the sheet and the full salary in the
+  CRM. The CRM is right.
 
 Training assets the spec asks for: a one-page cheat sheet for the shop wall (add
-a job · print a receipt · where this month's profit is), and a 3-minute screen
-recording for whoever does entry when the owner is away.
+a job · print a receipt · where this month's profit is · logging hours), and a
+3-minute screen recording for whoever does entry when the owner is away.
 
 ---
 
 ## 12. Start here
 
-1. Read `DECISIONS.md` §15–§16, then `src/lib/books.ts` and
-   `tests/books.test.ts` — they are the template for Release 2's shape.
-2. Confirm with the owner: the staff list, each person's pay type
-   (`hourly` / `daily_fixed` / `monthly_fixed`) and their rate.
-3. Build Release 2 per §6, keeping migration `0007` additive-only (§3.1).
+1. Read `DECISIONS.md` §15–§17, then `src/lib/books.ts` and `src/lib/payroll.ts`
+   with their tests — they are the template for Release 3's shape.
+2. **Deploy Release 2 first** (§10) unless the owner wants counter pricing
+   pulled forward; the two releases are independent.
+3. Build Release 3 per §7, keeping migration `0008` additive-only (§3.1), and
+   remember it is the only release that touches live financial write paths.
 4. Release per §10, verifying production on the migrated database *before* the
    swap.

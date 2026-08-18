@@ -32,7 +32,9 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
       { href: "/admin/customers", label: "Customers", permission: "manage_customers", icon: "customers" },
       { href: "/admin/fleet", label: "Fleet accounts", permission: "manage_customers", icon: "fleet" },
       { href: "/admin/expenses", label: "Expenses", permission: "manage_expenses", icon: "expenses" },
+      { href: "/admin/timesheets", label: "Hours", permission: "manage_timesheets", icon: "calendar" },
       { href: "/admin/reports", label: "Reports", permission: "view_financial_reports", icon: "reports" },
+      { href: "/admin/reports/payroll", label: "Payroll", permission: "view_financial_reports", icon: "staff" },
     ],
   },
   {

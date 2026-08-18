@@ -37,6 +37,15 @@ export const staffUsers = pgTable("staff_users", {
   role: text("role").notNull(), // owner | manager | reception | technician | accountant
   skills: text("skills").array().notNull().default([]),
   active: boolean("active").notNull().default(true),
+  /**
+   * How this person is paid — hourly | daily_fixed | monthly_fixed (PAY_TYPES).
+   * Everyone starts `hourly` at a zero rate, which earns nothing, so the
+   * defaults cannot invent payroll for staff whose terms nobody has entered.
+   */
+  payType: text("pay_type").notNull().default("hourly"),
+  hourlyRateCents: integer("hourly_rate_cents").notNull().default(0),
+  dailyRateCents: integer("daily_rate_cents").notNull().default(0),
+  monthlySalaryCents: integer("monthly_salary_cents").notNull().default(0),
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
@@ -966,5 +975,52 @@ export const expenses = pgTable(
      * collide with each other.
      */
     uniqueIndex("expenses_recurring_period_uq").on(t.recurringBillId, t.periodMonth),
+  ],
+);
+
+/* ------------------------------------------------------------------ */
+/* Labour                                                              */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One row per staff member per working day — the tracker's "Worker Hours" tab.
+ *
+ * `minutes` is an integer, not the spec's decimal(5,2) hours: this codebase has
+ * a no-floats rule in financial math and already counts working time in minutes
+ * (`durationMin`) everywhere else. Hours are a display format, not a stored one.
+ *
+ * `pay_earned_cents` is computed at save time from the staff member's rate and
+ * then FROZEN, exactly the way an invoice snapshots its prices. A raise in
+ * October must never rewrite what someone earned in September.
+ *
+ * `work_date` is noon business-local stored as UTC, the same convention as
+ * `expenses.expense_date`: a calendar day the shop worked, pinned to an instant
+ * that cannot drift into the neighbouring day — and therefore deterministic
+ * enough for the unique index below to mean "one row per person per day".
+ */
+export const timesheets = pgTable(
+  "timesheets",
+  {
+    id: id(),
+    workDate: timestamp("work_date", { withTimezone: true }).notNull(),
+    staffUserId: text("staff_user_id")
+      .notNull()
+      .references(() => staffUsers.id),
+    minutes: integer("minutes").notNull().default(0),
+    payEarnedCents: integer("pay_earned_cents").notNull().default(0),
+    notes: text("notes"),
+    createdByStaffId: text("created_by_staff_id").references(() => staffUsers.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("timesheets_date_idx").on(t.workDate),
+    index("timesheets_staff_idx").on(t.staffUserId),
+    /**
+     * The week grid saves a whole week at once and the shop has more than one
+     * phone. Making "one row per person per day" a database guarantee means a
+     * double submission upserts rather than double-counting a day's pay.
+     */
+    uniqueIndex("timesheets_staff_day_uq").on(t.staffUserId, t.workDate),
   ],
 );

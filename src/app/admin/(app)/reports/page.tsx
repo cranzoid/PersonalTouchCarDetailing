@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { PeriodNav } from "@/components/period-nav";
 import { requirePageStaff } from "@/lib/auth/page";
-import { getBooksSnapshot, type PeriodKind } from "@/lib/books";
+import { getBooksSnapshot, getPeriodWindow, type PeriodKind } from "@/lib/books";
+import { getPayrollSnapshot } from "@/lib/payroll";
 import { getSettings } from "@/lib/settings";
 import { formatCents } from "@/lib/money";
 import { PAYMENT_PROVIDER_LABELS } from "@/lib/payment-labels";
@@ -82,6 +83,12 @@ export default async function ReportsPage({
   } catch {
     books = await getBooksSnapshot("month", thisYear, thisMonth);
   }
+
+  // Payroll runs on the same calendar period as the P&L above it, so "still
+  // owed" and "expenses" are always describing the same window.
+  const payroll = await getPayrollSnapshot(
+    getPeriodWindow(books.period.kind, books.period.year, books.period.index, books.timezone),
+  );
 
   const report = await getReportingSnapshot(days);
   const lastMoment = new Date(report.window.end.getTime() - 1);
@@ -307,6 +314,56 @@ export default async function ReportsPage({
               </tr>
             </tfoot>
           </table>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-ink-800 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h3 className="text-sm font-semibold text-white">Payroll</h3>
+              <p className="mt-1 text-xs text-ink-400">
+                Wages earned in {books.period.label} against what has actually been paid out.
+                Earned is hours logged plus monthly salaries; paid is the payroll slice of the
+                expenses above, so it is already inside net profit.
+              </p>
+            </div>
+            <Link
+              href={`/admin/reports/payroll?kind=${books.period.kind}&y=${books.period.year}&i=${books.period.index}`}
+              className="rounded-lg border border-ink-600 px-3 py-1.5 text-xs font-medium text-ink-200 hover:bg-ink-800"
+            >
+              Open payroll report
+            </Link>
+          </div>
+          <dl className="mt-4 grid gap-4 sm:grid-cols-3">
+            <div>
+              <dt className="text-xs text-ink-400">Earned</dt>
+              <dd className="mt-1 text-xl font-semibold text-white">
+                {formatCents(payroll.payroll.totalEarnedCents, books.currency)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-ink-400">Paid out</dt>
+              <dd className="mt-1 text-xl font-semibold text-white">
+                {formatCents(payroll.payroll.paidCents, books.currency)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-xs text-ink-400">Variance</dt>
+              <dd
+                className={`mt-1 text-xl font-semibold ${
+                  payroll.payroll.varianceCents > 0 ? "text-amber-300" : "text-white"
+                }`}
+              >
+                {formatCents(payroll.payroll.varianceCents, books.currency)}
+                <span className="ml-2 text-xs font-normal text-ink-400">
+                  {payroll.payroll.varianceCents > 0
+                    ? "still owed"
+                    : payroll.payroll.varianceCents < 0
+                      ? "paid ahead"
+                      : "settled"}
+                </span>
+              </dd>
+            </div>
+          </dl>
         </div>
       </section>
 

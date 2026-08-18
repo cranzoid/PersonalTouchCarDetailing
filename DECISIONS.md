@@ -173,8 +173,8 @@ cost side, deliberately and in stages (expenses first, labour and payroll next).
   permission. Reception and technicians reach the dashboard, so the money strip
   and the bills card are gated inside the page, not merely hidden from the nav.
 
-**Revisit when:** Release 2 adds `timesheets` and staff pay rates, at which
-point `expense_categories.is_payroll` starts driving the payroll balance it was
+**Revisit when:** ~~Release 2 adds `timesheets` and staff pay rates~~ — done,
+see #17. `expense_categories.is_payroll` now drives the payroll balance it was
 added for.
 
 ## 16. Numbers are exempt from the CSV formula guard
@@ -185,3 +185,55 @@ accountant's column silently stopped summing. Values matching `-?\d+(\.\d+)?`
 now pass through unescaped — a plain decimal cannot be a formula — while
 `-2+3+cmd` and `=cmd|calc` are still escaped. Both cases are pinned by tests in
 `tests/reporting-export.test.ts`.
+
+## 17. Labour: frozen per-day pay, and salary that accrues on the calendar
+Release 2 folds the tracker's `Worker Hours` and `Payroll Payout` tabs into the
+CRM. `BUILD.md` §10 had put payroll out of scope; that call is now reversed,
+completing the reversal begun in #15.
+
+- **Time is stored as integer minutes, not decimal hours.** The spec asked for
+  `decimal(5,2)`, but #6 keeps floats out of financial math and the codebase
+  already counts working time in minutes (`durationMin`). Hours are a display
+  format; `formatMinutesAsHours` is the only place they exist.
+- **Per-day pay is computed at save time and frozen** into
+  `timesheets.pay_earned_cents`, the same discipline invoices use for prices
+  (#6). A raise in October cannot rewrite what someone earned in September, and
+  the week grid deliberately submits only the cells that changed so re-saving a
+  week never re-freezes settled days at today's rate.
+- **A monthly salary accrues per calendar month, independent of activity.** The
+  spreadsheet's `Monthly Summary!B36` posted the whole salary if any single row
+  existed for the month, so one job logged on the 2nd accrued $3,000 and a
+  month with nothing written down accrued nothing. A salary is owed for the
+  month either way. This is one of the two divergences the parallel run should
+  expect, and the CRM is the one that is right.
+- **Earned and paid stay two independent records.** Earned comes from
+  timesheets and salaries; paid comes from `expenses` in a category flagged
+  `is_payroll`. Nothing writes one from the other — the report exists precisely
+  to show where they disagree. "Record payout" therefore calls the ordinary
+  `createExpenseAction` rather than opening a second expense-insert path, so a
+  payout is audited, exportable and inside the P&L like any other payment.
+- **Payroll is matched on `staff_user_id`, never on a name.** The sheet matched
+  a name typed into "Paid To", where one typo silently broke the balance. A
+  payroll expense that names nobody is surfaced as an explicit
+  `unassignedPaidCents` warning rather than being dropped from the total.
+- **`computePayroll` returns lines and derives the totals from them**, instead
+  of extending `computeProfitAndLoss` as the handoff sketched. Salary accrual
+  needs the staff table and the period's month count, neither of which that
+  function receives, and summing the lines makes it impossible for the per-person
+  table and the variance under the P&L to disagree.
+- **A work day is noon business-local**, matching `expenses.expense_date`. That
+  makes the day deterministic, which is what lets
+  `UNIQUE (staff_user_id, work_date)` actually mean "one row per person per
+  day" — a week grid saved twice from two phones upserts instead of
+  double-counting. Bare calendar arithmetic (`addDaysISO`) stays in UTC so a
+  week does not gain or lose a day at a DST change.
+- **Hours entry is `manage_timesheets` (owner, manager)**, not `manage_expenses`.
+  The grid displays what everyone earned, so it is pay data; but entering hours
+  is a daily shop-floor task and an accountant has no reason to do it. Letting a
+  technician log *their own* hours needs an own-row-only gate and is deliberately
+  not built — hiding a button is never the security boundary (#4 of the
+  conventions in BUILD.md).
+
+**Revisit when:** a technician needs to log their own hours, or the owners want
+overtime rules, statutory holiday pay or source deductions — none of which the
+tracker had and none of which are modelled here.
