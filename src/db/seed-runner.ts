@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import * as schema from "./schema";
 import { newId } from "../lib/id";
 import { loadEnv } from "../lib/load-env";
+import { DEFAULT_EXPENSE_CATEGORIES } from "../lib/types";
 
 loadEnv();
 
@@ -53,7 +54,7 @@ const CATALOG: { category: string; slug: string; description: string; services: 
       // Flyer "Car Detailing Package #5 — Basic Interior Clean"
       { name: "Basic Interior Clean", slug: "basic-interior-clean", short: "Vacuum carpet and trunk, wipe down dash, doors and cup holders, clean interior windows.", priceCents: 5000, durationMin: 30, mode: "bookable", largeVehicleDeltaCents: 2000 },
       // Flyer "Car Detailing Package #4 — Basic Car Wash"
-      { name: "Basic Car Wash", slug: "basic-car-wash", short: "Exterior hand wash, dry and clean mats.", priceCents: 2500, durationMin: 60, mode: "bookable", largeVehicleDeltaCents: 500 },
+      { name: "Basic Car Wash", slug: "basic-car-wash", short: "Exterior hand wash, dry and clean mats.", priceCents: 3000, durationMin: 60, mode: "bookable", largeVehicleDeltaCents: 500 },
       // Flyer: "RV Detailing Available — Ask Us For Details"
       { name: "RV Detailing", slug: "rv-detailing", short: "RV and motorhome detailing — contact us for a custom quote.", priceCents: null, durationMin: 480, mode: "contact_only" },
     ],
@@ -125,6 +126,22 @@ const ADDONS = [
   { name: "Dog Hair Clean", description: "Removal of embedded pet hair (for interior clean-up packages).", priceCents: 5000, durationMin: 30 },
   { name: "Wax / Buff", description: "Machine wax and buff for added gloss and protection.", priceCents: 12000, durationMin: 120 },
   { name: "Salt Stain Removal", description: "Winter salt stain extraction from carpets and mats.", priceCents: 5000, durationMin: 30 },
+];
+
+/**
+ * Starting recurring bills, taken from the shop's tracker. They are seeded
+ * INACTIVE on purpose: these amounts are samples, and generating real expense
+ * rows from an unconfirmed figure would invent financial history. The owner
+ * confirms each amount in Admin -> Settings -> Recurring bills and switches it
+ * on; nothing is generated until they do.
+ */
+const RECURRING_BILLS = [
+  { name: "Shop Rent", category: "Rent", amountCents: 250000, paidBy: "preauthorized" },
+  { name: "Business Insurance", category: "Insurance", amountCents: 35000, paidBy: "preauthorized" },
+  { name: "Hydro", category: "Hydro", amountCents: 22000, paidBy: "preauthorized" },
+  { name: "Electric", category: "Electric", amountCents: 18000, paidBy: "preauthorized" },
+  { name: "Natural Gas", category: "Gas", amountCents: 12000, paidBy: "preauthorized" },
+  { name: "Phone & Internet", category: "Phone / Internet", amountCents: 14500, paidBy: "preauthorized" },
 ];
 
 const MESSAGE_TEMPLATES = [
@@ -259,6 +276,44 @@ export async function runSeed() {
       }
     }
     console.log("Seeded service catalog (owner-confirmed flyer prices and durations).");
+  }
+
+  // --- expense categories & recurring bills -------------------------------
+  const existingExpenseCategories = await db.select().from(schema.expenseCategories);
+  if (existingExpenseCategories.length === 0) {
+    for (const [i, category] of DEFAULT_EXPENSE_CATEGORIES.entries()) {
+      await db.insert(schema.expenseCategories).values({
+        id: newId("exc"),
+        name: category.name,
+        isPayroll: category.isPayroll,
+        sort: i,
+      });
+    }
+    console.log("Seeded expense categories.");
+  }
+
+  const existingBills = await db.select().from(schema.recurringBills);
+  if (existingBills.length === 0) {
+    const categoriesByName = new Map(
+      (await db.select().from(schema.expenseCategories)).map((row) => [row.name, row.id]),
+    );
+    const now = new Date();
+    const startMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+    for (const bill of RECURRING_BILLS) {
+      const categoryId = categoriesByName.get(bill.category);
+      if (!categoryId) continue;
+      await db.insert(schema.recurringBills).values({
+        id: newId("rbl"),
+        name: bill.name,
+        categoryId,
+        amountCents: bill.amountCents,
+        startMonth,
+        paidBy: bill.paidBy,
+        active: false,
+        notes: "Sample amount from the tracker — confirm before switching on.",
+      });
+    }
+    console.log("Seeded recurring bills (inactive — confirm amounts before enabling).");
   }
 
   // --- message templates -------------------------------------------------

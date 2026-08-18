@@ -189,10 +189,18 @@ Open Graph crop is `public/og.png`.
 
 Repository migrations, in order:
 
-1. `drizzle/0000_flaky_freak.sql` — base platform schema.
+1. `drizzle/0000_init.sql` — base platform schema.
 2. `drizzle/0001_clammy_mole_man.sql` — automation sent-at timestamps.
 3. `drizzle/0002_absurd_monster_badoon.sql` — consolidated invoice/job links,
    durable rate-limit buckets, and lead marketing consent.
+4. `drizzle/0003_owner_confirmed_hours_pricing_durations.sql`
+5. `drizzle/0004_manual_invoicing_and_integrations.sql`
+6. `drizzle/0005_lame_hitman.sql`
+7. `drizzle/0006_bookkeeping.sql` — `expense_categories`, `expenses`,
+   `recurring_bills`. Additive only: three new tables, no change to any existing
+   one. This matters because the staging slot shares the production database and
+   applies migrations at boot, so the migration lands while the current
+   production build is still serving traffic.
 
 All three have been applied locally to `ptcd_dev` and `ptcd_test`. Tests refuse
 to run destructive setup unless the URL database name is exactly `ptcd_test`.
@@ -226,6 +234,47 @@ features:
 8. Populate gallery/review content only from real customer material with the
    required consent. Run responsive visual QA in current Safari, Chrome, and
    mobile devices once a browser session is available.
+
+## Bookkeeping (Release 1)
+
+Expenses, monthly bills and a real profit-and-loss now live in the CRM, so the
+Excel tracker is no longer needed for the cost side. Revenue, tax and the job
+pipeline are unchanged.
+
+**Where things are**
+
+- **Admin → Expenses** — record what the business pays out, one row per payment.
+  Step through months, quarters or years; export the period to CSV.
+- **Admin → Settings → Categories & bills** — rename or add expense categories,
+  and set up the bills that repeat every month.
+- **Admin → Reports** — the Profit & loss section, with year-over-year
+  comparison and a P&L CSV in the layout the accountant already knows.
+- **Admin → Dashboard** — this month's net sales, expenses and profit, plus the
+  card prompting you to confirm the bills that were added automatically.
+
+**First-run task for the owners**
+
+The six recurring bills are seeded from the tracker's sample figures and ship
+**switched off**. Nothing reaches the books until someone opens
+Settings → Categories & bills, checks each amount against a real invoice, and
+turns the bill on. This is deliberate — generating expense rows from an
+unconfirmed figure would invent financial history.
+
+**How the monthly bills work**
+
+`/api/cron/tick` creates this month's bills as real expense rows the first time
+it runs in a new month. It is safe to run hourly: a unique index on
+(`recurring_bill_id`, `period_month`) means later ticks do nothing and two app
+instances racing produce one row, not two. Generated rows arrive unconfirmed and
+with no tax recorded — set the HST when the real bill arrives, since correcting
+the amount also marks it confirmed.
+
+**Who can see costs**
+
+`manage_expenses` (owner, manager, accountant). Reception and technicians reach
+the dashboard, so the money strip and the bills card are gated inside the page
+as well as hidden from the navigation — a technician gets a 404 on Expenses and
+a 403 on the CSV export.
 
 ## Running an ad promotion
 

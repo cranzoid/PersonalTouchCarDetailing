@@ -131,3 +131,57 @@ Consequential choices:
 **Revisit when:** the business wants several offers at once, usage caps, or
 per-campaign revenue reporting → promote the settings blob to a `promotions`
 table and join `appointments.promo_code` for the breakdown.
+
+## 15. Bookkeeping: expenses, monthly bills and a real P&L
+The owners ran the shop's finances in an 11-tab Excel tracker alongside this
+CRM. Revenue lived here; every cost lived there, so "what did I make this
+month" could not be answered without the spreadsheet. `BUILD.md` §10 put
+payroll and full bookkeeping out of scope; that call is now reversed for the
+cost side, deliberately and in stages (expenses first, labour and payroll next).
+
+- **`expenses` is a ledger, not a document.** Unlike invoices and payments,
+  deleting an expense is a real `DELETE`. It is internal bookkeeping, not
+  something issued to a customer, and the owners expect a mistyped row to
+  disappear as it would in a spreadsheet. The whole row is written to
+  `audit_log.before` first, so the ledger stays reconstructible.
+- **Recurring bills become real expense rows.** In the sheet they were phantom
+  formula cells you could not mark paid or reconcile. A generator inside the
+  existing `/api/cron/tick` creates them, which is why the P&L never adds bills
+  separately — they are already in the expense total.
+- **Idempotency is a database guarantee, not a code convention.**
+  `expenses_recurring_period_uq` on (`recurring_bill_id`, `period_month`) means
+  the hourly tick creates a month's bills once and two racing app instances
+  produce one row. Hand-entered expenses leave both columns NULL, and Postgres
+  treats NULLs as distinct, so they never collide.
+- **Seeded bills ship INACTIVE.** Their amounts came from the tracker and are
+  samples. Generating real expense rows from an unconfirmed figure would invent
+  financial history, so nothing is recorded until the owner confirms an amount
+  and switches the bill on.
+- **Months are business-local `YYYY-MM` text, not dates.** A bill belongs to a
+  calendar month, not an instant, so there is no timezone to get wrong.
+  Zero-padded keys also sort lexicographically in chronological order, which is
+  what makes `dueRecurringBills` a string comparison with no date parsing.
+- **Mixed basis, stated on the screen.** Sales accrue on invoices issued — the
+  same set `summarizeTax` builds an HST return from, so the P&L and the tax
+  report can never disagree. Expenses count on the date paid. This is what the
+  spreadsheet did and how a small business actually files.
+- **Calendar periods live beside the rolling windows.** `getReportWindow`
+  (7/30/90 days) is unchanged; `getPeriodWindow` adds months, quarters and years
+  because that is what a tax return and a bank statement are built from. Both
+  ends stay true local midnight across a DST change.
+- **Cost data is owner/manager/accountant only** via a new `manage_expenses`
+  permission. Reception and technicians reach the dashboard, so the money strip
+  and the bills card are gated inside the page, not merely hidden from the nav.
+
+**Revisit when:** Release 2 adds `timesheets` and staff pay rates, at which
+point `expense_categories.is_payroll` starts driving the payroll balance it was
+added for.
+
+## 16. Numbers are exempt from the CSV formula guard
+`csvCell` prefixed anything starting with `-` with an apostrophe to defuse
+spreadsheet formula injection. That also caught every negative money figure: a
+refund exported as `'-30.00`, which Excel imports as **text**, so the
+accountant's column silently stopped summing. Values matching `-?\d+(\.\d+)?`
+now pass through unescaped — a plain decimal cannot be a formula — while
+`-2+3+cmd` and `=cmd|calc` are still escaped. Both cases are pinned by tests in
+`tests/reporting-export.test.ts`.

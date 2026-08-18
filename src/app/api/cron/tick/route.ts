@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { generateRecurringBills } from "@/lib/books";
 import { syncOverdueInvoices } from "@/lib/invoices";
 import { sendDueAppointmentReminders, sendDueReviewRequests, sendDueMaintenanceReminders } from "@/lib/scheduling";
 import { getPool } from "@/db";
@@ -13,8 +14,12 @@ const CRON_ADVISORY_LOCK = 7_214_031;
  * task the app needs: overdue invoice status flips, appointment reminders,
  * post-payment review requests, and maintenance reminders. The admin/portal
  * invoice pages also flip overdue status opportunistically on read, so that
- * one task is a robustness net for invoices nobody views — the other three
- * have no on-read equivalent and depend entirely on this endpoint running.
+ * one task is a robustness net for invoices nobody views — the others have
+ * no on-read equivalent and depend entirely on this endpoint running.
+ *
+ * Recurring bill generation is safe to run hourly: it is idempotent against a
+ * unique index, so the first tick of a month creates the rows and every later
+ * tick does nothing.
  */
 async function runTick(req: Request) {
   const secret = process.env.CRON_SECRET;
@@ -40,6 +45,7 @@ async function runTick(req: Request) {
     const appointmentReminders = await sendDueAppointmentReminders();
     const reviewRequests = await sendDueReviewRequests();
     const maintenanceReminders = await sendDueMaintenanceReminders();
+    const recurringBills = await generateRecurringBills();
     const expiredRateLimitBuckets = await pruneExpiredRateLimits();
 
     return NextResponse.json({
@@ -48,6 +54,7 @@ async function runTick(req: Request) {
       appointmentReminders,
       reviewRequests,
       maintenanceReminders,
+      recurringBills,
       expiredRateLimitBuckets,
     });
   } finally {

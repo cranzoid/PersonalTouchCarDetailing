@@ -20,6 +20,9 @@ export const PERMISSIONS = {
   record_payments: ["owner", "manager", "reception", "accountant"],
   issue_refunds: ["owner", "manager"],
   view_financial_reports: ["owner", "manager", "accountant"],
+  /** Recording what the business spends. Reception and technicians are
+   * deliberately excluded — cost data is owner/manager/bookkeeper only. */
+  manage_expenses: ["owner", "manager", "accountant"],
   view_private_files: ["owner", "manager", "reception", "technician"],
   view_dashboard: ["owner", "manager", "reception", "technician", "accountant"],
 } as const satisfies Record<string, readonly StaffRole[]>;

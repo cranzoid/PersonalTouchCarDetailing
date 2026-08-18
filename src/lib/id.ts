@@ -41,7 +41,10 @@ export type IdPrefix =
   | "whe" // webhook event
   | "com" // communication
   | "tpl" // message template
-  | "sch"; // staff schedule row
+  | "sch" // staff schedule row
+  | "exc" // expense category
+  | "exp" // expense
+  | "rbl"; // recurring bill
 
 export function newId(prefix: IdPrefix): string {
   return `${prefix}_${randomId()}`;
