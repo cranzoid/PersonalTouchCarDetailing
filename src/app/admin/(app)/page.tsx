@@ -3,9 +3,13 @@ import { and, asc, count, eq, gte, inArray, lt, ne } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { StatusBadge } from "@/components/admin";
 import { requirePageStaff } from "@/lib/auth/page";
+import { roleHas } from "@/lib/auth/permissions";
+import { getBooksSnapshot, listUnconfirmedBills } from "@/lib/books";
 import { getSettings } from "@/lib/settings";
 import { formatCents } from "@/lib/money";
 import { formatInZone, zonedToUtc } from "@/lib/tz";
+import type { StaffRole } from "@/lib/types";
+import { ConfirmBillsCard } from "./expenses/confirm-bills-card";
 
 export const dynamic = "force-dynamic";
 
@@ -69,6 +73,14 @@ export default async function AdminDashboard() {
     .from(schema.jobs)
     .where(ne(schema.jobs.status, "completed"));
 
+  // The money strip and the bills card are cost data — reception and
+  // technicians reach this page too, and must not see either.
+  const role = staff.role as StaffRole;
+  const canSeeMoney = roleHas(role, "view_financial_reports");
+  const canManageExpenses = roleHas(role, "manage_expenses");
+  const books = canSeeMoney ? await getBooksSnapshot("month", y, m) : null;
+  const billsToConfirm = canManageExpenses ? await listUnconfirmedBills(now) : [];
+
   const stats = [
     { label: "New leads", value: newLeads.n, href: "/admin/leads" },
     { label: "New quote requests", value: newQuotes.n, href: "/admin/leads?tab=quotes" },
@@ -95,6 +107,60 @@ export default async function AdminDashboard() {
           </Link>
         ))}
       </div>
+
+      {books && (
+        <section className="mt-8">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-lg font-semibold text-white">{books.period.label}</h2>
+            <Link href="/admin/reports" className="text-sm text-accent-300 hover:underline">
+              Full report →
+            </Link>
+          </div>
+          <div className="mt-3 grid gap-4 sm:grid-cols-3">
+            <div className="rounded-2xl border border-ink-700 bg-ink-900/50 p-5">
+              <p className="text-sm text-ink-400">Net sales</p>
+              <p className="mt-1 text-3xl font-bold text-white">
+                {formatCents(books.pnl.netSalesCents, books.currency)}
+              </p>
+              <p className="mt-2 text-xs text-ink-400">Invoiced, before {settings.taxLabel}</p>
+            </div>
+            <div className="rounded-2xl border border-ink-700 bg-ink-900/50 p-5">
+              <p className="text-sm text-ink-400">Expenses</p>
+              <p className="mt-1 text-3xl font-bold text-white">
+                {formatCents(books.pnl.expenses.totalCents, books.currency)}
+              </p>
+              <p className="mt-2 text-xs text-ink-400">
+                {books.pnl.expenses.count} {books.pnl.expenses.count === 1 ? "payment" : "payments"}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-ink-700 bg-ink-900/50 p-5">
+              <p className="text-sm text-ink-400">Net profit</p>
+              <p
+                className={`mt-1 text-3xl font-bold ${
+                  books.pnl.netProfitCents < 0 ? "text-red-300" : "text-white"
+                }`}
+              >
+                {formatCents(books.pnl.netProfitCents, books.currency)}
+              </p>
+              <p className="mt-2 text-xs text-ink-400">
+                {books.pnl.profitMargin === null
+                  ? "No sales yet this month"
+                  : `${(books.pnl.profitMargin * 100).toFixed(1)}% margin`}
+              </p>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {billsToConfirm.length > 0 && (
+        <ConfirmBillsCard
+          bills={billsToConfirm.map((bill) => ({
+            id: bill.id,
+            label: bill.description ?? bill.name,
+            amountLabel: formatCents(bill.amountCents, settings.currency),
+          }))}
+        />
+      )}
 
       <h2 className="mt-10 text-lg font-semibold text-white">Today&apos;s appointments</h2>
       {todaysAppointments.length === 0 ? (

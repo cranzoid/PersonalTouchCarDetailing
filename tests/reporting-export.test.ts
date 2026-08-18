@@ -79,6 +79,25 @@ describe("reporting export", () => {
     expect(csv).toContain("50.00");
   });
 
+  it("leaves a negative money figure as a number Excel can still sum", async () => {
+    // The formula guard escapes anything starting with "-", which would turn a
+    // refund into the text "'-30.00" and silently break the accountant's column
+    // total. Plain numbers must pass through untouched.
+    await db().insert(schema.payments).values({
+      id: newId("pay"),
+      provider: "cash",
+      idempotencyKey: newId("pay"),
+      amountCents: 3000,
+      kind: "refund",
+      status: "succeeded",
+      receivedAt: new Date(),
+    });
+    const snapshot = await getReportingSnapshot(30);
+    const csv = await buildReportCsv("payments", 30, snapshot);
+    expect(csv).toContain("-30.00");
+    expect(csv).not.toContain("'-30.00");
+  });
+
   it("neutralises spreadsheet formula injection in text fields", async () => {
     await db().insert(schema.customers).values({
       id: newId("cus"), firstName: "=cmd|calc", lastName: "Exploit",
@@ -87,5 +106,15 @@ describe("reporting export", () => {
     const snapshot = await getReportingSnapshot(30);
     const csv = await buildReportCsv("invoices", 30, snapshot);
     expect(csv).not.toMatch(/(^|,)=cmd/);
+  });
+
+  it("still escapes a formula that merely looks numeric at the start", async () => {
+    await db().insert(schema.customers).values({
+      id: newId("cus"), firstName: "-2+3+cmd", lastName: "Exploit",
+      phone: "905-555-0001", preferredContact: "phone",
+    });
+    const snapshot = await getReportingSnapshot(30);
+    const csv = await buildReportCsv("invoices", 30, snapshot);
+    expect(csv).not.toMatch(/(^|,)-2\+3/);
   });
 });

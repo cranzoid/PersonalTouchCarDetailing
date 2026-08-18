@@ -159,3 +159,55 @@ export const QC_CHECKLIST_ITEMS = [
   { key: "final_photos_taken", label: "Final photographs taken" },
   { key: "invoice_reviewed", label: "Invoice reviewed" },
 ] as const;
+
+/* ------------------------------------------------------------------ */
+/* Bookkeeping                                                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * How an outgoing payment left the business. A superset of
+ * MANUAL_PAYMENT_METHODS: recurring bills are usually on preauthorized debit,
+ * which is not a way a customer ever pays us.
+ */
+export const EXPENSE_PAYMENT_METHODS = [
+  "cash",
+  "cheque",
+  "etransfer",
+  "card_terminal",
+  "preauthorized",
+  "other",
+] as const;
+export type ExpensePaymentMethod = (typeof EXPENSE_PAYMENT_METHODS)[number];
+
+export const EXPENSE_PAYMENT_METHOD_LABELS: Record<ExpensePaymentMethod, string> = {
+  cash: "Cash",
+  cheque: "Cheque",
+  etransfer: "E-transfer",
+  card_terminal: "Debit / credit card",
+  preauthorized: "Preauthorized debit",
+  other: "Other",
+};
+
+/**
+ * The expense categories the shop's tracker uses. Seeded on first run and
+ * fully editable afterwards in Admin → Settings → Expense categories, so this
+ * list is a starting point, never a hard-coded enum.
+ *
+ * `isPayroll` drives two things: the payroll balance in Reports, and the
+ * blocking rule that an expense in one of these categories must name the staff
+ * member it paid (matching on staff id, never a typed name).
+ */
+export const DEFAULT_EXPENSE_CATEGORIES = [
+  { name: "Worker Pay", isPayroll: true },
+  { name: "Manager Pay", isPayroll: true },
+  { name: "Vendor / Supplies", isPayroll: false },
+  { name: "Rent", isPayroll: false },
+  { name: "Hydro", isPayroll: false },
+  { name: "Electric", isPayroll: false },
+  { name: "Gas", isPayroll: false },
+  { name: "Phone / Internet", isPayroll: false },
+  { name: "Insurance", isPayroll: false },
+  { name: "Advertising", isPayroll: false },
+  { name: "Repairs / Maintenance", isPayroll: false },
+  { name: "Other", isPayroll: false },
+] as const;
