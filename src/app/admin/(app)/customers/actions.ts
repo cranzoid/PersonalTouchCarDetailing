@@ -7,6 +7,7 @@ import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { AuthError, requireStaff } from "@/lib/auth/session";
 import { newId } from "@/lib/id";
+import { normalizePhone } from "@/lib/phone";
 import { sendMessageTemplate } from "@/lib/messaging";
 import { createCustomerPortalToken } from "@/lib/portal";
 import { getSettings } from "@/lib/settings";
@@ -94,6 +95,7 @@ export async function createCustomerAction(
         lastName: input.lastName,
         email: input.email,
         phone: input.phone,
+        phoneNormalized: normalizePhone(input.phone),
         preferredContact: input.preferredContact,
         customerType: input.customerType,
         companyName: input.companyName,
@@ -165,6 +167,7 @@ export async function createFleetCustomerAction(
         lastName: input.lastName,
         email: input.email,
         phone: input.phone,
+        phoneNormalized: normalizePhone(input.phone),
         preferredContact: input.preferredContact,
         customerType: "business",
         companyName: input.companyName,
@@ -342,6 +345,7 @@ export async function updateCustomerAction(raw: unknown): Promise<CustomerAction
       };
       await tx.update(schema.customers).set({
         ...after,
+        phoneNormalized: normalizePhone(input.phone),
         marketingConsentAt: input.marketingConsent
           ? customer.marketingConsentAt ?? new Date()
           : null,
@@ -410,6 +414,7 @@ export async function anonymizeCustomerAction(raw: unknown): Promise<CustomerAct
         lastName: "Customer",
         email: null,
         phone: null,
+        phoneNormalized: null,
         preferredContact: "email",
         companyName: null,
         tags: [],

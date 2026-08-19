@@ -2,11 +2,13 @@ import Link from "next/link";
 import { asc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { Container, SectionHeading, Card, ButtonLink } from "@/components/ui";
-import { formatCents } from "@/lib/money";
+import { formatCents, withTaxCents } from "@/lib/money";
+import { getSettings } from "@/lib/settings";
 
 export const metadata = { title: "Services" };
 
 export default async function ServicesPage() {
+  const settings = await getSettings();
   const categories = await db()
     .select()
     .from(schema.serviceCategories)
@@ -23,7 +25,7 @@ export default async function ServicesPage() {
       <SectionHeading
         eyebrow="Service menu"
         title="Care designed around your vehicle"
-        subtitle="Prices shown are starting points for a standard sedan — larger vehicles and heavier conditions are adjusted transparently during booking. Condition-dependent services are quoted after we see your vehicle or photos."
+        subtitle={`Prices shown are starting points for a standard sedan — larger vehicles and heavier conditions are adjusted transparently during booking. Condition-dependent services are quoted after we see your vehicle or photos. Listed prices are what you pay in cash or by Interac e-transfer; card and cheque add ${settings.taxLabel}.`}
       />
       <div className="space-y-20">
         {categories.map((cat) => (
@@ -46,9 +48,19 @@ export default async function ServicesPage() {
                     <p className="mt-3 flex-1 text-sm leading-6 text-ink-300">{svc.shortDescription}</p>
                     <div className="mt-6 flex items-center justify-between border-t border-white/10 pt-4 text-sm">
                       <span className="text-accent-300">
-                        {svc.basePriceCents !== null
-                          ? `From ${formatCents(svc.basePriceCents)}`
-                          : "By quote"}
+                        {svc.basePriceCents !== null ? (
+                          <>
+                            From {formatCents(svc.basePriceCents)}
+                            {settings.taxRateBp > 0 && (
+                              <span className="block text-xs text-ink-500">
+                                {formatCents(withTaxCents(svc.basePriceCents, settings.taxRateBp))} by
+                                card or cheque
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          "By quote"
+                        )}
                       </span>
                       <Link
                         href={`/services/${svc.slug}`}

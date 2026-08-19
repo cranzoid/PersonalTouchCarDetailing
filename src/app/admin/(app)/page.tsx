@@ -4,11 +4,13 @@ import { db, schema } from "@/db";
 import { StatusBadge } from "@/components/admin";
 import { requirePageStaff } from "@/lib/auth/page";
 import { roleHas } from "@/lib/auth/permissions";
+import { getAttentionQueue } from "@/lib/attention";
 import { getBooksSnapshot, listUnconfirmedBills } from "@/lib/books";
 import { getSettings } from "@/lib/settings";
 import { formatCents } from "@/lib/money";
 import { formatInZone, zonedToUtc } from "@/lib/tz";
 import type { StaffRole } from "@/lib/types";
+import { AttentionCard } from "./attention-card";
 import { ConfirmBillsCard } from "./expenses/confirm-bills-card";
 
 export const dynamic = "force-dynamic";
@@ -78,8 +80,19 @@ export default async function AdminDashboard() {
   const role = staff.role as StaffRole;
   const canSeeMoney = roleHas(role, "view_financial_reports");
   const canManageExpenses = roleHas(role, "manage_expenses");
+  const canManageInvoices = roleHas(role, "manage_invoices");
   const books = canSeeMoney ? await getBooksSnapshot("month", y, m) : null;
   const billsToConfirm = canManageExpenses ? await listUnconfirmedBills(now) : [];
+  // Bounded to the last 90 days so the card is about work in flight, not an
+  // archive — and so it does not open on the swap full of pre-Release-3
+  // invoices whose discount reason is NULL only because the column is new.
+  const attention = canManageInvoices
+    ? await getAttentionQueue({
+        since: new Date(now.getTime() - 90 * 86_400_000),
+        formatMoney: (cents) => formatCents(cents, settings.currency),
+        formatDate: (date) => formatInZone(date, tz, { month: "short", day: "numeric" }),
+      })
+    : null;
 
   const stats = [
     { label: "New leads", value: newLeads.n, href: "/admin/leads" },
@@ -150,6 +163,10 @@ export default async function AdminDashboard() {
             </div>
           </div>
         </section>
+      )}
+
+      {attention && attention.total > 0 && (
+        <AttentionCard items={attention.items} total={attention.total} />
       )}
 
       {billsToConfirm.length > 0 && (

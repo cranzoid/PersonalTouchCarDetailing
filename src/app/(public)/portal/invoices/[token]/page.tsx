@@ -159,6 +159,14 @@ export default async function PortalInvoicePage({
             {paidInFull ? "Paid in full — thank you!" : "This invoice is settled."}
           </p>
         </div>
+      ) : invoice.taxTreatment === "none" && invoice.quotedPaymentMethod ? (
+        <div role="status" className="mt-6 rounded-2xl border border-ink-700 bg-ink-900/60 p-6 text-ink-300">
+          <p>
+            This invoice is priced for payment in cash or by Interac e-transfer, so there is no online
+            card checkout for it. Please settle it when you collect the vehicle, or call {settings.phone}{" "}
+            if you would rather pay by card.
+          </p>
+        </div>
       ) : (
         <div className="mt-6 rounded-[2rem] border border-accent-500/25 bg-gradient-to-br from-[#0B2A4A]/80 to-ink-950 p-6 shadow-xl shadow-black/15">
           <PayButton token={token} />

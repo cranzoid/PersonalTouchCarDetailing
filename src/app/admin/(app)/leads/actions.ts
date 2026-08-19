@@ -7,6 +7,7 @@ import { db, schema } from "@/db";
 import { requireStaff, AuthError } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { newId } from "@/lib/id";
+import { normalizePhone } from "@/lib/phone";
 
 const leadStatusInput = z.object({
   leadId: z.string().min(1),
@@ -171,6 +172,7 @@ export async function convertLeadAction(raw: unknown): Promise<ActionResult<{ cu
         lastName: input.lastName,
         email: lead.email,
         phone: lead.phone,
+        phoneNormalized: normalizePhone(lead.phone),
         preferredContact: input.preferredContact,
         customerType: input.customerType,
         companyName: input.customerType === "business" ? input.companyName ?? null : null,
