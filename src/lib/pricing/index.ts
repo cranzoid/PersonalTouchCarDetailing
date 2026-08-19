@@ -18,6 +18,19 @@ export type PricedLine = {
   durationMin: number;
 };
 
+/**
+ * A staff-authored line with no catalog entry behind it — a ceramic coating or
+ * any other quote-only job, priced at the counter. Only reachable from the
+ * staff booking path: the price is supplied rather than looked up, so the
+ * public booking flow must never be able to pass one.
+ */
+export type CustomBookingLine = {
+  description: string;
+  priceCents: number;
+  /** Chair time this line needs, so the scheduler can block the bay for it. */
+  durationMin: number;
+};
+
 export type BookingPricing = {
   lines: PricedLine[];
   /** Always gross — the sum of the lines, before any discount. */
@@ -65,14 +78,27 @@ export async function priceBooking(input: {
    * prices — a caller can never supply an amount.
    */
   promo?: ResolvedPromotion | null;
+  /**
+   * Staff-supplied lines for work the catalog cannot price — a ceramic coating
+   * quoted at the counter. The caller is responsible for restricting these to
+   * staff; the public booking actions never pass them.
+   */
+  customLines?: CustomBookingLine[];
 }): Promise<BookingPricing> {
   const { serviceIds, addonIds, vehicleCategory, settings, promo } = input;
-  if (serviceIds.length === 0) throw new PricingError("Select at least one service");
+  const customLines = input.customLines ?? [];
+  // A booking may be entirely custom — a coating with no package attached — so
+  // the requirement is one line of some kind, not one catalog service.
+  if (serviceIds.length === 0 && customLines.length === 0) {
+    throw new PricingError("Select at least one service, or add a custom line");
+  }
 
-  const services = await db()
-    .select()
-    .from(schema.services)
-    .where(and(inArray(schema.services.id, serviceIds), eq(schema.services.active, true)));
+  const services = serviceIds.length > 0
+    ? await db()
+        .select()
+        .from(schema.services)
+        .where(and(inArray(schema.services.id, serviceIds), eq(schema.services.active, true)))
+    : [];
   if (services.length !== serviceIds.length) {
     throw new PricingError("One or more services are unavailable");
   }
@@ -82,20 +108,27 @@ export async function priceBooking(input: {
     }
   }
 
-  const adjustments = await db()
-    .select()
-    .from(schema.serviceVehicleAdjustments)
-    .where(
-      and(
-        inArray(schema.serviceVehicleAdjustments.serviceId, serviceIds),
-        eq(schema.serviceVehicleAdjustments.vehicleCategory, vehicleCategory),
-      ),
-    );
+  const adjustments = serviceIds.length > 0
+    ? await db()
+        .select()
+        .from(schema.serviceVehicleAdjustments)
+        .where(
+          and(
+            inArray(schema.serviceVehicleAdjustments.serviceId, serviceIds),
+            eq(schema.serviceVehicleAdjustments.vehicleCategory, vehicleCategory),
+          ),
+        )
+    : [];
   const adjByService = new Map(adjustments.map((a) => [a.serviceId, a]));
 
   let addonRows: (typeof schema.addons.$inferSelect)[] = [];
   if (addonIds.length > 0) {
-    // Add-ons must be active AND linked to at least one selected service.
+    // Add-ons must be active AND linked to at least one selected service. A
+    // custom line is not a service, so it cannot carry add-ons — price the
+    // extra as a second custom line instead.
+    if (serviceIds.length === 0) {
+      throw new PricingError("Selected add-on is not available for this service");
+    }
     const links = await db()
       .select()
       .from(schema.serviceAddons)
@@ -133,6 +166,15 @@ export async function priceBooking(input: {
       description: addon.name,
       priceCents: addon.priceCents,
       durationMin: addon.durationMin,
+    });
+  }
+  // Appended last so the deposit loop below still walks only catalog service
+  // lines, and so a promotion can never reach a hand-priced line.
+  for (const custom of customLines) {
+    lines.push({
+      description: custom.description,
+      priceCents: custom.priceCents,
+      durationMin: custom.durationMin,
     });
   }
 

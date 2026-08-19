@@ -11,8 +11,23 @@ type CustomerOption = { id: string; label: string; contact: string };
 type VehicleOption = { id: string; customerId: string; label: string; category: string };
 type ServiceOption = { id: string; name: string; categoryName: string; basePriceCents: number; addonIds: string[] };
 type AddonOption = { id: string; name: string; priceCents: number };
+/** Dollars/minutes as typed; converted on submit so a half-typed price is not a crash. */
+type CustomLine = { description: string; price: string; duration: string };
 
 const inputClass = "w-full rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-white";
+
+/** Minutes a new custom line starts at — a sensible half-day-of-nothing default. */
+const DEFAULT_CUSTOM_DURATION_MIN = "60";
+
+function toCents(dollars: string): number {
+  const value = Number(dollars);
+  return Number.isFinite(value) && value > 0 ? Math.round(value * 100) : 0;
+}
+
+function toMinutes(value: string): number {
+  const minutes = Number(value);
+  return Number.isFinite(minutes) && minutes > 0 ? Math.round(minutes) : 0;
+}
 
 export function NewAppointmentBuilder({
   customers,
@@ -34,6 +49,7 @@ export function NewAppointmentBuilder({
   const [vehicleId, setVehicleId] = useState("");
   const [serviceIds, setServiceIds] = useState<string[]>([]);
   const [addonIds, setAddonIds] = useState<string[]>([]);
+  const [customLines, setCustomLines] = useState<CustomLine[]>([]);
   const [dateISO, setDateISO] = useState("");
   const [slots, setSlots] = useState<Array<{ startMs: number; label: string }> | null>(null);
   const [startMs, setStartMs] = useState<number | null>(null);
@@ -48,6 +64,26 @@ export function NewAppointmentBuilder({
   const selectedVehicle = vehicles.find((vehicle) => vehicle.id === vehicleId);
   const eligibleAddonIds = useMemo(() => new Set(services.filter((service) => serviceIds.includes(service.id)).flatMap((service) => service.addonIds)), [services, serviceIds]);
   const eligibleAddons = addons.filter((addon) => eligibleAddonIds.has(addon.id));
+  // Blank rows are ignored rather than rejected, so an empty row left behind
+  // after a change of mind does not block the booking.
+  const preparedCustomLines = useMemo(
+    () =>
+      customLines
+        .filter((line) => line.description.trim().length > 0)
+        .map((line) => ({
+          description: line.description.trim(),
+          priceCents: toCents(line.price),
+          durationMin: toMinutes(line.duration),
+        })),
+    [customLines],
+  );
+  const hasBookableLine = serviceIds.length > 0 || preparedCustomLines.length > 0;
+  // Catalog services carry their own duration; an all-custom booking has one
+  // only if staff typed it, and the server refuses a zero-length booking.
+  const needsCustomDuration =
+    serviceIds.length === 0 &&
+    preparedCustomLines.length > 0 &&
+    preparedCustomLines.every((line) => line.durationMin === 0);
   // Booking-window bounds mirror the public site by default. Staff can lift
   // them to record a walk-in that already happened or take a same-day job;
   // the server re-checks the same flag, and bay/staff conflicts always apply.
@@ -73,6 +109,11 @@ export function NewAppointmentBuilder({
     resetAvailability();
   }
 
+  function setCustomLine(index: number, patch: Partial<CustomLine>) {
+    setCustomLines((prev) => prev.map((line, i) => (i === index ? { ...line, ...patch } : line)));
+    resetAvailability();
+  }
+
   async function loadSlots() {
     setBusy(true);
     setError(null);
@@ -81,6 +122,7 @@ export function NewAppointmentBuilder({
       vehicleId,
       serviceIds,
       addonIds,
+      customLines: preparedCustomLines,
       dateISO,
       allowOutsideBookingWindow: allowOutsideWindow,
     });
@@ -101,6 +143,7 @@ export function NewAppointmentBuilder({
       vehicleId,
       serviceIds,
       addonIds,
+      customLines: preparedCustomLines,
       dateISO,
       startMs,
       customerNotes: notes || undefined,
@@ -136,7 +179,10 @@ export function NewAppointmentBuilder({
         </section>
 
         <section className="rounded-xl border border-ink-800 p-5">
-          <h2 className="font-semibold text-white">2. Services and add-ons</h2>
+          <h2 className="font-semibold text-white">2. Packages and add-ons</h2>
+          <p className="mt-1 text-sm text-ink-400">
+            Quote-only services are not listed here — book those as a custom line below.
+          </p>
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
             {services.map((service) => <label key={service.id} className="flex cursor-pointer items-start gap-3 rounded-lg border border-ink-800 p-3 hover:border-accent-500/50"><input type="checkbox" checked={serviceIds.includes(service.id)} onChange={() => toggleService(service.id)} className="mt-1 accent-accent-400" /><span><span className="block text-xs uppercase tracking-wide text-ink-500">{service.categoryName}</span><span className="block text-sm font-medium text-white">{service.name}</span><span className="block text-xs text-ink-400">From {formatCents(service.basePriceCents)}</span></span></label>)}
           </div>
@@ -144,10 +190,85 @@ export function NewAppointmentBuilder({
         </section>
 
         <section className="rounded-xl border border-ink-800 p-5">
-          <h2 className="font-semibold text-white">3. Date and real availability</h2>
+          <h2 className="font-semibold text-white">3. Custom lines</h2>
+          <p className="mt-1 text-sm text-ink-400">
+            For work the catalog cannot price — a ceramic coating, paint correction, or anything
+            quoted at the counter. A booking can be made of custom lines alone, with no package.
+          </p>
+          {customLines.length > 0 && (
+            <div className="mt-4 space-y-3">
+              {customLines.map((line, index) => (
+                <div key={index} className="grid gap-2 sm:grid-cols-[1fr_8rem_7rem_auto] sm:items-end">
+                  <label className="text-sm text-ink-300">
+                    <span className="text-xs text-ink-400">Description</span>
+                    <input
+                      value={line.description}
+                      onChange={(event) => setCustomLine(index, { description: event.target.value })}
+                      maxLength={200}
+                      placeholder="Ceramic coating — 5 year"
+                      className={`${inputClass} mt-1`}
+                    />
+                  </label>
+                  <label className="text-sm text-ink-300">
+                    <span className="text-xs text-ink-400">Price ($)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      inputMode="decimal"
+                      value={line.price}
+                      onChange={(event) => setCustomLine(index, { price: event.target.value })}
+                      className={`${inputClass} mt-1`}
+                    />
+                  </label>
+                  <label className="text-sm text-ink-300">
+                    <span className="text-xs text-ink-400">Minutes</span>
+                    <input
+                      type="number"
+                      min="0"
+                      max={24 * 60}
+                      step="15"
+                      inputMode="numeric"
+                      value={line.duration}
+                      onChange={(event) => setCustomLine(index, { duration: event.target.value })}
+                      className={`${inputClass} mt-1`}
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => { setCustomLines((prev) => prev.filter((_, i) => i !== index)); resetAvailability(); }}
+                    aria-label={`Remove custom line ${index + 1}`}
+                    className="rounded-lg border border-ink-700 px-3 py-2 text-sm text-ink-300 hover:border-red-500/60 hover:text-red-300"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={() => setCustomLines((prev) => [...prev, { description: "", price: "", duration: DEFAULT_CUSTOM_DURATION_MIN }])}
+            className="mt-4 rounded-lg border border-ink-700 px-4 py-2 text-sm font-medium text-ink-200 hover:border-accent-500/50"
+          >
+            Add custom line
+          </button>
+          {needsCustomDuration && (
+            <p className="mt-3 text-sm text-amber-300">
+              Give at least one custom line a duration in minutes — that is the time the bay is held for.
+            </p>
+          )}
+          <p className="mt-3 text-xs text-ink-500">
+            Custom lines are taxed like any other line and take no deposit, so a booking made only of
+            them is confirmed straight away.
+          </p>
+        </section>
+
+        <section className="rounded-xl border border-ink-800 p-5">
+          <h2 className="font-semibold text-white">4. Date and real availability</h2>
           <div className="mt-4 flex flex-wrap items-end gap-3">
             <label className="text-sm text-ink-300">Date<input type="date" min={minDate} max={maxDate} value={dateISO} onChange={(event) => { setDateISO(event.target.value); resetAvailability(); }} className={`${inputClass} mt-1`} /></label>
-            <button onClick={() => void loadSlots()} disabled={busy || !customerId || !vehicleId || serviceIds.length === 0 || !dateISO} className="rounded-lg bg-accent-400 px-4 py-2 text-sm font-semibold text-ink-950 disabled:opacity-40">{busy ? "Checking…" : "Check availability"}</button>
+            <button onClick={() => void loadSlots()} disabled={busy || !customerId || !vehicleId || !hasBookableLine || needsCustomDuration || !dateISO} className="rounded-lg bg-accent-400 px-4 py-2 text-sm font-semibold text-ink-950 disabled:opacity-40">{busy ? "Checking…" : "Check availability"}</button>
           </div>
           <label className="mt-3 flex items-center gap-2 text-sm text-ink-300">
             <input
@@ -175,7 +296,10 @@ export function NewAppointmentBuilder({
 
       <aside className="rounded-xl border border-ink-800 p-5 lg:sticky lg:top-24 lg:self-start">
         <h2 className="font-semibold text-white">Staff booking</h2>
-        <p className="mt-2 text-sm text-ink-400">Prices, duration and capacity are revalidated on the server when saved.</p>
+        <p className="mt-2 text-sm text-ink-400">
+          Catalog prices, duration and capacity are revalidated on the server when saved. A custom
+          line keeps the price typed above — that is the point of it.
+        </p>
         {totalCents !== null && <p className="mt-4 text-lg font-semibold text-accent-300">{formatCents(totalCents)}</p>}
         {durationMin !== null && <p className="text-sm text-ink-400">{durationMin} min service time, plus buffers</p>}
         <p className="mt-4 text-xs text-ink-500">Website policy acceptance is intentionally not recorded for staff-created bookings.</p>

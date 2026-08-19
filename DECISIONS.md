@@ -359,3 +359,39 @@ Deduplication and any unique constraint are a separate, owner-reviewed exercise.
 **Revisit when:** the owner's accountant rules on the cash/Interac treatment (the
 restatement query above is the first step), or the shop wants to dedupe the
 customer table for real.
+
+## 19. Custom appointment lines: staff price the work the catalog cannot
+A booking may now carry hand-typed lines — a ceramic coating, paint correction,
+anything quoted at the counter — instead of, or alongside, catalog packages.
+`priceBooking` gained an optional `customLines` argument and its "select at
+least one service" rule became "at least one line", so a coating-only booking is
+possible with no package attached.
+
+- **No migration.** `appointment_services` already allows a null `service_id`
+  with a free-text description and its own price and duration; approved-estimate
+  conversion has written lines that way since Phase 2. Custom lines therefore
+  reach the invoice for free — `createInvoiceFromJobAction` copies those rows
+  without caring where they came from.
+- **The price is trusted because staff typed it.** That is the whole point, and
+  it matches the custom lines the manual invoice builder already accepts. The
+  guard is the actor, not the value: `customLines` is only ever passed from
+  behind `manage_bookings`, and the public booking schema is a plain `z.object`
+  that strips the key and still requires `serviceIds.min(1)`.
+- **Duration is per line and mandatory in effect.** The scheduler books real
+  chair time, so a coating that takes four hours must hold the bay for four
+  hours. A catalog service brings its own duration; an all-custom booking has
+  one only if staff type it, and both the slot lookup and the create action
+  refuse a zero-length booking rather than reserving nothing.
+- **Add-ons stay tied to a catalog service.** An all-custom booking gets no
+  add-ons; the extra goes in a second custom line with its own price. The
+  alternative — unlocking every add-on whenever a custom line exists — was
+  considered and rejected by the owner as a needless second way to do the same
+  thing. Custom lines are unlimited, so nothing is unreachable.
+- **Custom lines carry no deposit and no promotion.** Deposits are a per-service
+  catalog setting, so a booking made only of custom lines is confirmed outright
+  rather than sitting in `deposit_required`. They are appended after the catalog
+  lines so the deposit loop still walks only real services, and a promotion —
+  which matches on `service_id` — can never reach a hand-priced line.
+
+**Revisit when:** the shop wants a deposit on coating work. That needs a deposit
+field on the custom line itself, since there is no catalog row to configure.

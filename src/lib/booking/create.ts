@@ -5,7 +5,7 @@ import { audit } from "@/lib/audit";
 import type { BusinessSettings } from "@/lib/settings";
 import type { Attribution } from "@/db/schema";
 import { normalizePhone } from "@/lib/phone";
-import { priceBooking, type BookingPricing } from "@/lib/pricing";
+import { priceBooking, type BookingPricing, type CustomBookingLine } from "@/lib/pricing";
 import { isFirstTimeDetailCustomer, type ResolvedPromotion } from "@/lib/promotions";
 import { VEHICLE_CATEGORIES, type VehicleCategory } from "@/lib/types";
 import { createAppointmentDepositAccessToken } from "@/lib/appointment-deposits";
@@ -281,6 +281,8 @@ export async function createStaffAppointment(input: {
   vehicleId: string;
   serviceIds: string[];
   addonIds: string[];
+  /** Hand-priced work with no catalog entry — a ceramic coating, say. */
+  customLines?: CustomBookingLine[];
   dateISO: string;
   startMs: number;
   customerNotes?: string;
@@ -314,6 +316,7 @@ export async function createStaffAppointment(input: {
     const pricing = await priceBooking({
       serviceIds: input.serviceIds,
       addonIds: input.addonIds,
+      customLines: input.customLines,
       vehicleCategory: vehicle.category as VehicleCategory,
       settings: input.settings,
     });
