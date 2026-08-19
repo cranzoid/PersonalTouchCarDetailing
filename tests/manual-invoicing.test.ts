@@ -120,7 +120,7 @@ const baseLines = [
 
 describe("createManualInvoiceAction", () => {
   it("creates a taxed invoice with no originating job", async () => {
-    const result = await createManualInvoiceAction({ customerId, vehicleId, lines: baseLines, paymentMethod: "card_terminal" });
+    const result = await createManualInvoiceAction({ customerId, vehicleId, lines: baseLines });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
@@ -136,7 +136,6 @@ describe("createManualInvoiceAction", () => {
   it("zeroes tax and records the reason when exempt, so total equals subtotal", async () => {
     const result = await createManualInvoiceAction({
       customerId,
-      paymentMethod: "card_terminal",
       lines: baseLines,
       taxExempt: true,
       taxExemptReason: "Cash sale",
@@ -153,14 +152,13 @@ describe("createManualInvoiceAction", () => {
   });
 
   it("refuses an exemption with no stated reason", async () => {
-    const result = await createManualInvoiceAction({ customerId, lines: baseLines, taxExempt: true, paymentMethod: "card_terminal" });
+    const result = await createManualInvoiceAction({ customerId, lines: baseLines, taxExempt: true });
     expect(result.ok).toBe(false);
   });
 
   it("backdates to the given calendar day in the business timezone", async () => {
     const result = await createManualInvoiceAction({
       customerId,
-      paymentMethod: "card_terminal",
       lines: baseLines,
       invoiceDateISO: "2026-03-09",
     });
@@ -181,13 +179,13 @@ describe("createManualInvoiceAction", () => {
     await db().insert(schema.customers).values({
       id: otherId, firstName: "Other", lastName: "Person", phone: "905-555-0000", preferredContact: "phone",
     });
-    const result = await createManualInvoiceAction({ customerId: otherId, vehicleId, lines: baseLines, paymentMethod: "card_terminal" });
+    const result = await createManualInvoiceAction({ customerId: otherId, vehicleId, lines: baseLines });
     expect(result.ok).toBe(false);
   });
 
   it("allocates sequential invoice numbers alongside other invoices", async () => {
-    const first = await createManualInvoiceAction({ customerId, lines: baseLines, paymentMethod: "card_terminal" });
-    const second = await createManualInvoiceAction({ customerId, lines: baseLines, paymentMethod: "card_terminal" });
+    const first = await createManualInvoiceAction({ customerId, lines: baseLines });
+    const second = await createManualInvoiceAction({ customerId, lines: baseLines });
     expect(first.ok && second.ok).toBe(true);
     if (!first.ok || !second.ok) return;
     const rows = await db().select().from(schema.invoices);
@@ -201,13 +199,11 @@ describe("catalogue pricing on manual invoices", () => {
     // The reported bug: picking an SUV still billed the $200 sedan rate.
     const suv = await createManualInvoiceAction({
       customerId,
-      paymentMethod: "card_terminal",
       vehicleId,
       lines: [{ kind: "service", serviceId, quantity: 1 }],
     });
     const sedan = await createManualInvoiceAction({
       customerId,
-      paymentMethod: "card_terminal",
       vehicleId: sedanVehicleId,
       lines: [{ kind: "service", serviceId, quantity: 1 }],
     });
@@ -223,7 +219,6 @@ describe("catalogue pricing on manual invoices", () => {
   it("falls back to the base price when no vehicle is chosen", async () => {
     const result = await createManualInvoiceAction({
       customerId,
-      paymentMethod: "card_terminal",
       lines: [{ kind: "service", serviceId, quantity: 1 }],
     });
     expect(result.ok).toBe(true);
@@ -235,7 +230,6 @@ describe("catalogue pricing on manual invoices", () => {
   it("ignores a client-supplied price unless it is an explicit override", async () => {
     const result = await createManualInvoiceAction({
       customerId,
-      paymentMethod: "card_terminal",
       vehicleId,
       lines: [{ kind: "service", serviceId, quantity: 2 }],
     });
@@ -252,7 +246,6 @@ describe("catalogue pricing on manual invoices", () => {
   it("honours a staff price override", async () => {
     const result = await createManualInvoiceAction({
       customerId,
-      paymentMethod: "card_terminal",
       vehicleId,
       lines: [{ kind: "service", serviceId, quantity: 1, unitPriceCents: 18000 }],
     });
@@ -264,7 +257,6 @@ describe("catalogue pricing on manual invoices", () => {
   it("bills add-ons at the catalogue price alongside the service", async () => {
     const result = await createManualInvoiceAction({
       customerId,
-      paymentMethod: "card_terminal",
       vehicleId,
       lines: [
         { kind: "service", serviceId, quantity: 1 },
@@ -279,7 +271,6 @@ describe("catalogue pricing on manual invoices", () => {
   it("requires a price for a quote-only service", async () => {
     const missing = await createManualInvoiceAction({
       customerId,
-      paymentMethod: "card_terminal",
       vehicleId,
       lines: [{ kind: "service", serviceId: quoteOnlyServiceId, quantity: 1 }],
     });
@@ -287,7 +278,6 @@ describe("catalogue pricing on manual invoices", () => {
 
     const supplied = await createManualInvoiceAction({
       customerId,
-      paymentMethod: "card_terminal",
       vehicleId,
       lines: [{ kind: "service", serviceId: quoteOnlyServiceId, quantity: 1, unitPriceCents: 45000 }],
     });
@@ -297,7 +287,6 @@ describe("catalogue pricing on manual invoices", () => {
   it("applies a percentage discount against the resolved subtotal", async () => {
     const result = await createManualInvoiceAction({
       customerId,
-      paymentMethod: "card_terminal",
       vehicleId,
       lines: [{ kind: "service", serviceId, quantity: 1 }],
       discountPercentBp: 1000, // 10%
@@ -314,7 +303,6 @@ describe("catalogue pricing on manual invoices", () => {
   it("rejects a service that no longer exists", async () => {
     const result = await createManualInvoiceAction({
       customerId,
-      paymentMethod: "card_terminal",
       lines: [{ kind: "service", serviceId: "svc_gone", quantity: 1 }],
     });
     expect(result.ok).toBe(false);
@@ -323,7 +311,7 @@ describe("catalogue pricing on manual invoices", () => {
 
 describe("setInvoiceTaxExemptAction", () => {
   it("recomputes the total and settles a cash payment exactly", async () => {
-    const created = await createManualInvoiceAction({ customerId, lines: baseLines, paymentMethod: "card_terminal" });
+    const created = await createManualInvoiceAction({ customerId, lines: baseLines });
     if (!created.ok) throw new Error("setup failed");
 
     const exempted = await setInvoiceTaxExemptAction({
@@ -351,7 +339,7 @@ describe("setInvoiceTaxExemptAction", () => {
   });
 
   it("refuses to change tax once a payment exists", async () => {
-    const created = await createManualInvoiceAction({ customerId, lines: baseLines, paymentMethod: "card_terminal" });
+    const created = await createManualInvoiceAction({ customerId, lines: baseLines });
     if (!created.ok) throw new Error("setup failed");
     await recordPaymentAction({
       invoiceId: created.invoiceId,
@@ -371,7 +359,7 @@ describe("setInvoiceTaxExemptAction", () => {
 
 describe("renderInvoicePdf", () => {
   it("renders a single page for a normal invoice", async () => {
-    const created = await createManualInvoiceAction({ customerId, vehicleId, lines: baseLines, paymentMethod: "card_terminal" });
+    const created = await createManualInvoiceAction({ customerId, vehicleId, lines: baseLines });
     if (!created.ok) throw new Error("setup failed");
 
     const buffer = await renderInvoicePdf(created.invoiceId);
@@ -390,7 +378,7 @@ describe("renderInvoicePdf", () => {
       quantity: 1,
       unitPriceCents: 12500 + n * 100,
     }));
-    const created = await createManualInvoiceAction({ customerId, vehicleId, lines: manyLines.slice(0, 40), paymentMethod: "card_terminal" });
+    const created = await createManualInvoiceAction({ customerId, vehicleId, lines: manyLines.slice(0, 40) });
     if (!created.ok) throw new Error("setup failed");
 
     for (let i = 0; i < 10; i++) {

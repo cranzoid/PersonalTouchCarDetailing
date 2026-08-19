@@ -18,7 +18,6 @@ import { db, getPool, schema } from "../src/db";
 import { newId } from "../src/lib/id";
 import { summarizeTax } from "../src/lib/reporting";
 import {
-  cancelInvoiceAction,
   createManualInvoiceAction,
   recordPaymentAction,
   setInvoiceTaxExemptAction,
@@ -57,38 +56,79 @@ afterAll(async () => {
   await getPool().end();
 });
 
-describe("the payment method decides whether the invoice charges tax", () => {
-  it("records a cash sale at the listed price, with no tax and an auditable reason", async () => {
-    const created = await createManualInvoiceAction({ customerId, lines, paymentMethod: "cash" });
+describe("an invoice is raised WITH tax — the shop does not know how they will pay", () => {
+  it("issues $175 of work at $197.75, tax on, no method bound to it", async () => {
+    const created = await createManualInvoiceAction({ customerId, lines });
     expect(created.ok).toBe(true);
     if (!created.ok) return;
 
     const invoice = await loadInvoice(created.invoiceId);
     expect(invoice.subtotalCents).toBe(17500);
-    expect(invoice.taxCents).toBe(0);
-    expect(invoice.totalCents).toBe(17500);
-    expect(invoice.taxRateBp).toBe(0);
-    expect(invoice.taxTreatment).toBe("none");
-    expect(invoice.quotedPaymentMethod).toBe("cash");
-    // The existing exempt pair is what the PDF and summarizeTax already read,
-    // so neither had to learn about tax treatments.
-    expect(invoice.taxExempt).toBe(true);
-    expect(invoice.taxExemptReason).toBe("Cash sale — no HST charged");
+    expect(invoice.taxCents).toBe(2275);
+    expect(invoice.totalCents).toBe(19775);
+    expect(invoice.taxTreatment).toBe("added");
+    expect(invoice.quotedPaymentMethod).toBeNull();
+    expect(invoice.taxExempt).toBe(false);
   });
 
-  it("records an Interac e-transfer sale untaxed too", async () => {
-    const created = await createManualInvoiceAction({ customerId, lines, paymentMethod: "etransfer" });
+  it("still honours a staff exemption at creation, with no method bound", async () => {
+    const created = await createManualInvoiceAction({
+      customerId, lines, taxExempt: true, taxExemptReason: "Out-of-province customer",
+    });
     if (!created.ok) throw new Error("setup failed");
     const invoice = await loadInvoice(created.invoiceId);
     expect(invoice.totalCents).toBe(17500);
     expect(invoice.taxTreatment).toBe("none");
+    expect(invoice.quotedPaymentMethod).toBeNull();
+  });
+});
+
+describe("recording the payment is what settles the tax", () => {
+  async function issued() {
+    const created = await createManualInvoiceAction({ customerId, lines });
+    if (!created.ok) throw new Error("setup failed");
+    await db().update(schema.invoices).set({ status: "sent" }).where(eq(schema.invoices.id, created.invoiceId));
+    return created.invoiceId;
+  }
+
+  it("strips the tax and re-prices to $175.00 when they pay cash", async () => {
+    const invoiceId = await issued();
+    const paid = await recordPaymentAction({
+      invoiceId, method: "cash", amountCents: 17500, idempotencyKey: newId("pay"),
+    });
+    expect(paid.ok).toBe(true);
+
+    const invoice = await loadInvoice(invoiceId);
+    expect(invoice.taxCents).toBe(0);
+    expect(invoice.taxRateBp).toBe(0);
+    expect(invoice.totalCents).toBe(17500);
+    expect(invoice.taxTreatment).toBe("none");
+    expect(invoice.quotedPaymentMethod).toBe("cash");
+    // The existing exempt pair is what the PDF and summarizeTax already read.
+    expect(invoice.taxExempt).toBe(true);
+    expect(invoice.taxExemptReason).toBe("Cash sale — no HST charged");
+    expect(invoice.status).toBe("paid");
   });
 
-  it("adds HST for credit and cheque — $175 becomes $197.75", async () => {
-    for (const method of ["card_terminal", "stripe", "cheque"] as const) {
-      const created = await createManualInvoiceAction({ customerId, lines, paymentMethod: method });
-      if (!created.ok) throw new Error("setup failed");
-      const invoice = await loadInvoice(created.invoiceId);
+  it("does the same for Interac e-transfer", async () => {
+    const invoiceId = await issued();
+    const paid = await recordPaymentAction({
+      invoiceId, method: "etransfer", amountCents: 17500, idempotencyKey: newId("pay"),
+    });
+    expect(paid.ok).toBe(true);
+    const invoice = await loadInvoice(invoiceId);
+    expect(invoice.totalCents).toBe(17500);
+    expect(invoice.taxExemptReason).toBe("Interac e-transfer sale — no HST charged");
+  });
+
+  it("keeps the tax and the $197.75 total when they pay by card or cheque", async () => {
+    for (const method of ["card_terminal", "cheque"] as const) {
+      const invoiceId = await issued();
+      const paid = await recordPaymentAction({
+        invoiceId, method, amountCents: 19775, idempotencyKey: newId("pay"),
+      });
+      expect(paid.ok).toBe(true);
+      const invoice = await loadInvoice(invoiceId);
       expect(invoice.taxCents).toBe(2275);
       expect(invoice.totalCents).toBe(19775);
       expect(invoice.taxTreatment).toBe("added");
@@ -96,40 +136,114 @@ describe("the payment method decides whether the invoice charges tax", () => {
     }
   });
 
-  it("refuses an invoice with no payment method rather than guessing one", async () => {
-    const result = await createManualInvoiceAction({ customerId, lines });
+  it("refuses the taxed figure tendered in cash, and does not re-price on the way out", async () => {
+    // Staff clicking "pay in full" before switching the method to cash would
+    // otherwise strip $22.75 of tax and THEN reject the payment, leaving the
+    // invoice re-priced by a payment that never happened.
+    const invoiceId = await issued();
+    const result = await recordPaymentAction({
+      invoiceId, method: "cash", amountCents: 19775, idempotencyKey: newId("pay"),
+    });
     expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain("$175.00");
+
+    const invoice = await loadInvoice(invoiceId);
+    expect(invoice.totalCents).toBe(19775);
+    expect(invoice.taxTreatment).toBe("added");
+    expect(invoice.quotedPaymentMethod).toBeNull();
+    expect(await db().select().from(schema.payments)).toHaveLength(0);
   });
 
-  it("makes the restatement a query: none + a quoted method finds exactly the cash sales", async () => {
-    await createManualInvoiceAction({ customerId, lines, paymentMethod: "cash" });
-    await createManualInvoiceAction({ customerId, lines, paymentMethod: "card_terminal" });
-    const exempted = await createManualInvoiceAction({
-      customerId, lines, paymentMethod: "card_terminal",
-      taxExempt: true, taxExemptReason: "Out-of-province customer",
+  it("settles the question on the FIRST payment and holds it there", async () => {
+    const invoiceId = await issued();
+    const first = await recordPaymentAction({
+      invoiceId, method: "cash", amountCents: 10000, idempotencyKey: newId("pay"),
     });
-    if (!exempted.ok) throw new Error("setup failed");
+    expect(first.ok).toBe(true);
+    expect((await loadInvoice(invoiceId)).totalCents).toBe(17500);
+
+    const blocked = await recordPaymentAction({
+      invoiceId, method: "card_terminal", amountCents: 7500, idempotencyKey: newId("pay"),
+    });
+    expect(blocked.ok).toBe(false);
+    if (blocked.ok) return;
+    expect(blocked.error).toContain("already part-paid");
+
+    const rest = await recordPaymentAction({
+      invoiceId, method: "etransfer", amountCents: 7500, idempotencyKey: newId("pay"),
+    });
+    expect(rest.ok).toBe(true);
+    expect((await loadInvoice(invoiceId)).status).toBe("paid");
+  });
+
+  it("never re-prices an invoice that was already part-paid before the rule existed", async () => {
+    const invoiceId = await issued();
+    await recordPaymentAction({ invoiceId, method: "card_terminal", amountCents: 5000, idempotencyKey: newId("pay") });
+    // Exactly the shape of a row migrated by 0008 mid-payment: a payment
+    // against it, no quoted method.
+    await db().update(schema.invoices).set({ quotedPaymentMethod: null })
+      .where(eq(schema.invoices.id, invoiceId));
+
+    const paid = await recordPaymentAction({
+      invoiceId, method: "cash", amountCents: 14775, idempotencyKey: newId("pay"),
+    });
+    expect(paid.ok).toBe(true);
+    const invoice = await loadInvoice(invoiceId);
+    expect(invoice.totalCents).toBe(19775);
+    expect(invoice.taxCents).toBe(2275);
+  });
+
+  it("lets any method settle a staff-exempted invoice, and binds none of them", async () => {
+    const created = await createManualInvoiceAction({
+      customerId, lines, taxExempt: true, taxExemptReason: "Exempt organisation",
+    });
+    if (!created.ok) throw new Error("setup failed");
+    await db().update(schema.invoices).set({ status: "sent" }).where(eq(schema.invoices.id, created.invoiceId));
+
+    const paid = await recordPaymentAction({
+      invoiceId: created.invoiceId, method: "card_terminal", amountCents: 17500, idempotencyKey: newId("pay"),
+    });
+    expect(paid.ok).toBe(true);
+    const invoice = await loadInvoice(created.invoiceId);
+    expect(invoice.taxExemptReason).toBe("Exempt organisation");
+    expect(invoice.quotedPaymentMethod).toBeNull();
+  });
+
+  it("is idempotent — a retried payment does not re-price anything twice", async () => {
+    const invoiceId = await issued();
+    const key = newId("pay");
+    const first = await recordPaymentAction({ invoiceId, method: "cash", amountCents: 17500, idempotencyKey: key });
+    const retry = await recordPaymentAction({ invoiceId, method: "cash", amountCents: 17500, idempotencyKey: key });
+    expect(first.ok).toBe(true);
+    expect(retry.ok).toBe(true);
+    expect(await db().select().from(schema.payments)).toHaveLength(1);
+    expect((await loadInvoice(invoiceId)).totalCents).toBe(17500);
+  });
+
+  it("makes the restatement a query: none + a method finds the cash sales only", async () => {
+    const cash = await issued();
+    await recordPaymentAction({ invoiceId: cash, method: "cash", amountCents: 17500, idempotencyKey: newId("pay") });
+    const card = await issued();
+    await recordPaymentAction({ invoiceId: card, method: "cheque", amountCents: 19775, idempotencyKey: newId("pay") });
+    const staffExempt = await createManualInvoiceAction({
+      customerId, lines, taxExempt: true, taxExemptReason: "Out-of-province customer",
+    });
+    if (!staffExempt.ok) throw new Error("setup failed");
 
     const all = await db().select().from(schema.invoices);
     const restatable = all.filter((i) => i.taxTreatment === "none" && i.quotedPaymentMethod !== null);
     expect(restatable).toHaveLength(1);
-    expect(restatable[0]!.quotedPaymentMethod).toBe("cash");
-    // The staff exemption is untaxed but must not be swept in with it.
-    const staffExempt = all.find((i) => i.id === exempted.invoiceId)!;
-    expect(staffExempt.taxTreatment).toBe("none");
-    expect(staffExempt.quotedPaymentMethod).toBeNull();
+    expect(restatable[0]!.id).toBe(cash);
   });
 
   it("separates cash from e-transfer on the tax report's exempt-reason table", async () => {
     for (const method of ["cash", "cash", "etransfer"] as const) {
-      const created = await createManualInvoiceAction({ customerId, lines, paymentMethod: method });
-      if (!created.ok) throw new Error("setup failed");
-      await db().update(schema.invoices).set({ status: "sent" })
-        .where(eq(schema.invoices.id, created.invoiceId));
+      const invoiceId = await issued();
+      await recordPaymentAction({ invoiceId, method, amountCents: 17500, idempotencyKey: newId("pay") });
     }
     const summary = summarizeTax(await db().select().from(schema.invoices));
     expect(summary.taxCollectedCents).toBe(0);
-    expect(summary.exemptInvoiceCount).toBe(3);
     expect(summary.exemptReasons.map((r) => [r.reason, r.count])).toEqual([
       ["Cash sale — no HST charged", 2],
       ["Interac e-transfer sale — no HST charged", 1],
@@ -137,118 +251,20 @@ describe("the payment method decides whether the invoice charges tax", () => {
   });
 });
 
-describe("a payment that contradicts the invoice is refused, not absorbed", () => {
-  async function issued(method: "cash" | "card_terminal") {
-    const created = await createManualInvoiceAction({ customerId, lines, paymentMethod: method });
-    if (!created.ok) throw new Error("setup failed");
-    await db().update(schema.invoices).set({ status: "sent" }).where(eq(schema.invoices.id, created.invoiceId));
-    return created.invoiceId;
-  }
-
-  it("blocks a card payment against a cash invoice", async () => {
-    const invoiceId = await issued("cash");
-    const result = await recordPaymentAction({
-      invoiceId, method: "card_terminal", amountCents: 17500, idempotencyKey: newId("pay"),
-    });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error).toContain("cancel this invoice and re-issue");
-    expect(await db().select().from(schema.payments)).toHaveLength(0);
-  });
-
-  it("blocks a cash payment against a card invoice", async () => {
-    const invoiceId = await issued("card_terminal");
-    const result = await recordPaymentAction({
-      invoiceId, method: "cash", amountCents: 19775, idempotencyKey: newId("pay"),
-    });
-    expect(result.ok).toBe(false);
-  });
-
-  it("accepts the method the invoice was issued for", async () => {
-    const invoiceId = await issued("cash");
-    const result = await recordPaymentAction({
-      invoiceId, method: "cash", amountCents: 17500, idempotencyKey: newId("pay"),
-    });
-    expect(result.ok).toBe(true);
-    expect((await loadInvoice(invoiceId)).status).toBe("paid");
-  });
-
-  it("treats e-transfer as equivalent to cash, since neither is taxed", async () => {
-    const invoiceId = await issued("cash");
-    const result = await recordPaymentAction({
-      invoiceId, method: "etransfer", amountCents: 17500, idempotencyKey: newId("pay"),
-    });
-    expect(result.ok).toBe(true);
-  });
-
-  it("leaves pre-Release-3 invoices payable by any method across the swap", async () => {
-    const invoiceId = await issued("card_terminal");
-    // Exactly the shape of a row migrated by 0008: defaulted treatment, no
-    // quoted method, taxed under the old always-add rule.
-    await db().update(schema.invoices).set({ quotedPaymentMethod: null })
-      .where(eq(schema.invoices.id, invoiceId));
-    const result = await recordPaymentAction({
-      invoiceId, method: "cash", amountCents: 19775, idempotencyKey: newId("pay"),
-    });
-    expect(result.ok).toBe(true);
-  });
-
-  it("supports the owner's cancel-and-re-issue path end to end", async () => {
-    const invoiceId = await issued("cash");
-    const blocked = await recordPaymentAction({
-      invoiceId, method: "card_terminal", amountCents: 17500, idempotencyKey: newId("pay"),
-    });
-    expect(blocked.ok).toBe(false);
-
-    const cancelled = await cancelInvoiceAction({ invoiceId, reason: "Customer paying by card instead" });
-    expect(cancelled.ok).toBe(true);
-
-    const reissued = await createManualInvoiceAction({ customerId, lines, paymentMethod: "card_terminal" });
-    if (!reissued.ok) throw new Error("re-issue failed");
-    await db().update(schema.invoices).set({ status: "sent" })
-      .where(eq(schema.invoices.id, reissued.invoiceId));
-    const paid = await recordPaymentAction({
-      invoiceId: reissued.invoiceId, method: "card_terminal", amountCents: 19775, idempotencyKey: newId("pay"),
-    });
-    expect(paid.ok).toBe(true);
-    // The customer pays the card price, not the cash one.
-    expect((await loadInvoice(reissued.invoiceId)).totalCents).toBe(19775);
-  });
-
-  it("stops blocking once a staff exemption replaces the payment-method reason", async () => {
-    const created = await createManualInvoiceAction({ customerId, lines, paymentMethod: "card_terminal" });
-    if (!created.ok) throw new Error("setup failed");
-    const exempted = await setInvoiceTaxExemptAction({
-      invoiceId: created.invoiceId, taxExempt: true, reason: "Exempt organisation",
-    });
-    expect(exempted.ok).toBe(true);
-
-    const invoice = await loadInvoice(created.invoiceId);
-    expect(invoice.taxTreatment).toBe("none");
-    expect(invoice.quotedPaymentMethod).toBeNull();
-    const paid = await recordPaymentAction({
-      invoiceId: created.invoiceId, method: "cash", amountCents: 17500, idempotencyKey: newId("pay"),
-    });
-    expect(paid.ok).toBe(true);
-  });
-});
-
 describe("discount reason", () => {
   it("takes a discount with no explanation at all — the owner does not record one", async () => {
-    const result = await createManualInvoiceAction({
-      customerId, lines, paymentMethod: "cash", discountCents: 2500,
-    });
+    const result = await createManualInvoiceAction({ customerId, lines, discountCents: 2500 });
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     const invoice = await loadInvoice(result.invoiceId);
     expect(invoice.discountCents).toBe(2500);
     expect(invoice.discountReason).toBeNull();
-    expect(invoice.totalCents).toBe(15000);
+    expect(invoice.totalCents).toBe(16950); // 150.00 + 13% HST
   });
 
   it("still stores the reason when one is given", async () => {
     const result = await createManualInvoiceAction({
-      customerId, lines, paymentMethod: "cash", discountCents: 2500, discountReason: "Service recovery",
+      customerId, lines, discountCents: 2500, discountReason: "Service recovery",
     });
     if (!result.ok) throw new Error("setup failed");
     const invoice = await loadInvoice(result.invoiceId);
@@ -257,9 +273,7 @@ describe("discount reason", () => {
   });
 
   it("accepts a zero discount unchanged", async () => {
-    const result = await createManualInvoiceAction({
-      customerId, lines, paymentMethod: "cash", discountPercentBp: 0,
-    });
+    const result = await createManualInvoiceAction({ customerId, lines, discountPercentBp: 0 });
     expect(result.ok).toBe(true);
   });
 });

@@ -460,16 +460,20 @@ follows is what was built and the three places it departed from the plan below.
 
 ### 7.0 Where the build departed from this plan, and why
 
-1. **The payment-method selector went on *three* creation paths, not two.**
-   `createConsolidatedInvoiceAction` was not in §7.3's list. Without it a fleet
-   account could only ever be billed tax-added, and the §7.3 payment block would
-   then have made those invoices unpayable by any account settling in cash or by
-   e-transfer.
-2. **The payment block is gated on `quoted_payment_method` being set.** Applying
-   it to every invoice would have meant the shop could take no cash on anything
-   already open at the moment of the swap — every pre-Release-3 invoice defaults
-   to `tax_treatment = 'added'` with no quoted method. Legacy invoices behave
-   exactly as they did; there is a test pinning it.
+1. **The payment method is asked for when the payment is RECORDED, not when the
+   invoice is raised.** §7.3 said the selector belongs on invoice creation, and
+   that is how it first shipped — then the owner corrected it, because *the shop
+   does not know how the customer will pay when it raises the invoice*. They
+   invoice, send it, and find out at the counter. So the invoice is issued with
+   tax on it and the **first payment** settles the question: cash or e-transfer
+   strips the tax and re-prices the document, card or cheque leaves it as
+   issued. `resolvePaymentTax` in `src/lib/invoices.ts` is the whole rule; it
+   lives in `recordPaymentAction`. **Do not put a payment selector back on the
+   creation paths.**
+2. **An invoice that already has a payment against it is never re-priced**, and
+   the block only fires once a method has settled the treatment. That is also
+   what makes the release safe for invoices caught mid-payment: they carry on
+   under the rate they were issued at. Tests pin both.
 3. **Online card checkout is refused on an untaxed invoice**, in
    `claimInvoiceCheckout` inside the row lock, not just by hiding the button.
    Card is a taxable method, so paying a cash-priced invoice online would settle
@@ -484,10 +488,11 @@ NULL` — the cash and Interac sales, and nothing else.
 
 - `PAYMENT_METHOD_TAXABLE`, `QUOTED_PAYMENT_METHODS` and `TAX_TREATMENTS` in
   `src/lib/types.ts`.
-- `resolveInvoiceTax`, `paymentMethodConflict`, `isPaymentMethodTaxable`,
-  `taxTreatmentForMethod`, `noTaxReasonForMethod` in `src/lib/invoices.ts` —
-  all pure, all unit-tested. The three creation paths share `resolveInvoiceTax`
-  so they cannot drift.
+- `resolvePaymentTax`, `paymentMethodConflict`, `isPaymentMethodTaxable`,
+  `noTaxReasonForMethod` in `src/lib/invoices.ts` — all pure, all unit-tested.
+  `resolvePaymentTax` strips tax as `total − tax`, never by recomputing from
+  line items: the two agree on every invoice the app can raise, but only
+  subtraction is safe on one whose lines are missing.
 - `src/lib/phone.ts` — `normalizePhone`, `formatPhone`, `duplicatePhoneNumbers`.
 - `src/lib/attention.ts` + `src/app/admin/(app)/attention-card.tsx` — the
   needs-attention queue, bounded to 90 days. **One rule, not two:** spec §5's

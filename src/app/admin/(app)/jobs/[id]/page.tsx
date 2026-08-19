@@ -200,7 +200,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
               <p className="mb-3 text-sm text-ink-500">
                 Builds an invoice from the booked services plus any approved additional work.
               </p>
-              <CreateInvoiceButton jobId={job.id} taxLabel={settings.taxLabel} />
+              <CreateInvoiceButton jobId={job.id} />
             </div>
           )}
         </section>

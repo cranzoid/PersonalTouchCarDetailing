@@ -2,12 +2,6 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import {
-  PAYMENT_METHOD_TAXABLE,
-  QUOTED_PAYMENT_METHODS,
-  QUOTED_PAYMENT_METHOD_LABELS,
-  type QuotedPaymentMethod,
-} from "@/lib/types";
 import { createConsolidatedInvoiceAction } from "../invoices/actions";
 
 export type EligibleFleetJob = {
@@ -20,18 +14,13 @@ export type EligibleFleetJob = {
 export function ConsolidatedInvoiceBuilder({
   customerId,
   jobs,
-  taxLabel,
 }: {
   customerId: string;
   jobs: EligibleFleetJob[];
-  taxLabel: string;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Fleet accounts most often settle on account by cheque, so that is the
-  // default here rather than the cash default on a walk-in job.
-  const [paymentMethod, setPaymentMethod] = useState<QuotedPaymentMethod>("cheque");
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -39,7 +28,7 @@ export function ConsolidatedInvoiceBuilder({
     setError(null);
     const form = new FormData(event.currentTarget);
     const jobIds = form.getAll("jobId").map(String);
-    const result = await createConsolidatedInvoiceAction({ customerId, jobIds, paymentMethod });
+    const result = await createConsolidatedInvoiceAction({ customerId, jobIds });
     setBusy(false);
     if (!result.ok) return setError(result.error);
     router.push(`/admin/invoices/${result.invoiceId}`);
@@ -65,25 +54,6 @@ export function ConsolidatedInvoiceBuilder({
               </label>
             ))}
           </div>
-          <label className="mt-4 block text-xs text-ink-400">
-            How will this account pay?
-            <select
-              className="mt-1 block rounded-lg border border-ink-600 bg-ink-950 px-3 py-2 text-sm text-white"
-              value={paymentMethod}
-              onChange={(e) => setPaymentMethod(e.target.value as QuotedPaymentMethod)}
-            >
-              {QUOTED_PAYMENT_METHODS.map((m) => (
-                <option key={m} value={m}>
-                  {QUOTED_PAYMENT_METHOD_LABELS[m]}
-                </option>
-              ))}
-            </select>
-          </label>
-          <p className={`mt-2 text-xs ${PAYMENT_METHOD_TAXABLE[paymentMethod] ? "text-ink-500" : "text-amber-300"}`}>
-            {PAYMENT_METHOD_TAXABLE[paymentMethod]
-              ? `${taxLabel} is added to this invoice.`
-              : `No ${taxLabel} is charged on cash or e-transfer sales. The account must settle by that method — changing it later means cancelling and re-issuing.`}
-          </p>
           {error && <p className="mt-3 text-sm text-red-300">{error}</p>}
           <button disabled={busy} className="mt-4 rounded-lg bg-accent-400 px-4 py-2 text-sm font-semibold text-ink-950 disabled:opacity-50">
             {busy ? "Creating…" : "Create draft invoice"}

@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { ManualPaymentMethod } from "@/lib/types";
+import { formatCents } from "@/lib/money";
+import { PAYMENT_METHOD_TAXABLE, type ManualPaymentMethod } from "@/lib/types";
 import {
   sendInvoiceAction,
   recordPaymentAction,
@@ -33,6 +34,9 @@ export function InvoiceActions({
   invoiceId,
   status,
   balanceCents,
+  untaxedBalanceCents,
+  taxSettled,
+  currency,
   netPaidCents,
   stripeRefundableCents,
   manualRefundableCents,
@@ -42,6 +46,14 @@ export function InvoiceActions({
   invoiceId: string;
   status: string;
   balanceCents: number;
+  /**
+   * What would be owing if this payment strips the tax. Equal to
+   * `balanceCents` whenever nothing can change — a settled or exempt invoice.
+   */
+  untaxedBalanceCents: number;
+  /** True once a payment or a staff exemption has fixed the tax treatment. */
+  taxSettled: boolean;
+  currency: string;
   netPaidCents: number;
   stripeRefundableCents: number;
   manualRefundableCents: number;
@@ -55,6 +67,11 @@ export function InvoiceActions({
   const [delivery, setDelivery] = useState<"email" | "sms" | null>(null);
 
   const [method, setMethod] = useState<(typeof PAYMENT_METHODS)[number]["value"]>("cash");
+  // Cash and e-transfer strip the tax when the payment is recorded, so the
+  // amount actually owing depends on the method picked right here. Getting this
+  // wrong is how staff end up tendering the taxed figure and being refused.
+  const stripsTax = !taxSettled && !PAYMENT_METHOD_TAXABLE[method];
+  const dueCents = stripsTax ? untaxedBalanceCents : balanceCents;
   const [amount, setAmount] = useState("");
   const [paymentIdempotencyKey, setPaymentIdempotencyKey] = useState(() => newIdempotencyKey("payment"));
   const [refundAmount, setRefundAmount] = useState("");
@@ -214,6 +231,13 @@ export function InvoiceActions({
         <div className="border-t border-ink-800 pt-5">
           <p className="text-sm font-medium text-white">Record a manual payment</p>
           <p className="mt-1 text-xs text-ink-500">Cash, e-transfer or a card terminal handled outside Stripe.</p>
+          {!taxSettled && untaxedBalanceCents !== balanceCents && (
+            <p className={`mt-2 text-xs ${stripsTax ? "text-amber-300" : "text-ink-500"}`}>
+              {stripsTax
+                ? `No ${taxLabel} on cash or e-transfer — recording this drops the balance to ${formatCents(untaxedBalanceCents, currency)}.`
+                : `${taxLabel} stands on card or cheque: ${formatCents(balanceCents, currency)} due. Cash or e-transfer would be ${formatCents(untaxedBalanceCents, currency)}.`}
+            </p>
+          )}
           <div className="mt-3 flex flex-wrap items-end gap-2">
             <label className="block text-xs text-ink-400">
               Method
@@ -244,7 +268,7 @@ export function InvoiceActions({
                 "partially paid". */}
             <button
               type="button"
-              onClick={() => setAmount((balanceCents / 100).toFixed(2))}
+              onClick={() => setAmount((dueCents / 100).toFixed(2))}
               disabled={busy}
               className="rounded-lg border border-ink-600 px-4 py-2 text-sm font-medium text-ink-200 hover:bg-ink-800 disabled:opacity-40"
             >

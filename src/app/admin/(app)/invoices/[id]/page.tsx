@@ -47,6 +47,17 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
     .where(eq(schema.invoiceJobs.invoiceId, id));
 
   const summary = summarizePayments(invoice.totalCents, invoice.depositAppliedCents, payments);
+  // The tax on an unpaid invoice is not settled until someone pays it: cash or
+  // e-transfer strips it, card or cheque keeps it. Both balances are handed to
+  // the payment form so the "pay in full" button tenders the right figure for
+  // the method chosen. Mirrors resolvePaymentTax's rules exactly.
+  const taxSettled =
+    invoice.quotedPaymentMethod !== null ||
+    invoice.taxExempt ||
+    payments.some((p) => p.status === "succeeded");
+  const untaxedSummary = taxSettled
+    ? summary
+    : summarizePayments(invoice.totalCents - invoice.taxCents, invoice.depositAppliedCents, payments);
   const refundAvailability = getRefundAvailability(payments, invoice.depositAppliedCents);
 
   return (
@@ -138,13 +149,13 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
               <td className="px-4 py-2 text-ink-200">{formatCents(invoice.taxCents, settings.currency)}</td></tr>
             {invoice.quotedPaymentMethod && (
               <tr><td colSpan={4} className={`px-4 py-2 text-xs ${invoice.taxTreatment === "none" ? "text-amber-300" : "text-ink-500"}`}>
-                  {`Issued for payment by ${
+                  {`Paid by ${
                     QUOTED_PAYMENT_METHOD_LABELS[invoice.quotedPaymentMethod as QuotedPaymentMethod] ??
                     invoice.quotedPaymentMethod
                   }${
                     invoice.taxTreatment === "none"
-                      ? ` — no ${invoice.taxLabel} charged. A card or cheque payment will be refused; cancel and re-issue instead.`
-                      : `. A cash or e-transfer payment will be refused; cancel and re-issue instead.`
+                      ? `, so no ${invoice.taxLabel} was charged. The balance cannot now be settled by card or cheque.`
+                      : `, so ${invoice.taxLabel} stands. The balance cannot now be settled by cash or e-transfer.`
                   }`}
                 </td></tr>
             )}
@@ -235,6 +246,9 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         invoiceId={invoice.id}
         status={invoice.status}
         balanceCents={summary.balanceCents}
+        untaxedBalanceCents={untaxedSummary.balanceCents}
+        taxSettled={taxSettled}
+        currency={settings.currency}
         netPaidCents={summary.netPaidCents}
         stripeRefundableCents={refundAvailability.stripeRefundableCents}
         manualRefundableCents={refundAvailability.manualRefundableCents}

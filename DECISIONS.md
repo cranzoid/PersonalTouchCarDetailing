@@ -265,35 +265,50 @@ rather than resolved in code.
   a `WHERE` clause, not a year of re-entry, and it does not collide with the
   ordinary staff exemptions (out-of-province, exempt organisation) that leave
   `quoted_payment_method` NULL.
-- **The choice lands on invoice creation, on all three paths.** The owner
-  declined a counter-sale "Add Job" screen, so there is no earlier step that
-  produces a tax document. `createInvoiceFromJobAction`,
-  `createConsolidatedInvoiceAction` and `createManualInvoiceAction` all take a
-  required `paymentMethod` and all route it through one function,
-  `resolveInvoiceTax`, so they cannot drift. The consolidated fleet path was not
-  in the handoff's list but had to be included: without it a fleet account could
-  only ever be billed tax-added, and the payment rule below would then make its
-  invoices unpayable by cheque-less accounts.
+- **The choice lands where the shop actually learns the answer: recording the
+  payment.** It shipped on invoice creation first — a required "How will they
+  pay?" selector on all three paths — and that was wrong, because *the shop does
+  not know*. The owners raise an invoice, send it, and find out how it is being
+  settled when the customer settles it. Asking at creation forced staff to guess,
+  and a guess written into a tax document is worse than no answer at all. So the
+  invoice is raised **with tax**, and `resolvePaymentTax` in `recordPaymentAction`
+  lets the **first payment** settle it: cash or e-transfer strips the tax and
+  re-prices the document, card or cheque leaves it as issued, and either way the
+  method is stamped so `paymentMethodConflict` can hold it steady afterwards.
+- **The re-price is `total − tax`, not a recomputation from line items.** The two
+  agree on every invoice the app can raise, but only subtraction is safe on one
+  whose lines are missing — recomputing there would write a $0.00 total onto a
+  real financial document. A test pins it.
+- **The balance is checked against the re-priced total, before anything is
+  written.** Tendering the taxed figure in cash is refused outright rather than
+  stripping the tax and then rejecting the payment that caused it, which would
+  leave the invoice re-priced by a payment that never happened.
 - **A staff exemption outranks the payment-method rule.** An out-of-province
   customer paying by card is exempt for a reason that has nothing to do with
   payment; `resolveInvoiceTax` keeps their reason and leaves
   `quoted_payment_method` NULL.
-- **A contradicting payment is refused, not absorbed.** The owner's decision was
-  cancel-and-re-issue, so `recordPaymentAction` blocks a cash payment against a
-  tax-added invoice and a card payment against a tax-free one, and says which.
-  Online card checkout is refused on a tax-free invoice in
-  `claimInvoiceCheckout` — inside the row lock, because hiding the pay button is
-  never the security boundary.
-- **The rule binds only invoices that carry the choice.** The check is gated on
-  `quoted_payment_method` being set. Every invoice raised before this release
-  has it NULL and was taxed under the old always-add rule; enforcing against
-  them would have meant the shop could take no cash on anything already open at
-  the moment of the swap. Legacy invoices keep behaving exactly as they did.
+- **A second payment cannot flip the answer.** Once one payment has settled the
+  treatment, the opposite method is refused: the customer has already paid part
+  of a total computed the other way, and re-pricing underneath them is worse
+  than the inconsistency it fixes. Online card checkout is likewise refused on
+  an invoice a cash payment has already stripped — in `claimInvoiceCheckout`,
+  inside the row lock, because hiding the pay button is never the boundary.
+- **An invoice already part-paid is never re-priced**, which is also what makes
+  this safe for anything caught mid-payment by the release: those rows have
+  `quoted_payment_method` NULL and a payment against them, so they simply carry
+  on under the rate they were issued at.
+- **The customer's copy shows the cash price.** The invoice goes out with tax on
+  it, so the portal names the other figure — *"Paying in cash or by Interac
+  e-transfer? $175.00"* — rather than quietly asking for more than the counter
+  will charge.
 - **This deliberately breaks the appointment↔invoice reconciliation of #14.** An
   appointment snapshots a tax-added total at booking, and a cash job now invoices
   for less than the appointment quoted. That is the price of the rule, not a
   bug. The booking wizard still quotes tax-added as the conservative default and
   shows the cash figure alongside it; the invoice remains the tax document.
+- **A staff exemption still outranks all of it** and binds no method, so
+  `quoted_payment_method` stays NULL and the restatement query keeps pointing at
+  payment-method sales only.
 - **`setInvoiceTaxExemptAction` keeps the two columns honest**, moving
   `tax_treatment` with the exemption and clearing `quoted_payment_method` — a
   manual exemption is a different reason, and leaving the old method there would

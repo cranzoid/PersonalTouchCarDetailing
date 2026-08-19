@@ -83,85 +83,27 @@ export function isPaymentMethodTaxable(method: string): boolean {
   return PAYMENT_METHOD_TAXABLE[method as QuotedPaymentMethod] ?? true;
 }
 
-export function taxTreatmentForMethod(method: QuotedPaymentMethod): TaxTreatment {
-  return PAYMENT_METHOD_TAXABLE[method] ? "added" : "none";
-}
-
 /**
  * The reason stored in `invoices.tax_exempt_reason` for a sale that charges no
- * tax because of how it is being paid. `summarizeTax` groups the tax report by
- * this string, so it stays stable and human-readable.
+ * tax because of how it was paid. `summarizeTax` groups the tax report by this
+ * string, so it stays stable and human-readable.
  */
-export function noTaxReasonForMethod(method: QuotedPaymentMethod, taxLabel: string): string {
-  return `${QUOTED_PAYMENT_METHOD_LABELS[method]} sale — no ${taxLabel} charged`;
-}
-
-/**
- * The whole tax side of raising an invoice, in one place so all three creation
- * paths (from a job, consolidated fleet, manual) cannot drift apart.
- *
- * `baseTaxRateBp` is the rate that WOULD apply — an appointment's snapshotted
- * rate, or the settings rate. A non-taxable method zeroes it and sets the
- * existing `taxExempt` + reason pair, which the invoice PDF and `summarizeTax`
- * already handle, so neither needs to learn about tax treatments.
- *
- * A staff-applied exemption still wins: an out-of-province customer paying by
- * card is exempt for a reason that has nothing to do with the payment method,
- * and `quotedPaymentMethod` stays null so no payment-method rule binds the
- * invoice later.
- */
-export function resolveInvoiceTax(input: {
-  method: QuotedPaymentMethod;
-  baseTaxRateBp: number;
-  taxLabel: string;
-  staffExempt?: boolean;
-  staffExemptReason?: string | null;
-}): {
-  taxRateBp: number;
-  taxTreatment: TaxTreatment;
-  quotedPaymentMethod: QuotedPaymentMethod | null;
-  taxExempt: boolean;
-  taxExemptReason: string | null;
-} {
-  if (input.staffExempt) {
-    return {
-      taxRateBp: 0,
-      taxTreatment: "none",
-      quotedPaymentMethod: null,
-      taxExempt: true,
-      taxExemptReason: input.staffExemptReason ?? null,
-    };
-  }
-  const treatment = taxTreatmentForMethod(input.method);
-  if (treatment === "none") {
-    return {
-      taxRateBp: 0,
-      taxTreatment: "none",
-      quotedPaymentMethod: input.method,
-      taxExempt: true,
-      taxExemptReason: noTaxReasonForMethod(input.method, input.taxLabel),
-    };
-  }
-  return {
-    taxRateBp: input.baseTaxRateBp,
-    taxTreatment: "added",
-    quotedPaymentMethod: input.method,
-    taxExempt: false,
-    taxExemptReason: null,
-  };
+export function noTaxReasonForMethod(method: string, taxLabel: string): string {
+  const label = QUOTED_PAYMENT_METHOD_LABELS[method as QuotedPaymentMethod] ?? method;
+  return `${label} sale — no ${taxLabel} charged`;
 }
 
 /**
  * Blocks a payment whose method contradicts how the invoice was taxed, and
- * returns the staff-facing message explaining what to do instead. The owner's
- * decision is cancel-and-re-issue: allowing a cash payment against a
- * tax-added invoice (or the reverse) would leave the tax document describing a
- * sale that never happened.
+ * returns the staff-facing message explaining what to do instead.
  *
- * Deliberately gated on `quotedPaymentMethod` being set. Every invoice raised
- * before Release 3 has it NULL and was taxed under the old always-add rule;
- * enforcing this against them would mean the shop could not take cash on any
- * invoice already open at the moment of the swap.
+ * Only ever fires once a first payment has SETTLED the treatment: the shop
+ * raises an invoice with tax on it, and whoever pays first decides whether that
+ * tax stands. A second payment on the same invoice cannot flip it, because the
+ * customer has already paid part of a total computed the other way.
+ *
+ * Silent when `quotedPaymentMethod` is null — an invoice nobody has paid yet,
+ * a staff-exempted one, or anything raised before this rule existed.
  */
 export function paymentMethodConflict(
   invoice: { taxTreatment: string; quotedPaymentMethod: string | null },
@@ -171,18 +113,121 @@ export function paymentMethodConflict(
   if (!invoice.quotedPaymentMethod) return null;
   const invoiceTaxed = invoice.taxTreatment === "added";
   if (invoiceTaxed === isPaymentMethodTaxable(method)) return null;
-  const quotedLabel =
+  const settledLabel =
     QUOTED_PAYMENT_METHOD_LABELS[invoice.quotedPaymentMethod as QuotedPaymentMethod] ??
     invoice.quotedPaymentMethod;
   const payingLabel = QUOTED_PAYMENT_METHOD_LABELS[method as QuotedPaymentMethod] ?? method;
   return invoiceTaxed
-    ? `This invoice was issued for ${quotedLabel}, so it charges ${taxLabel}. ${payingLabel} is priced without ${taxLabel} — cancel this invoice and re-issue it for ${payingLabel}.`
-    : `This invoice was issued for ${quotedLabel}, so it charges no ${taxLabel}. ${payingLabel} is taxable — cancel this invoice and re-issue it for ${payingLabel}.`;
+    ? `This invoice was already part-paid by ${settledLabel}, so it charges ${taxLabel}. ${payingLabel} is priced without ${taxLabel} — refund what has been paid and re-issue, or take the rest by a taxable method.`
+    : `This invoice was already part-paid by ${settledLabel}, so no ${taxLabel} was charged. ${payingLabel} is taxable — refund what has been paid and re-issue, or take the rest by cash or e-transfer.`;
+}
+
+/**
+ * Columns `recordPaymentAction` writes when a payment settles the tax question.
+ * The untaxed branch re-prices the document; the taxable branch only records
+ * which method fixed it that way, deliberately leaving `taxRateBp`/`taxCents`
+ * exactly as issued so a zero-rated appointment stays zero-rated.
+ */
+export type PaymentTaxChanges = {
+  taxTreatment: TaxTreatment;
+  quotedPaymentMethod: string;
+} & Partial<{
+  taxRateBp: number;
+  taxCents: number;
+  totalCents: number;
+  taxExempt: boolean;
+  taxExemptReason: string | null;
+}>;
+
+export type PaymentTaxOutcome =
+  | { ok: false; conflict: string }
+  | {
+      ok: true;
+      /** The total the invoice will carry once this payment lands. */
+      totalCents: number;
+      /** Columns to write, or null when the invoice already says the right thing. */
+      changes: PaymentTaxChanges | null;
+    };
+
+/**
+ * What recording a payment by `method` does to the invoice's tax.
+ *
+ * The shop's rule (spec §2, owner-confirmed) is that cash and Interac
+ * e-transfer are not taxed while credit and cheque are — and the shop does not
+ * know which it will be until the customer pays. So the invoice is raised and
+ * sent with tax on it, and the FIRST payment settles the question: cash or
+ * e-transfer strips the tax and re-prices the document; anything else leaves it
+ * as issued. Either way the method is stamped on the invoice, and from then on
+ * `paymentMethodConflict` holds the answer steady.
+ *
+ * Two invoices are deliberately left alone:
+ *
+ * - **One that already has a payment against it.** Re-pricing underneath a
+ *   customer who has paid part of a taxed total is worse than the inconsistency
+ *   it fixes. This also covers every invoice part-paid before this rule existed.
+ * - **One a staff member exempted by hand** (out-of-province, exempt
+ *   organisation). That exemption has nothing to do with how the customer pays,
+ *   so any method may settle it and `quotedPaymentMethod` stays null — which is
+ *   what keeps the restatement query (`tax_treatment = 'none' AND
+ *   quoted_payment_method IS NOT NULL`) pointed at payment-method sales only.
+ */
+export function resolvePaymentTax(input: {
+  invoice: {
+    totalCents: number;
+    taxCents: number;
+    taxExempt: boolean;
+    taxTreatment: string;
+    quotedPaymentMethod: string | null;
+  };
+  method: string;
+  taxLabel: string;
+  /** True when any succeeded payment already sits against this invoice. */
+  alreadyPaidAgainst: boolean;
+}): PaymentTaxOutcome {
+  const { invoice } = input;
+
+  // Settled, by a previous payment or by an earlier release. Hold it steady.
+  if (invoice.quotedPaymentMethod || input.alreadyPaidAgainst) {
+    const conflict = paymentMethodConflict(invoice, input.method, input.taxLabel);
+    return conflict ? { ok: false, conflict } : { ok: true, totalCents: invoice.totalCents, changes: null };
+  }
+
+  // A staff exemption outranks the payment-method rule and binds nobody.
+  if (invoice.taxExempt) return { ok: true, totalCents: invoice.totalCents, changes: null };
+
+  if (isPaymentMethodTaxable(input.method)) {
+    // Nothing to re-price. The invoice already charges whatever rate it was
+    // issued at, and that rate is not ours to substitute here.
+    return {
+      ok: true,
+      totalCents: invoice.totalCents,
+      changes: { taxTreatment: "added", quotedPaymentMethod: input.method },
+    };
+  }
+
+  // Subtracting the snapshotted tax, NOT recomputing from line items. The two
+  // agree on every invoice the app can raise, but only this one is safe on an
+  // invoice whose lines are missing — recomputing there would write a $0.00
+  // total onto a real financial document.
+  const untaxedTotalCents = invoice.totalCents - invoice.taxCents;
+  return {
+    ok: true,
+    totalCents: untaxedTotalCents,
+    changes: {
+      taxRateBp: 0,
+      taxCents: 0,
+      totalCents: untaxedTotalCents,
+      taxExempt: true,
+      taxExemptReason: noTaxReasonForMethod(input.method, input.taxLabel),
+      taxTreatment: "none",
+      quotedPaymentMethod: input.method,
+    },
+  };
 }
 
 /** Pure totals math — mirrors computeEstimateTotals minus the optional-line concept. */
 export function computeInvoiceTotals(
-  lines: Pick<InvoiceLineInput, "quantity" | "unitPriceCents">[],
+  lines: readonly Pick<InvoiceLineInput, "quantity" | "unitPriceCents">[],
   discountCents: number,
   taxRateBp: number,
 ): InvoiceTotals {

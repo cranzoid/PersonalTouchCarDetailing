@@ -76,6 +76,16 @@ export default async function PortalInvoicePage({
     .orderBy(desc(schema.payments.createdAt));
 
   const summary = summarizePayments(invoice.totalCents, invoice.depositAppliedCents, payments);
+  // The shop charges no tax on cash or Interac e-transfer, but it does not know
+  // how this customer will pay, so the invoice is issued WITH tax. Telling them
+  // the cash figure here is the difference between an honest document and one
+  // that quietly asks for more than they will be charged at the counter.
+  const taxSettled =
+    invoice.quotedPaymentMethod !== null ||
+    invoice.taxExempt ||
+    payments.some((p) => p.status === "succeeded");
+  const cashTotalCents = invoice.totalCents - invoice.taxCents;
+  const showCashPrice = !taxSettled && invoice.taxCents > 0 && summary.balanceCents > 0;
   const cancelled = invoice.status === "cancelled";
   const refunded = invoice.status === "refunded";
   const paidInFull = invoice.status === "paid" || (invoice.status === "refunded" && summary.balanceCents <= 0);
@@ -168,12 +178,25 @@ export default async function PortalInvoicePage({
           </p>
         </div>
       ) : (
-        <div className="mt-6 rounded-[2rem] border border-accent-500/25 bg-gradient-to-br from-[#0B2A4A]/80 to-ink-950 p-6 shadow-xl shadow-black/15">
-          <PayButton token={token} />
-          <p className="mt-3 text-center text-xs text-ink-500">
-            Secure checkout. You can also pay in person by cash, e-transfer or card.
-          </p>
-        </div>
+        <>
+          {showCashPrice && (
+            <div className="mt-6 rounded-2xl border border-accent-400/25 bg-ink-900/40 p-5 text-sm text-ink-200">
+              <p>
+                <span className="font-semibold text-white">
+                  Paying in cash or by Interac e-transfer? {formatCents(cashTotalCents, settings.currency)}.
+                </span>{" "}
+                We charge no {invoice.taxLabel} on those, so the total above drops when you settle that
+                way. Paying by card or cheque, the amount shown is what is due.
+              </p>
+            </div>
+          )}
+          <div className="mt-6 rounded-[2rem] border border-accent-500/25 bg-gradient-to-br from-[#0B2A4A]/80 to-ink-950 p-6 shadow-xl shadow-black/15">
+            <PayButton token={token} />
+            <p className="mt-3 text-center text-xs text-ink-500">
+              Secure checkout. You can also pay in person by cash, e-transfer or card.
+            </p>
+          </div>
+        </>
       )}
 
       <p className="mt-10 text-xs text-ink-500">

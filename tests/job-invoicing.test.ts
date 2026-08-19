@@ -121,7 +121,7 @@ describe("createInvoiceFromJobAction with a promotional discount", () => {
       promoCode: "FIRST10AUG26",
       promoLabel: "First Detail Offer",
     });
-    const res = await createInvoiceFromJobAction({ jobId, paymentMethod: "card_terminal" });
+    const res = await createInvoiceFromJobAction({ jobId });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
 
@@ -145,7 +145,7 @@ describe("createInvoiceFromJobAction with a promotional discount", () => {
       status: "approved",
     });
 
-    const res = await createInvoiceFromJobAction({ jobId, paymentMethod: "card_terminal" });
+    const res = await createInvoiceFromJobAction({ jobId });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
 
@@ -159,7 +159,7 @@ describe("createInvoiceFromJobAction with a promotional discount", () => {
 
   it("leaves the discount alone when the invoice is later marked tax exempt", async () => {
     const { jobId } = await bookedJob({ subtotalCents: 28000, discountCents: 2800 });
-    const created = await createInvoiceFromJobAction({ jobId, paymentMethod: "card_terminal" });
+    const created = await createInvoiceFromJobAction({ jobId });
     expect(created.ok).toBe(true);
     if (!created.ok) return;
 
@@ -179,7 +179,7 @@ describe("createInvoiceFromJobAction with a promotional discount", () => {
 
   it("records a zero discount for an ordinary booking", async () => {
     const { jobId } = await bookedJob({ subtotalCents: 28000, discountCents: 0 });
-    const res = await createInvoiceFromJobAction({ jobId, paymentMethod: "card_terminal" });
+    const res = await createInvoiceFromJobAction({ jobId });
     expect(res.ok).toBe(true);
     if (!res.ok) return;
 
