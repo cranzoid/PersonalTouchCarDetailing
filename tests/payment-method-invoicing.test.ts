@@ -234,16 +234,19 @@ describe("a payment that contradicts the invoice is refused, not absorbed", () =
 });
 
 describe("discount reason", () => {
-  it("refuses a discount nobody explained", async () => {
+  it("takes a discount with no explanation at all — the owner does not record one", async () => {
     const result = await createManualInvoiceAction({
       customerId, lines, paymentMethod: "cash", discountCents: 2500,
     });
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error).toContain("reason for the discount");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const invoice = await loadInvoice(result.invoiceId);
+    expect(invoice.discountCents).toBe(2500);
+    expect(invoice.discountReason).toBeNull();
+    expect(invoice.totalCents).toBe(15000);
   });
 
-  it("stores the reason when one is given", async () => {
+  it("still stores the reason when one is given", async () => {
     const result = await createManualInvoiceAction({
       customerId, lines, paymentMethod: "cash", discountCents: 2500, discountReason: "Service recovery",
     });
@@ -253,7 +256,7 @@ describe("discount reason", () => {
     expect(invoice.discountReason).toBe("Service recovery");
   });
 
-  it("asks for nothing when the discount resolves to zero", async () => {
+  it("accepts a zero discount unchanged", async () => {
     const result = await createManualInvoiceAction({
       customerId, lines, paymentMethod: "cash", discountPercentBp: 0,
     });

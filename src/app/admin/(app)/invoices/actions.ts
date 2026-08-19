@@ -941,7 +941,12 @@ const createManualInvoiceInput = z.object({
   invoiceDateISO: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   /** How the customer is paying — decides whether this document charges tax. */
   paymentMethod: z.enum(QUOTED_PAYMENT_METHODS),
-  /** Required whenever a discount is applied; shown on the needs-attention card. */
+  /**
+   * Optional note on why a discount was given, shown on the invoice when
+   * present. Deliberately NOT required: the owner does not want to explain a
+   * discount to raise an invoice, and blocking on it only slowed the counter
+   * down. See DECISIONS.md #18.
+   */
   discountReason: z.string().trim().max(200).optional(),
   taxExempt: z.boolean().default(false),
   taxExemptReason: z.string().trim().max(200).optional(),
@@ -1039,11 +1044,6 @@ export async function createManualInvoiceAction(
         ? percentCents(subtotalCents, input.discountPercentBp)
         : input.discountCents;
     const totals = computeInvoiceTotals(lines, discountCents, taxRateBp);
-    // Checked against the resolved amount, not the raw input: a 0% discount or
-    // a flat $0 is not a discount and needs no explanation.
-    if (totals.discountCents > 0 && !input.discountReason) {
-      return { ok: false, error: "Give a reason for the discount — it appears on the invoice and in Reports" };
-    }
 
     const result = await db().transaction(async (tx): Promise<ActionResult<{ invoiceId: string }>> => {
       const [customer] = await tx
