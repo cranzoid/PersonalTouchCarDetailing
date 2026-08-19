@@ -81,7 +81,7 @@ export default async function FleetDetailPage({ params }: { params: Promise<{ id
         </div>
       </section>
 
-      {roleHas(staff.role, "manage_invoices") && <ConsolidatedInvoiceBuilder customerId={customer.id} jobs={eligibleJobs} />}
+      {roleHas(staff.role, "manage_invoices") && <ConsolidatedInvoiceBuilder customerId={customer.id} jobs={eligibleJobs} taxLabel={settings.taxLabel} />}
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold text-white">Invoices ({invoices.length})</h2>

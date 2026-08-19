@@ -134,10 +134,23 @@ export const customers = pgTable(
     sourceLeadId: text("source_lead_id"),
     referredByCustomerId: text("referred_by_customer_id"),
     anonymizedAt: timestamp("anonymized_at", { withTimezone: true }),
+    /**
+     * `phone` reduced to bare digits (see src/lib/phone.ts) so staff can find a
+     * customer however the number was typed. Deliberately NON-UNIQUE: live data
+     * already contains duplicates, and a unique constraint would fail the
+     * migration against production. Matching on it is STAFF-SIDE ONLY — the
+     * public booking path must never look a stranger up by phone number
+     * (DECISIONS.md #14).
+     */
+    phoneNormalized: text("phone_normalized"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("customers_email_idx").on(t.email), index("customers_phone_idx").on(t.phone)],
+  (t) => [
+    index("customers_email_idx").on(t.email),
+    index("customers_phone_idx").on(t.phone),
+    index("customers_phone_normalized_idx").on(t.phoneNormalized),
+  ],
 );
 
 export const vehicles = pgTable(
@@ -698,6 +711,27 @@ export const invoices = pgTable(
      */
     taxExempt: boolean("tax_exempt").notNull().default(false),
     taxExemptReason: text("tax_exempt_reason"),
+    /**
+     * Whether this document added tax: "added" | "none". Existing rows default
+     * to "added", which is exactly what they were, so the column is readable by
+     * the build that predates it.
+     *
+     * Paired with `quotedPaymentMethod`, this is what makes a later restatement
+     * a query rather than a year of re-entry: the sales recorded with no tax
+     * *because of how the customer paid* are
+     * `tax_treatment = 'none' AND quoted_payment_method IS NOT NULL`.
+     */
+    taxTreatment: text("tax_treatment").notNull().default("added"),
+    /**
+     * How the customer said they would pay, chosen when the invoice is raised.
+     * Drives `taxTreatment` (see PAYMENT_METHOD_TAXABLE in src/lib/types.ts) and
+     * is what `recordPaymentAction` checks a payment against. NULL means the
+     * invoice predates Release 3 or was exempted for some other reason, and no
+     * payment-method rule applies to it.
+     */
+    quotedPaymentMethod: text("quoted_payment_method"),
+    /** Required by the staff builders whenever a discount is applied. */
+    discountReason: text("discount_reason"),
     totalCents: integer("total_cents").notNull().default(0),
     depositAppliedCents: integer("deposit_applied_cents").notNull().default(0),
     /**

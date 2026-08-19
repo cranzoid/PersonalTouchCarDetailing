@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { asc, desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { formatCents } from "@/lib/money";
+import { QUOTED_PAYMENT_METHOD_LABELS, type QuotedPaymentMethod } from "@/lib/types";
 import { PAYMENT_PROVIDER_LABELS } from "@/lib/payment-labels";
 import { formatInZone } from "@/lib/tz";
 import { getSettings } from "@/lib/settings";
@@ -124,12 +125,29 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
             <tr><td colSpan={3} className="px-4 py-2 text-right text-ink-400">Subtotal</td>
               <td className="px-4 py-2 text-ink-200">{formatCents(invoice.subtotalCents, settings.currency)}</td></tr>
             {invoice.discountCents > 0 && (
-              <tr><td colSpan={3} className="px-4 py-2 text-right text-ink-400">Discount</td>
+              <tr><td colSpan={3} className="px-4 py-2 text-right text-ink-400">
+                  Discount
+                  {invoice.discountReason && (
+                    <span className="block text-xs font-normal text-ink-500">{invoice.discountReason}</span>
+                  )}
+                </td>
                 <td className="px-4 py-2 text-ink-200">−{formatCents(invoice.discountCents, settings.currency)}</td></tr>
             )}
             <tr><td colSpan={3} className="px-4 py-2 text-right text-ink-400">
                 {invoice.taxLabel} ({(invoice.taxRateBp / 100).toFixed(2)}%)</td>
               <td className="px-4 py-2 text-ink-200">{formatCents(invoice.taxCents, settings.currency)}</td></tr>
+            {invoice.quotedPaymentMethod && (
+              <tr><td colSpan={4} className={`px-4 py-2 text-xs ${invoice.taxTreatment === "none" ? "text-amber-300" : "text-ink-500"}`}>
+                  {`Issued for payment by ${
+                    QUOTED_PAYMENT_METHOD_LABELS[invoice.quotedPaymentMethod as QuotedPaymentMethod] ??
+                    invoice.quotedPaymentMethod
+                  }${
+                    invoice.taxTreatment === "none"
+                      ? ` — no ${invoice.taxLabel} charged. A card or cheque payment will be refused; cancel and re-issue instead.`
+                      : `. A cash or e-transfer payment will be refused; cancel and re-issue instead.`
+                  }`}
+                </td></tr>
+            )}
             <tr><td colSpan={3} className="px-4 py-3 text-right font-semibold text-white">Total</td>
               <td className="px-4 py-3 font-semibold text-accent-300">{formatCents(invoice.totalCents, settings.currency)}</td></tr>
             {invoice.depositAppliedCents > 0 && (

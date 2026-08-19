@@ -3,7 +3,8 @@ import type { Metadata } from "next";
 import { asc, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { Container, ButtonLink, Card } from "@/components/ui";
-import { formatCents } from "@/lib/money";
+import { formatCents, withTaxCents } from "@/lib/money";
+import { getSettings } from "@/lib/settings";
 import { VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
@@ -24,6 +25,7 @@ export default async function ServiceDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
+  const settings = await getSettings();
   const rows = await db()
     .select()
     .from(schema.services)
@@ -85,11 +87,21 @@ export default async function ServiceDetailPage({
               <div className="mt-4 overflow-x-auto">
                 <table className="w-full max-w-lg overflow-hidden rounded-2xl text-sm">
                   <caption className="sr-only">Price adjustments by vehicle category</caption>
+                  <thead>
+                    <tr className="border-b border-white/10 text-xs uppercase tracking-wider text-ink-500">
+                      <th scope="col" className="py-2 text-left font-medium">Vehicle</th>
+                      <th scope="col" className="py-2 text-right font-medium">Cash / e-transfer</th>
+                      <th scope="col" className="py-2 text-right font-medium">Card / cheque</th>
+                    </tr>
+                  </thead>
                   <tbody>
                     <tr className="border-b border-white/10">
                       <td className="py-2 text-ink-300">Coupe / Sedan</td>
                       <td className="py-2 text-right text-accent-300">
                         {formatCents(svc.basePriceCents!)}
+                      </td>
+                      <td className="py-2 text-right text-ink-300">
+                        {formatCents(withTaxCents(svc.basePriceCents!, settings.taxRateBp))}
                       </td>
                     </tr>
                     {adjustments.map((adj) => (
@@ -101,6 +113,11 @@ export default async function ServiceDetailPage({
                         <td className="py-2 text-right text-accent-300">
                           {formatCents(svc.basePriceCents! + adj.priceDeltaCents)}
                         </td>
+                        <td className="py-2 text-right text-ink-300">
+                          {formatCents(
+                            withTaxCents(svc.basePriceCents! + adj.priceDeltaCents, settings.taxRateBp),
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -108,7 +125,8 @@ export default async function ServiceDetailPage({
               </div>
               <p className="mt-2 text-xs text-ink-500">
                 Final pricing is confirmed at booking. Heavily soiled vehicles may require
-                additional time, always discussed with you first.
+                additional time, always discussed with you first. Listed prices are what you pay in
+                cash or by Interac e-transfer; card and cheque add {settings.taxLabel}.
               </p>
             </div>
           )}
@@ -139,6 +157,12 @@ export default async function ServiceDetailPage({
             <p className="mt-2 font-display text-4xl text-white">
               {bookable ? formatCents(svc.basePriceCents!) : "By quote"}
             </p>
+            {bookable && settings.taxRateBp > 0 && (
+              <p className="mt-1 text-sm text-ink-400">
+                in cash or by Interac e-transfer ·{" "}
+                {formatCents(withTaxCents(svc.basePriceCents!, settings.taxRateBp))} by card or cheque
+              </p>
+            )}
             <p className="mt-1 text-sm text-ink-400">
               Approx. {formatDuration(svc.baseDurationMin)} for a standard vehicle
             </p>

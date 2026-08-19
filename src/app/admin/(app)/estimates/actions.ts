@@ -5,6 +5,7 @@ import { z } from "zod";
 import { eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "@/lib/id";
+import { normalizePhone } from "@/lib/phone";
 import { requireStaff, AuthError } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { getSettings } from "@/lib/settings";
@@ -181,6 +182,7 @@ export async function createEstimateAction(
           lastName: input.customer.lastName,
           email: input.customer.email ?? null,
           phone: input.customer.phone ?? null,
+          phoneNormalized: normalizePhone(input.customer.phone),
           sourceLeadId: lead?.id ?? null,
           marketingConsent: lead?.marketingConsent ?? false,
           marketingConsentAt: lead?.marketingConsentAt ?? null,

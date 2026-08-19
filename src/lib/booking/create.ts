@@ -4,6 +4,7 @@ import { newId } from "@/lib/id";
 import { audit } from "@/lib/audit";
 import type { BusinessSettings } from "@/lib/settings";
 import type { Attribution } from "@/db/schema";
+import { normalizePhone } from "@/lib/phone";
 import { priceBooking, type BookingPricing } from "@/lib/pricing";
 import { isFirstTimeDetailCustomer, type ResolvedPromotion } from "@/lib/promotions";
 import { VEHICLE_CATEGORIES, type VehicleCategory } from "@/lib/types";
@@ -176,6 +177,11 @@ export async function createAppointmentInTransaction(
         lastName: req.customer.lastName,
         email: req.customer.email ?? null,
         phone: req.customer.phone ?? null,
+        // Written so staff can find them later. Deliberately NOT read here:
+        // matching a public booking to an existing customer by phone number
+        // would let a stranger attach to somebody else's record
+        // (DECISIONS.md #14). Dedup is a staff-side, human-reviewed job.
+        phoneNormalized: normalizePhone(req.customer.phone),
         preferredContact: req.customer.preferredContact ?? "email",
       });
     }

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { desc, ilike, or } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requirePageStaff } from "@/lib/auth/page";
+import { duplicatePhoneNumbers, normalizePhone } from "@/lib/phone";
 import { NewCustomerForm } from "./new-customer-form";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +16,11 @@ export default async function CustomersPage({
   const { q } = await searchParams;
   const query = q?.trim();
 
+  // "(905) 555-1234", "905-555-1234" and "9055551234" are one number, and the
+  // raw `phone` column holds whichever form the customer happened to give.
+  // Searching the normalized column as well means staff find the record however
+  // they type it. Staff-side only, by design — see src/lib/phone.ts.
+  const queryPhone = query ? normalizePhone(query) : null;
   const base = db().select().from(schema.customers);
   const customers = await (query
     ? base.where(
@@ -23,12 +29,26 @@ export default async function CustomersPage({
           ilike(schema.customers.lastName, `%${query}%`),
           ilike(schema.customers.email, `%${query}%`),
           ilike(schema.customers.phone, `%${query}%`),
+          ...(queryPhone ? [ilike(schema.customers.phoneNormalized, `%${queryPhone}%`)] : []),
         ),
       )
     : base
   )
     .orderBy(desc(schema.customers.createdAt))
     .limit(100);
+
+  // Live data already contains duplicates — the public booking form creates a
+  // new customer every time, and deliberately does not match on phone. Flagging
+  // them here is the staff-side half of that trade-off: a prompt for a human to
+  // look, never an automatic merge.
+  const duplicatePhones = duplicatePhoneNumbers(
+    await db()
+      .select({
+        phoneNormalized: schema.customers.phoneNormalized,
+        anonymizedAt: schema.customers.anonymizedAt,
+      })
+      .from(schema.customers),
+  );
 
   return (
     <div>
@@ -73,6 +93,14 @@ export default async function CustomersPage({
                 <td className="px-4 py-3 text-ink-300">
                   {c.email && <p>{c.email}</p>}
                   {c.phone && <p>{c.phone}</p>}
+                  {c.phoneNormalized && duplicatePhones.has(c.phoneNormalized) && !c.anonymizedAt && (
+                    <Link
+                      href={`/admin/customers?q=${encodeURIComponent(c.phoneNormalized)}`}
+                      className="mt-1 inline-block text-xs text-amber-300 hover:underline"
+                    >
+                      Shares this number with another customer →
+                    </Link>
+                  )}
                 </td>
                 <td className="px-4 py-3 capitalize text-ink-400">{c.customerType}</td>
                 <td className="px-4 py-3 text-ink-400">{c.marketingConsent ? "Yes" : "No"}</td>

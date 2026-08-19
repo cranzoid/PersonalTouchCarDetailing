@@ -57,6 +57,13 @@
       "when": 1787084480469,
       "tag": "0007_labour",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787096806495,
+      "tag": "0008_tax_treatment",
+      "breakpoints": true
     }
   ]
 }

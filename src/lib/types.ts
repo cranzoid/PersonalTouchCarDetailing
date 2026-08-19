@@ -44,6 +44,55 @@ export const VEHICLE_CATEGORY_LABELS: Record<VehicleCategory, string> = {
 export const MANUAL_PAYMENT_METHODS = ["cash", "cheque", "etransfer", "card_terminal"] as const;
 export type ManualPaymentMethod = (typeof MANUAL_PAYMENT_METHODS)[number];
 
+/**
+ * Every way an invoice can be settled, including the online checkout. This is
+ * the list staff choose from when raising an invoice ("How will they pay?"),
+ * because the answer decides whether the document charges tax.
+ */
+export const QUOTED_PAYMENT_METHODS = [
+  "cash",
+  "etransfer",
+  "card_terminal",
+  "stripe",
+  "cheque",
+] as const;
+export type QuotedPaymentMethod = (typeof QUOTED_PAYMENT_METHODS)[number];
+
+export const QUOTED_PAYMENT_METHOD_LABELS: Record<QuotedPaymentMethod, string> = {
+  cash: "Cash",
+  etransfer: "Interac e-transfer",
+  card_terminal: "Credit / debit card",
+  stripe: "Card online",
+  cheque: "Cheque",
+};
+
+/**
+ * Whether a payment method makes the sale taxable — the shop's pricing rule,
+ * confirmed by the owner on 2026-08-18 and implemented literally.
+ *
+ * All listed prices are tax-exclusive. Cash and Interac e-transfer are recorded
+ * with no tax charged; credit and cheque add HST. "Interac" here means
+ * e-transfer, NOT Interac debit at the terminal — a card terminal is credit.
+ *
+ * NOTE, recorded deliberately: the business is an HST registrant, and a
+ * registrant owes HST on every taxable supply regardless of how the customer
+ * pays. Recording a cash sale with no tax therefore UNDERSTATES HST collected.
+ * This was raised with the owner, who chose the literal reading of the tracker
+ * anyway. `invoices.tax_treatment` exists so restating it later is a query.
+ * Do not "improve" this map to tax-inclusive — raise it with the owner instead.
+ */
+export const PAYMENT_METHOD_TAXABLE: Record<QuotedPaymentMethod, boolean> = {
+  cash: false,
+  etransfer: false,
+  card_terminal: true,
+  stripe: true,
+  cheque: true,
+};
+
+/** Whether an invoice document added tax, and (via quotedPaymentMethod) why. */
+export const TAX_TREATMENTS = ["added", "none"] as const;
+export type TaxTreatment = (typeof TAX_TREATMENTS)[number];
+
 export const BOOKING_MODES = [
   "bookable",
   "quote_required",

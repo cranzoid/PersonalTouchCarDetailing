@@ -434,6 +434,16 @@ export default async function ReportsPage({
             </table>
           </div>
         )}
+        {/* Spec §4.5, kept verbatim. The shop is an HST registrant, and a
+            registrant owes HST on every taxable supply regardless of how the
+            customer pays — so recording cash and e-transfer sales with no tax
+            understates HST collected. The owner was told this and chose the
+            literal rule anyway; the footnote is what carries that choice to
+            whoever files the return. Do not remove it silently. */}
+        <p className="mt-4 rounded-2xl border border-amber-500/25 bg-amber-950/10 p-4 text-sm text-amber-200">
+          Cash and Interac sales are recorded with no tax charged; confirm treatment with your
+          accountant before filing.
+        </p>
       </section>
 
       <section aria-labelledby="methods-heading" className="mt-8">

@@ -40,6 +40,16 @@ async function claimInvoiceCheckout(input: {
     if (invoice.status === "cancelled" || invoice.status === "refunded") {
       return { ok: false as const, error: `This invoice was ${invoice.status}.` };
     }
+    // Card is a taxable method. An invoice priced for cash or e-transfer
+    // charges no tax, so paying it online would settle a tax document that
+    // describes a different sale. The page also hides the button — this is the
+    // boundary, because hiding a button never is one.
+    if (invoice.taxTreatment === "none" && invoice.quotedPaymentMethod) {
+      return {
+        ok: false as const,
+        error: "This invoice was priced for payment in cash or by e-transfer, so it cannot be paid by card online. Please pay in person, or contact us for a card invoice.",
+      };
+    }
 
     const payments = await tx.select().from(schema.payments).where(eq(schema.payments.invoiceId, invoice.id));
     const unresolved = payments.filter(isUnreconciledCheckout);

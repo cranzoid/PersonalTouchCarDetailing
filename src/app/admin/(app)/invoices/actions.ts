@@ -15,13 +15,20 @@ import {
   computeInvoiceTotals,
   createInvoiceAccessToken,
   nextInvoiceNumber,
+  paymentMethodConflict,
   recalculateInvoiceStatus,
+  resolveInvoiceTax,
   sendInvoiceReceipt,
   summarizePayments,
 } from "@/lib/invoices";
 import { zonedToUtc } from "@/lib/tz";
 import { resolveCatalogPrices } from "@/lib/pricing";
-import { MANUAL_PAYMENT_METHODS, VEHICLE_CATEGORIES, type VehicleCategory } from "@/lib/types";
+import {
+  MANUAL_PAYMENT_METHODS,
+  QUOTED_PAYMENT_METHODS,
+  VEHICLE_CATEGORIES,
+  type VehicleCategory,
+} from "@/lib/types";
 import { getAppBaseUrl } from "@/lib/urls";
 import {
   decodeStripeRefundReference,
@@ -44,9 +51,11 @@ export async function createInvoiceFromJobAction(
 ): Promise<ActionResult<{ invoiceId: string }>> {
   try {
     const staff = await requireStaff("manage_invoices");
-    const parsed = z.object({ jobId: z.string().min(1) }).safeParse(raw);
-    if (!parsed.success) return { ok: false, error: "Invalid request" };
-    const { jobId } = parsed.data;
+    const parsed = z
+      .object({ jobId: z.string().min(1), paymentMethod: z.enum(QUOTED_PAYMENT_METHODS) })
+      .safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Choose how the customer is paying" };
+    const { jobId, paymentMethod } = parsed.data;
     const settings = await getSettings();
 
     const result = await db().transaction(async (tx): Promise<ActionResult<{ invoiceId: string }>> => {
@@ -94,7 +103,17 @@ export async function createInvoiceFromJobAction(
       // `??` not `||`: a legitimately zero-rated appointment (0) must stay zero.
       // With `||` it silently fell back to the 13% settings rate, which made
       // tax exemption impossible on job-derived invoices.
-      const taxRateBp = appointment?.taxRateBp ?? settings.taxRateBp;
+      const baseTaxRateBp = appointment?.taxRateBp ?? settings.taxRateBp;
+      // How the customer is paying decides whether this document charges tax
+      // at all. The appointment snapshotted a tax-added total when it was
+      // booked, so a cash job now bills less than the appointment quoted —
+      // deliberate, and recorded in DECISIONS.md #18.
+      const tax = resolveInvoiceTax({
+        method: paymentMethod,
+        baseTaxRateBp,
+        taxLabel: settings.taxLabel,
+      });
+      const taxRateBp = tax.taxRateBp;
       // The promotional discount locked when the customer booked. Carried
       // across as a fixed amount, never recalculated: additional work approved
       // at the shop is billed at full price, and computeInvoiceTotals clamps it
@@ -118,6 +137,16 @@ export async function createInvoiceFromJobAction(
         taxLabel: settings.taxLabel,
         taxRegistrationNumber: settings.taxRegistrationNumber || null,
         taxCents: totals.taxCents,
+        taxExempt: tax.taxExempt,
+        taxExemptReason: tax.taxExemptReason,
+        taxTreatment: tax.taxTreatment,
+        quotedPaymentMethod: tax.quotedPaymentMethod,
+        // The discount rode across from the booking, so its reason is the promo
+        // that produced it rather than something staff type here.
+        discountReason:
+          totals.discountCents > 0
+            ? (appointment?.promoLabel ?? "Discount locked at booking")
+            : null,
         totalCents: totals.totalCents,
         depositAppliedCents,
         notes: appointment?.promoLabel
@@ -151,6 +180,8 @@ export async function createInvoiceFromJobAction(
           discountCents: totals.discountCents,
           promoCode: appointment?.promoCode ?? null,
           lines: lines.length,
+          paymentMethod,
+          taxTreatment: tax.taxTreatment,
         },
       });
       return { ok: true, invoiceId };
@@ -180,9 +211,10 @@ export async function createConsolidatedInvoiceAction(
     const parsed = z.object({
       customerId: z.string().min(1),
       jobIds: z.array(z.string().min(1)).min(1).max(50),
+      paymentMethod: z.enum(QUOTED_PAYMENT_METHODS),
     }).safeParse(raw);
-    if (!parsed.success) return { ok: false, error: "Select at least one valid job" };
-    const { customerId, jobIds } = parsed.data;
+    if (!parsed.success) return { ok: false, error: "Select at least one job and how the account pays" };
+    const { customerId, jobIds, paymentMethod } = parsed.data;
     if (new Set(jobIds).size !== jobIds.length) return { ok: false, error: "A job was selected more than once" };
     const settings = await getSettings();
 
@@ -284,7 +316,17 @@ export async function createConsolidatedInvoiceAction(
       if (taxRates.size > 1) {
         return { ok: false, error: "Selected jobs use different tax rates and cannot share one invoice" };
       }
-      const taxRateBp = taxRates.values().next().value ?? settings.taxRateBp;
+      const baseTaxRateBp = taxRates.values().next().value ?? settings.taxRateBp;
+      // Fleet accounts are billed under the same payment-method rule as anyone
+      // else. Without this the account could only ever be invoiced tax-added,
+      // and a cheque-or-e-transfer fleet would then be unable to pay it at all
+      // once recordPaymentAction started enforcing the rule.
+      const tax = resolveInvoiceTax({
+        method: paymentMethod,
+        baseTaxRateBp,
+        taxLabel: settings.taxLabel,
+      });
+      const taxRateBp = tax.taxRateBp;
       // Each appointment's locked discount rides with its own lines. Normally
       // zero here — a first-time offer and a fleet account rarely meet — but
       // the invoice must not silently drop the money when they do.
@@ -311,6 +353,11 @@ export async function createConsolidatedInvoiceAction(
         taxLabel: settings.taxLabel,
         taxRegistrationNumber: settings.taxRegistrationNumber || null,
         taxCents: totals.taxCents,
+        taxExempt: tax.taxExempt,
+        taxExemptReason: tax.taxExemptReason,
+        taxTreatment: tax.taxTreatment,
+        quotedPaymentMethod: tax.quotedPaymentMethod,
+        discountReason: totals.discountCents > 0 ? "Discount locked at booking" : null,
         totalCents: totals.totalCents,
         depositAppliedCents,
         notes: [
@@ -342,7 +389,15 @@ export async function createConsolidatedInvoiceAction(
         action: "invoice.created_consolidated",
         entityType: "invoice",
         entityId: invoiceId,
-        after: { number, customerId, jobIds, totalCents: totals.totalCents, lines: lines.length },
+        after: {
+          number,
+          customerId,
+          jobIds,
+          totalCents: totals.totalCents,
+          lines: lines.length,
+          paymentMethod,
+          taxTreatment: tax.taxTreatment,
+        },
       });
       return { ok: true, invoiceId };
     });
@@ -500,6 +555,11 @@ export async function recordPaymentAction(raw: unknown): Promise<ActionResult> {
       if (NOT_PAYABLE_STATUSES.has(invoice.status) || invoice.status === "paid") {
         return { ok: false, error: `A ${invoice.status.replaceAll("_", " ")} invoice cannot take a payment` };
       }
+      // The owner's decision: a taxability mismatch is never absorbed, it is
+      // cancelled and re-issued. Checked AFTER the idempotency lookup so a
+      // retry of a payment that was already accepted still returns cleanly.
+      const conflict = paymentMethodConflict(invoice, input.method, settings.taxLabel);
+      if (conflict) return { ok: false, error: conflict };
       const payments = await tx.select().from(schema.payments).where(eq(schema.payments.invoiceId, input.invoiceId));
       const summary = summarizePayments(invoice.totalCents, invoice.depositAppliedCents, payments);
       if (input.amountCents > summary.balanceCents) {
@@ -879,6 +939,10 @@ const createManualInvoiceInput = z.object({
   discountPercentBp: z.number().int().min(0).max(10000).optional(),
   /** Business-local calendar date; may be in the past for work already done. */
   invoiceDateISO: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  /** How the customer is paying — decides whether this document charges tax. */
+  paymentMethod: z.enum(QUOTED_PAYMENT_METHODS),
+  /** Required whenever a discount is applied; shown on the needs-attention card. */
+  discountReason: z.string().trim().max(200).optional(),
   taxExempt: z.boolean().default(false),
   taxExemptReason: z.string().trim().max(200).optional(),
   notes: z.string().trim().max(2000).optional(),
@@ -907,8 +971,16 @@ export async function createManualInvoiceAction(
 
     const settings = await getSettings();
     // Exempt invoices snapshot a 0 rate so the stored document stays
-    // self-describing; the flag and reason record WHY it was zero.
-    const taxRateBp = input.taxExempt ? 0 : settings.taxRateBp;
+    // self-describing; the flag and reason record WHY it was zero. A staff
+    // exemption outranks the payment-method rule — see resolveInvoiceTax.
+    const tax = resolveInvoiceTax({
+      method: input.paymentMethod,
+      baseTaxRateBp: settings.taxRateBp,
+      taxLabel: settings.taxLabel,
+      staffExempt: input.taxExempt,
+      staffExemptReason: input.taxExemptReason ?? null,
+    });
+    const taxRateBp = tax.taxRateBp;
 
     // Vehicle size drives package pricing, so resolve it before costing lines.
     let vehicleCategory: VehicleCategory | null = null;
@@ -967,6 +1039,11 @@ export async function createManualInvoiceAction(
         ? percentCents(subtotalCents, input.discountPercentBp)
         : input.discountCents;
     const totals = computeInvoiceTotals(lines, discountCents, taxRateBp);
+    // Checked against the resolved amount, not the raw input: a 0% discount or
+    // a flat $0 is not a discount and needs no explanation.
+    if (totals.discountCents > 0 && !input.discountReason) {
+      return { ok: false, error: "Give a reason for the discount — it appears on the invoice and in Reports" };
+    }
 
     const result = await db().transaction(async (tx): Promise<ActionResult<{ invoiceId: string }>> => {
       const [customer] = await tx
@@ -991,8 +1068,11 @@ export async function createManualInvoiceAction(
         taxLabel: settings.taxLabel,
         taxRegistrationNumber: settings.taxRegistrationNumber || null,
         taxCents: totals.taxCents,
-        taxExempt: input.taxExempt,
-        taxExemptReason: input.taxExempt ? input.taxExemptReason : null,
+        taxExempt: tax.taxExempt,
+        taxExemptReason: tax.taxExemptReason,
+        taxTreatment: tax.taxTreatment,
+        quotedPaymentMethod: tax.quotedPaymentMethod,
+        discountReason: totals.discountCents > 0 ? (input.discountReason ?? null) : null,
         totalCents: totals.totalCents,
         // Noon business-local, matching zonedWeekday's DST-safe convention, so
         // a backdated invoice lands on the intended calendar day everywhere.
@@ -1022,10 +1102,13 @@ export async function createManualInvoiceAction(
           customerId: input.customerId,
           totalCents: totals.totalCents,
           lines: lines.length,
-          taxExempt: input.taxExempt,
+          taxExempt: tax.taxExempt,
+          paymentMethod: input.paymentMethod,
+          taxTreatment: tax.taxTreatment,
+          discountCents: totals.discountCents,
           backdated: Boolean(input.invoiceDateISO),
         },
-        reason: input.taxExempt ? input.taxExemptReason : undefined,
+        reason: tax.taxExemptReason ?? input.discountReason ?? undefined,
       });
       return { ok: true, invoiceId };
     });
@@ -1094,6 +1177,13 @@ export async function setInvoiceTaxExemptAction(raw: unknown): Promise<ActionRes
           taxCents: totals.taxCents,
           taxExempt: input.taxExempt,
           taxExemptReason: input.taxExempt ? input.reason : null,
+          // `taxTreatment` records what the document does, so it has to follow.
+          // `quotedPaymentMethod` is cleared: a staff exemption is a reason
+          // that has nothing to do with how the customer pays, and leaving the
+          // old method here would go on blocking payments under a rule that no
+          // longer applies to this invoice.
+          taxTreatment: input.taxExempt ? "none" : "added",
+          quotedPaymentMethod: null,
           totalCents: totals.totalCents,
           updatedAt: new Date(),
         })

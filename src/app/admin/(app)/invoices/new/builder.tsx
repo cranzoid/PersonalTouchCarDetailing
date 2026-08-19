@@ -3,9 +3,16 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { formatCents } from "@/lib/money";
+import { formatCents, withTaxCents } from "@/lib/money";
 import { localDateISO } from "@/lib/tz";
-import { VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
+import {
+  PAYMENT_METHOD_TAXABLE,
+  QUOTED_PAYMENT_METHODS,
+  QUOTED_PAYMENT_METHOD_LABELS,
+  VEHICLE_CATEGORY_LABELS,
+  type QuotedPaymentMethod,
+  type VehicleCategory,
+} from "@/lib/types";
 import { createManualInvoiceAction } from "../actions";
 
 type CustomerOption = { id: string; label: string; contact: string };
@@ -61,6 +68,8 @@ export function NewInvoiceBuilder({
   const [discountMode, setDiscountMode] = useState<"amount" | "percent">("amount");
   const [discount, setDiscount] = useState("");
   const [invoiceDateISO, setInvoiceDateISO] = useState(() => localDateISO(timezone));
+  const [paymentMethod, setPaymentMethod] = useState<QuotedPaymentMethod>("cash");
+  const [discountReason, setDiscountReason] = useState("");
   const [taxExempt, setTaxExempt] = useState(false);
   const [taxExemptReason, setTaxExemptReason] = useState("");
   const [notes, setNotes] = useState("");
@@ -123,9 +132,13 @@ export function NewInvoiceBuilder({
         : toCents(discount);
     const discountCents = Math.min(Math.max(0, raw), subtotal);
     const taxable = subtotal - discountCents;
-    const tax = taxExempt ? 0 : Math.round((taxable * taxRateBp) / 10000);
-    return { subtotal, discountCents, tax, total: taxable + tax };
-  }, [pickedServices, pickedAddons, customLines, discount, discountMode, taxExempt, taxRateBp, services, addons, vehicleCategory]);
+    // Cash and e-transfer are priced tax-exclusive and charge nothing on top;
+    // a staff exemption zeroes it either way. Preview only — the server
+    // re-derives all of this from the same rule.
+    const charged = !taxExempt && PAYMENT_METHOD_TAXABLE[paymentMethod];
+    const tax = charged ? Math.round((taxable * taxRateBp) / 10000) : 0;
+    return { subtotal, discountCents, tax, total: taxable + tax, charged };
+  }, [pickedServices, pickedAddons, customLines, discount, discountMode, taxExempt, paymentMethod, taxRateBp, services, addons, vehicleCategory]);
 
   function toggleService(id: string) {
     setPickedServices((prev) => {
@@ -183,6 +196,8 @@ export function NewInvoiceBuilder({
         ? { discountPercentBp: Math.round(Number(discount || 0) * 100) }
         : { discountCents: toCents(discount) }),
       invoiceDateISO,
+      paymentMethod,
+      discountReason: discountReason || undefined,
       taxExempt,
       taxExemptReason: taxExempt ? taxExemptReason : undefined,
       notes: notes || undefined,
@@ -468,7 +483,26 @@ export function NewInvoiceBuilder({
         </section>
 
         <section className="rounded-xl border border-ink-800 p-5">
-          <h2 className="font-semibold text-white">Date, discount and tax</h2>
+          <h2 className="font-semibold text-white">Payment, date, discount and tax</h2>
+          <label className="mt-4 block">
+            <span className={labelClass}>How will they pay? (decides whether {taxLabel} is charged)</span>
+            <select
+              className={inputClass}
+              value={paymentMethod}
+              onChange={(e) => setPaymentMethod(e.target.value as QuotedPaymentMethod)}
+            >
+              {QUOTED_PAYMENT_METHODS.map((m) => (
+                <option key={m} value={m}>
+                  {QUOTED_PAYMENT_METHOD_LABELS[m]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <p className={`mt-2 text-xs ${PAYMENT_METHOD_TAXABLE[paymentMethod] ? "text-ink-500" : "text-amber-300"}`}>
+            {PAYMENT_METHOD_TAXABLE[paymentMethod]
+              ? `${taxLabel} is added to this invoice.`
+              : `No ${taxLabel} is charged on cash or e-transfer sales. The customer must pay by that method — a card or cheque payment against this invoice will be refused, and it would have to be cancelled and re-issued.`}
+          </p>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <label className="block">
               <span className={labelClass}>Invoice date (may be backdated)</span>
@@ -509,6 +543,20 @@ export function NewInvoiceBuilder({
               )}
             </div>
           </div>
+
+          {totals.discountCents > 0 && (
+            <label className="mt-4 block">
+              <span className={labelClass}>
+                Why the discount? (required — shown on the invoice and in Reports)
+              </span>
+              <input
+                className={inputClass}
+                value={discountReason}
+                onChange={(e) => setDiscountReason(e.target.value)}
+                placeholder="e.g. Repeat customer, service recovery, referral thank-you"
+              />
+            </label>
+          )}
 
           <label className="mt-4 flex items-center gap-2 text-sm text-ink-300">
             <input
@@ -556,7 +604,12 @@ export function NewInvoiceBuilder({
           )}
           <div className="flex justify-between text-ink-300">
             <dt>
-              {taxLabel} {taxExempt ? "(exempt)" : `(${(taxRateBp / 100).toFixed(2)}%)`}
+              {taxLabel}{" "}
+              {taxExempt
+                ? "(exempt)"
+                : totals.charged
+                  ? `(${(taxRateBp / 100).toFixed(2)}%)`
+                  : `(not charged — ${QUOTED_PAYMENT_METHOD_LABELS[paymentMethod].toLowerCase()})`}
             </dt>
             <dd>{money(totals.tax)}</dd>
           </div>
@@ -565,6 +618,18 @@ export function NewInvoiceBuilder({
             <dd>{money(totals.total)}</dd>
           </div>
         </dl>
+        {!taxExempt && totals.subtotal > 0 && taxRateBp > 0 && (
+          <p className="mt-3 rounded-lg bg-ink-900 p-3 text-xs text-ink-400">
+            Same work, the other way of paying:{" "}
+            <span className="text-white">
+              {money(totals.subtotal - totals.discountCents)} cash or e-transfer
+            </span>{" "}
+            ·{" "}
+            <span className="text-white">
+              {money(withTaxCents(totals.subtotal - totals.discountCents, taxRateBp))} card or cheque
+            </span>
+          </p>
+        )}
         <p className="mt-3 text-xs text-ink-500">
           Package prices are re-resolved on the server from the vehicle size when saved. The invoice is
           created as a draft — review it, then send it.

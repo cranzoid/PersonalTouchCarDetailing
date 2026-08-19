@@ -237,3 +237,86 @@ completing the reversal begun in #15.
 **Revisit when:** a technician needs to log their own hours, or the owners want
 overtime rules, statutory holiday pay or source deductions — none of which the
 tracker had and none of which are modelled here.
+
+## 18. Payment-method tax: the shop's rule, implemented literally and recorded
+
+**Context.** The owners' tracker prices every package tax-exclusive and adds tax
+only for some payment methods: cash and Interac e-transfer are recorded with no
+tax; credit and cheque add HST. Package #2 on a sedan is therefore $175.00 cash
+and $197.75 card. Confirmed with the owner on 2026-08-18, along with the reading
+that "Interac" means e-transfer, **not** Interac debit at the terminal — a card
+terminal is credit.
+
+**Decision.** Implemented exactly as written, with the disagreement recorded
+rather than resolved in code.
+
+- **This understates HST collected, and we said so.** The business is an HST
+  registrant (`707187431RT0001`), and a registrant owes HST on every taxable
+  supply regardless of how the customer pays. That was raised with the owner
+  explicitly; they chose the literal reading of the tracker. It is their call
+  and their filing. Nobody should quietly "fix" `PAYMENT_METHOD_TAXABLE` to
+  tax-inclusive later — raise it with the owner instead. The tax report carries
+  the spec's §4.5 footnote for whoever files the return, and that footnote is
+  not decoration.
+- **`invoices.tax_treatment` + `quoted_payment_method` make a restatement a
+  query.** `tax_treatment` says what the document did (`added` | `none`);
+  `quoted_payment_method` says whether a payment method is *why*. The sales to
+  restate are `tax_treatment = 'none' AND quoted_payment_method IS NOT NULL` —
+  a `WHERE` clause, not a year of re-entry, and it does not collide with the
+  ordinary staff exemptions (out-of-province, exempt organisation) that leave
+  `quoted_payment_method` NULL.
+- **The choice lands on invoice creation, on all three paths.** The owner
+  declined a counter-sale "Add Job" screen, so there is no earlier step that
+  produces a tax document. `createInvoiceFromJobAction`,
+  `createConsolidatedInvoiceAction` and `createManualInvoiceAction` all take a
+  required `paymentMethod` and all route it through one function,
+  `resolveInvoiceTax`, so they cannot drift. The consolidated fleet path was not
+  in the handoff's list but had to be included: without it a fleet account could
+  only ever be billed tax-added, and the payment rule below would then make its
+  invoices unpayable by cheque-less accounts.
+- **A staff exemption outranks the payment-method rule.** An out-of-province
+  customer paying by card is exempt for a reason that has nothing to do with
+  payment; `resolveInvoiceTax` keeps their reason and leaves
+  `quoted_payment_method` NULL.
+- **A contradicting payment is refused, not absorbed.** The owner's decision was
+  cancel-and-re-issue, so `recordPaymentAction` blocks a cash payment against a
+  tax-added invoice and a card payment against a tax-free one, and says which.
+  Online card checkout is refused on a tax-free invoice in
+  `claimInvoiceCheckout` — inside the row lock, because hiding the pay button is
+  never the security boundary.
+- **The rule binds only invoices that carry the choice.** The check is gated on
+  `quoted_payment_method` being set. Every invoice raised before this release
+  has it NULL and was taxed under the old always-add rule; enforcing against
+  them would have meant the shop could take no cash on anything already open at
+  the moment of the swap. Legacy invoices keep behaving exactly as they did.
+- **This deliberately breaks the appointment↔invoice reconciliation of #14.** An
+  appointment snapshots a tax-added total at booking, and a cash job now invoices
+  for less than the appointment quoted. That is the price of the rule, not a
+  bug. The booking wizard still quotes tax-added as the conservative default and
+  shows the cash figure alongside it; the invoice remains the tax document.
+- **`setInvoiceTaxExemptAction` keeps the two columns honest**, moving
+  `tax_treatment` with the exemption and clearing `quoted_payment_method` — a
+  manual exemption is a different reason, and leaving the old method there would
+  go on blocking payments under a rule that no longer applies.
+
+**Also in this release, and much smaller:** a `discount_reason` the staff
+builders require whenever a discount is actually applied (checked against the
+resolved amount, so a 0% discount needs no story), and a "needs attention" card
+on Home listing discounts with no reason and cars handed back but never
+invoiced. Both are soft rules — the card links to the record and empties as the
+work is done, and nothing is ever auto-corrected.
+
+**Phone normalization is staff-side only.** `customers.phone_normalized` is bare
+digits with a leading North American `1` dropped, written on every customer
+write path and backfilled in `0008`. The index is **non-unique** on purpose:
+live data already contains duplicates, and a unique constraint would have failed
+the migration against production. Staff search matches it, and the customer list
+flags numbers held by more than one record as a prompt for a human to merge.
+`createBooking` writes it and deliberately does **not** read it — matching a
+public booking to an existing customer by phone number is the customer
+enumeration oracle #14 already refused, and Release 3 does not reopen it.
+Deduplication and any unique constraint are a separate, owner-reviewed exercise.
+
+**Revisit when:** the owner's accountant rules on the cash/Interac treatment (the
+restatement query above is the first step), or the shop wants to dedupe the
+customer table for real.
