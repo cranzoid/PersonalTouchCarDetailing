@@ -385,6 +385,35 @@ day.
   booking confirmation template. Add it above `Estimated total:` under
   Admin → Communications so confirmation emails show the saving.
 
+## Booking quote-only work (custom lines)
+
+**Admin → Appointments → New** now has a **Custom lines** step, for anything the
+catalog cannot price: ceramic coating, paint correction, a one-off job quoted at
+the counter. Type a description, the price, and the minutes it will take, and add
+as many lines as the job needs.
+
+**What to know**
+
+- A booking can be **made entirely of custom lines** — no detailing package
+  required. That is the ceramic-coating case.
+- **The minutes matter.** They are the time the bay is held, so give an honest
+  figure. A catalog package brings its own duration; a booking of custom lines
+  alone will not save until one of them has a duration.
+- **The price you type is the price kept.** Catalog packages are still re-priced
+  by the server (a large SUV costs more than a sedan for the same package), but
+  a custom line is yours.
+- **Add-ons still belong to a package.** If nothing from the catalog is ticked,
+  the add-on list is empty — put the extra in another custom line with its own
+  price.
+- **No deposit is taken on custom lines**, because a deposit is a setting on a
+  catalog service. A booking of custom lines alone is confirmed straight away
+  rather than waiting on a deposit link.
+- Everything else is unchanged: tax is added as normal, the line shows on the
+  appointment and the job, and it carries through to the invoice by itself.
+
+The public booking page is untouched — customers still cannot book quote-only
+work, and are still sent to the quote form for it.
+
 ## Local operation
 
 ```bash

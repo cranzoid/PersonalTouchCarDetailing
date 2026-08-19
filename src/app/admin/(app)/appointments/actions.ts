@@ -39,14 +39,31 @@ export type AppointmentSlotsResult =
   | { ok: true; slots: Array<{ startMs: number; label: string }>; totalCents?: number; durationMin: number }
   | { ok: false; error: string };
 
-const manualSelectionSchema = z.object({
-  customerId: z.string().min(1),
-  vehicleId: z.string().min(1),
-  serviceIds: z.array(z.string().min(1)).min(1).max(5),
-  addonIds: z.array(z.string().min(1)).max(10),
+/**
+ * A line the catalog cannot price — ceramic coating, paint correction, or any
+ * other quote-only job. The price is typed by staff rather than looked up, so
+ * this only ever reaches priceBooking from behind the manage_bookings check
+ * below; the public booking actions never pass custom lines.
+ *
+ * Duration is per line because the scheduler books real chair time against it:
+ * a coating that takes a day must block the bay for a day.
+ */
+const customLineSchema = z.object({
+  description: z.string().trim().min(1).max(200),
+  priceCents: z.number().int().min(0).max(10_000_000),
+  durationMin: z.number().int().min(0).max(24 * 60),
 });
 
-const manualSlotsSchema = manualSelectionSchema.extend({
+const manualSelectionShape = z.object({
+  customerId: z.string().min(1),
+  vehicleId: z.string().min(1),
+  // No longer `.min(1)`: a booking can be entirely custom work.
+  serviceIds: z.array(z.string().min(1)).max(5),
+  addonIds: z.array(z.string().min(1)).max(10),
+  customLines: z.array(customLineSchema).max(10).default([]),
+});
+
+const manualSlotsShape = manualSelectionShape.extend({
   dateISO: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   /**
    * Offer slots that break the minimum-notice / booking-window rules so staff
@@ -56,10 +73,18 @@ const manualSlotsSchema = manualSelectionSchema.extend({
   allowOutsideBookingWindow: z.boolean().optional(),
 });
 
-const createManualSchema = manualSlotsSchema.extend({
+const createManualShape = manualSlotsShape.extend({
   startMs: z.number().int().positive(),
   customerNotes: z.string().trim().max(2000).optional(),
 });
+
+/** Something has to be booked — a catalog service or a custom line. */
+function hasBookableLine(value: { serviceIds: string[]; customLines: unknown[] }): boolean {
+  return value.serviceIds.length + value.customLines.length > 0;
+}
+
+const manualSlotsSchema = manualSlotsShape.refine(hasBookableLine);
+const createManualSchema = createManualShape.refine(hasBookableLine);
 
 const rescheduleSchema = z.object({
   appointmentId: z.string().min(1),
@@ -92,16 +117,24 @@ export async function getManualAppointmentSlotsAction(raw: unknown): Promise<App
   try {
     await requireStaff("manage_bookings");
     const parsed = manualSlotsSchema.safeParse(raw);
-    if (!parsed.success) return { ok: false, error: "Select a customer, vehicle, service and date" };
+    if (!parsed.success) {
+      return { ok: false, error: "Select a customer, vehicle, date, and at least one service or custom line" };
+    }
     const input = parsed.data;
     const vehicle = await loadOwnedVehicle(input.customerId, input.vehicleId);
     const settings = await getSettings();
     const pricing = await priceBooking({
       serviceIds: input.serviceIds,
       addonIds: input.addonIds,
+      customLines: input.customLines,
       vehicleCategory: vehicle.category as VehicleCategory,
       settings,
     });
+    // A booking of no length would reserve nothing and hand the bay to the next
+    // person. Reachable only from an all-custom cart, where staff set the time.
+    if (pricing.durationMin <= 0) {
+      return { ok: false, error: "Give the work a duration in minutes before checking availability" };
+    }
     const slots = await getAvailableSlots({
       dateISO: input.dateISO,
       workDurationMin: pricing.durationMin,
@@ -135,6 +168,11 @@ export async function createManualAppointmentAction(
     const parsed = createManualSchema.safeParse(raw);
     if (!parsed.success) return { ok: false, error: "Please check the appointment details" };
     const settings = await getSettings();
+    // Re-checked here as well as in the slot lookup: this action is the one
+    // that writes, and it is reachable without ever calling the other.
+    if (parsed.data.serviceIds.length === 0 && parsed.data.customLines.every((line) => line.durationMin <= 0)) {
+      return { ok: false, error: "Give the work a duration in minutes" };
+    }
     const result = await createStaffAppointment({ ...parsed.data, settings, staffId: staff.id });
     // Best-effort: the booking is already committed, so an alert failure must
     // not surface as a failed appointment creation.

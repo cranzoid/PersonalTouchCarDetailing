@@ -313,6 +313,100 @@ describe("createAppointment concurrency", () => {
     expect(entry.actorId).toBe("usr_staff_test");
   });
 
+  it("books quote-only work as a custom line with no catalog service behind it", async () => {
+    const customerId = newId("cus");
+    const vehicleId = newId("veh");
+    await db().insert(schema.customers).values({ id: customerId, firstName: "Coating", lastName: "Customer" });
+    await db().insert(schema.vehicles).values({
+      id: vehicleId,
+      customerId,
+      make: "Tesla",
+      model: "Model 3",
+      category: "sedan",
+    });
+
+    const result = await createStaffAppointment({
+      customerId,
+      vehicleId,
+      serviceIds: [],
+      addonIds: [],
+      customLines: [{ description: "Ceramic coating — 5 year", priceCents: 150000, durationMin: 240 }],
+      dateISO,
+      startMs: openUtc.getTime(),
+      settings,
+      staffId: "usr_staff_test",
+    });
+
+    const [appointment] = await db().select().from(schema.appointments)
+      .where(sql`${schema.appointments.id} = ${result.appointmentId}`);
+    expect(appointment.subtotalCents).toBe(150000);
+    expect(appointment.totalCents).toBe(169500); // + 13% HST
+    expect(appointment.durationMin).toBe(240);
+    // Nothing hand-priced carries a deposit, so the booking is confirmed outright.
+    expect(appointment.depositRequiredCents).toBe(0);
+    expect(appointment.status).toBe("confirmed");
+    // Slot end honours the custom duration plus the configured buffers.
+    expect(appointment.endsAt.getTime() - appointment.startsAt.getTime()).toBe(270 * 60_000);
+
+    const lines = await db().select().from(schema.appointmentServices)
+      .where(sql`${schema.appointmentServices.appointmentId} = ${result.appointmentId}`);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].serviceId).toBeNull();
+    expect(lines[0].addonId).toBeNull();
+    expect(lines[0].description).toBe("Ceramic coating — 5 year");
+    expect(lines[0].priceCents).toBe(150000);
+  });
+
+  it("prices custom lines alongside a catalog package, after the catalog lines", async () => {
+    const priced = await priceBooking({
+      serviceIds: ["svc_booking_test"],
+      addonIds: [],
+      customLines: [
+        { description: "Ceramic coating — 5 year", priceCents: 150000, durationMin: 240 },
+        { description: "Engine bay steam clean", priceCents: 8000, durationMin: 45 },
+      ],
+      vehicleCategory: "sedan",
+      settings,
+    });
+
+    expect(priced.lines.map((line) => line.description)).toEqual([
+      "Test Detail",
+      "Ceramic coating — 5 year",
+      "Engine bay steam clean",
+    ]);
+    expect(priced.subtotalCents).toBe(168000);
+    expect(priced.durationMin).toBe(345);
+    expect(priced.requiredSkills).toEqual([]);
+  });
+
+  it("refuses a booking with neither a catalog service nor a custom line", async () => {
+    await expect(priceBooking({
+      serviceIds: [],
+      addonIds: [],
+      customLines: [],
+      vehicleCategory: "sedan",
+      settings,
+    })).rejects.toThrow(/at least one service/);
+  });
+
+  it("refuses an add-on on an all-custom booking, since no service backs it", async () => {
+    const addonId = newId("add");
+    await db().insert(schema.addons).values({
+      id: addonId,
+      name: "Interior shampoo",
+      priceCents: 5000,
+      durationMin: 30,
+    });
+
+    await expect(priceBooking({
+      serviceIds: [],
+      addonIds: [addonId],
+      customLines: [{ description: "Ceramic coating", priceCents: 150000, durationMin: 240 }],
+      vehicleCategory: "sedan",
+      settings,
+    })).rejects.toThrow(/not available for this service/);
+  });
+
   it("rejects a staff booking when the vehicle belongs to another customer", async () => {
     const customerId = newId("cus");
     const otherCustomerId = newId("cus");
