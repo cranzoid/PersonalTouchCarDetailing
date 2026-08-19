@@ -1,4 +1,9 @@
 import Link from "next/link";
+import {
+  FinanceMetric,
+  FinanceWorkspaceHeader,
+  financeButton,
+} from "@/components/finance-workspace";
 import { PeriodNav } from "@/components/period-nav";
 import { requirePageStaff } from "@/lib/auth/page";
 import { getBooksSnapshot, getPeriodWindow, type PeriodKind } from "@/lib/books";
@@ -34,13 +39,7 @@ function sourceLabel(source: string): string {
 }
 
 function Kpi({ label, value, note }: { label: string; value: string; note: string }) {
-  return (
-    <div className="rounded-2xl border border-ink-700 bg-ink-900/50 p-5">
-      <p className="text-sm text-ink-400">{label}</p>
-      <p className="mt-1 text-3xl font-bold text-white">{value}</p>
-      <p className="mt-2 text-xs text-ink-400">{note}</p>
-    </div>
-  );
+  return <FinanceMetric label={label} value={value} detail={note} />;
 }
 
 function FunnelRow({ stage }: { stage: FunnelStage }) {
@@ -103,66 +102,27 @@ export default async function ReportsPage({
   })}`;
 
   return (
-    <div>
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-white">Reports</h1>
-          <p className="mt-1 text-sm text-ink-400">
-            Tax position, cash revenue, lead conversion, capacity utilization and source attribution.
-          </p>
-          <p className="mt-1 text-xs text-ink-400">
-            {periodLabel} · {report.timezone}
-          </p>
-        </div>
-        <div className="flex flex-col items-end gap-3">
-          <nav aria-label="Reporting period" className="flex flex-wrap gap-2">
-            {REPORT_DAY_OPTIONS.map((option) => (
-              <Link
-                key={option}
-                href={`/admin/reports?range=${option}`}
-                aria-current={days === option ? "page" : undefined}
-                className={`rounded-full px-4 py-1.5 text-sm ${
-                  days === option
-                    ? "bg-accent-400 font-semibold text-ink-950"
-                    : "bg-ink-800 text-ink-300 hover:text-white"
-                }`}
-              >
-                {option} days
-              </Link>
-            ))}
-          </nav>
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs text-ink-400">Export CSV:</span>
-            {[
-              { kind: "summary", label: "Summary" },
-              { kind: "invoices", label: "Invoices + tax" },
-              { kind: "payments", label: "Payments" },
-            ].map((option) => (
-              <a
-                key={option.kind}
-                href={`/api/reports/export?kind=${option.kind}&range=${days}`}
-                className="rounded-lg border border-ink-600 px-3 py-1.5 text-xs font-medium text-ink-200 hover:bg-ink-800"
-              >
-                {option.label}
-              </a>
-            ))}
-          </div>
-        </div>
-      </div>
+    <div className="max-w-[88rem]">
+      <FinanceWorkspaceHeader
+        active="reports"
+        title="Business overview"
+        description="Start with profit and cash position, then move into the tax, sales, lead and capacity detail behind those numbers."
+      />
 
-
-      <section aria-labelledby="pnl-heading" className="mt-8">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h2 id="pnl-heading" className="text-lg font-semibold text-white">
-              Profit &amp; loss
-            </h2>
-            <p className="mt-1 text-xs text-ink-400">
-              Sales are invoices issued in {books.period.label} — the same basis as the tax figures
-              below, so the two always agree. Expenses count on the day they were paid.
-            </p>
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <section className="rounded-2xl border border-[#D8E1EA] bg-white p-5 shadow-[0_8px_24px_rgba(11,42,74,0.04)]">
+          <div className="flex items-start gap-3">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#0B2A4A] text-sm font-bold text-[#FFFFFF]">
+              1
+            </span>
+            <div>
+              <h2 className="text-sm font-bold text-[#0B2A4A]">Financial period</h2>
+              <p className="mt-1 text-xs leading-5 text-[#697B8D]">
+                Profit, expenses and payroll use a complete calendar month, quarter or year.
+              </p>
+            </div>
           </div>
-          <div className="flex flex-col items-end gap-2">
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
             <PeriodNav
               period={{
                 kind: books.period.kind,
@@ -175,11 +135,106 @@ export default async function ReportsPage({
             />
             <a
               href={`/api/reports/export?kind=pnl&kindPeriod=${books.period.kind}&y=${books.period.year}&i=${books.period.index}`}
-              className="rounded-lg border border-ink-600 px-3 py-1.5 text-xs font-medium text-ink-200 hover:bg-ink-800"
+              className={financeButton}
             >
-              Export P&amp;L CSV
+              Export P&amp;L
             </a>
           </div>
+        </section>
+
+        <section className="rounded-2xl border border-[#D8E1EA] bg-white p-5 shadow-[0_8px_24px_rgba(11,42,74,0.04)]">
+          <div className="flex items-start gap-3">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#E0A93B] text-sm font-bold text-[#0B2A4A]">
+              2
+            </span>
+            <div>
+              <h2 className="text-sm font-bold text-[#0B2A4A]">Recent performance</h2>
+              <p className="mt-1 text-xs leading-5 text-[#697B8D]">
+                Revenue, leads, tax detail and utilization use a rolling window: {periodLabel}.
+              </p>
+            </div>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <nav
+              aria-label="Recent performance window"
+              className="flex rounded-xl border border-[#D4DEE7] bg-[#F5F7FA] p-1"
+            >
+              {REPORT_DAY_OPTIONS.map((option) => (
+                <Link
+                  key={option}
+                  href={`/admin/reports?range=${option}&kind=${books.period.kind}&y=${books.period.year}&i=${books.period.index}`}
+                  aria-current={days === option ? "page" : undefined}
+                  className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                    days === option
+                      ? "bg-[#0B2A4A] text-[#FFFFFF] shadow-sm"
+                      : "text-[#5F7285] hover:bg-white hover:text-[#0B2A4A]"
+                  }`}
+                >
+                  {option} days
+                </Link>
+              ))}
+            </nav>
+            <details className="relative">
+              <summary className={`${financeButton} cursor-pointer list-none`}>Export data</summary>
+              <div className="absolute right-0 top-12 z-20 w-48 rounded-xl border border-[#D8E1EA] bg-white p-2 shadow-[0_14px_36px_rgba(11,42,74,0.16)]">
+                {[
+                  { kind: "summary", label: "Summary CSV" },
+                  { kind: "invoices", label: "Invoices + tax CSV" },
+                  { kind: "payments", label: "Payments CSV" },
+                ].map((option) => (
+                  <a
+                    key={option.kind}
+                    href={`/api/reports/export?kind=${option.kind}&range=${days}`}
+                    className="block rounded-lg px-3 py-2 text-xs font-semibold text-[#425A70] hover:bg-[#F4F6FA] hover:text-[#0B2A4A]"
+                  >
+                    {option.label}
+                  </a>
+                ))}
+              </div>
+            </details>
+          </div>
+        </section>
+      </div>
+
+      <nav
+        aria-label="Report sections"
+        className="mt-4 flex gap-2 overflow-x-auto rounded-2xl border border-[#DEE5EC] bg-[#F8FAFC] p-2"
+      >
+        {[
+          ["financial-summary", "Profit & loss"],
+          ["tax-heading", "Tax & payments"],
+          ["revenue-heading", "Revenue"],
+          ["funnel-heading", "Leads"],
+          ["utilization-heading", "Capacity"],
+        ].map(([id, label]) => (
+          <a
+            key={id}
+            href={`#${id}`}
+            className="min-w-max rounded-xl px-3 py-2 text-xs font-semibold text-[#526A80] hover:bg-white hover:text-[#0B2A4A]"
+          >
+            {label}
+          </a>
+        ))}
+      </nav>
+
+      <section
+        id="financial-summary"
+        aria-labelledby="pnl-heading"
+        className="mt-6 rounded-[1.75rem] border border-[#DCE4EC] bg-[#F8FAFC] p-5 shadow-[0_10px_30px_rgba(11,42,74,0.045)] sm:p-6"
+      >
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 id="pnl-heading" className="text-lg font-semibold text-white">
+              Profit &amp; loss
+            </h2>
+            <p className="mt-1 text-xs text-ink-400">
+              Sales are invoices issued in {books.period.label} — the same basis as the tax figures
+              below, so the two always agree. Expenses count on the day they were paid.
+            </p>
+          </div>
+          <p className="rounded-full bg-[#E9EEF3] px-3 py-1.5 text-xs font-semibold text-[#526A80]">
+            {books.period.label}
+          </p>
         </div>
 
         <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -367,7 +422,31 @@ export default async function ReportsPage({
         </div>
       </section>
 
-      <section aria-labelledby="tax-heading" className="mt-8">
+      <div className="mt-8 overflow-hidden rounded-[1.75rem] bg-[#0B2A4A] px-5 py-6 text-[#FFFFFF] shadow-[0_12px_32px_rgba(11,42,74,0.14)] sm:px-7">
+        <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#E5BE67]">
+          Recent performance · {days} days
+        </p>
+        <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h2 className="text-xl font-bold tracking-[-0.02em]">Sales and operations</h2>
+            <p className="mt-1 max-w-3xl text-xs leading-5 text-white/65">
+              {periodLabel} · {report.timezone}. The sections below use this rolling window, not
+              the calendar period used for profit and loss above.
+            </p>
+          </div>
+          <a
+            href="#financial-summary"
+            className="rounded-xl border border-white/15 bg-white/[0.06] px-3 py-2 text-xs font-semibold text-white/75 hover:bg-white/10 hover:text-white"
+          >
+            Back to financials ↑
+          </a>
+        </div>
+      </div>
+
+      <section
+        aria-labelledby="tax-heading"
+        className="mt-6 rounded-[1.75rem] border border-[#DCE4EC] bg-white p-5 shadow-[0_8px_24px_rgba(11,42,74,0.04)] sm:p-6"
+      >
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 id="tax-heading" className="text-lg font-semibold text-white">
             Tax
@@ -446,7 +525,10 @@ export default async function ReportsPage({
         </p>
       </section>
 
-      <section aria-labelledby="methods-heading" className="mt-8">
+      <section
+        aria-labelledby="methods-heading"
+        className="mt-6 rounded-[1.75rem] border border-[#DCE4EC] bg-white p-5 shadow-[0_8px_24px_rgba(11,42,74,0.04)] sm:p-6"
+      >
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 id="methods-heading" className="text-lg font-semibold text-white">
             How customers paid
@@ -490,7 +572,10 @@ export default async function ReportsPage({
         )}
       </section>
 
-      <section aria-labelledby="revenue-heading" className="mt-8">
+      <section
+        aria-labelledby="revenue-heading"
+        className="mt-6 rounded-[1.75rem] border border-[#DCE4EC] bg-[#F8FAFC] p-5 shadow-[0_8px_24px_rgba(11,42,74,0.04)] sm:p-6"
+      >
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 id="revenue-heading" className="text-lg font-semibold text-white">
             Revenue
@@ -523,8 +608,11 @@ export default async function ReportsPage({
         </div>
       </section>
 
-      <div className="mt-10 grid gap-8 xl:grid-cols-2">
-        <section aria-labelledby="funnel-heading">
+      <div className="mt-6 grid gap-6 xl:grid-cols-2">
+        <section
+          aria-labelledby="funnel-heading"
+          className="rounded-[1.75rem] border border-[#DCE4EC] bg-white p-5 shadow-[0_8px_24px_rgba(11,42,74,0.04)] sm:p-6"
+        >
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h2 id="funnel-heading" className="text-lg font-semibold text-white">
               Lead cohort funnel
@@ -571,7 +659,10 @@ export default async function ReportsPage({
           </p>
         </section>
 
-        <section aria-labelledby="sources-heading">
+        <section
+          aria-labelledby="sources-heading"
+          className="rounded-[1.75rem] border border-[#DCE4EC] bg-white p-5 shadow-[0_8px_24px_rgba(11,42,74,0.04)] sm:p-6"
+        >
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <h2 id="sources-heading" className="text-lg font-semibold text-white">
               Source → net revenue
@@ -619,7 +710,10 @@ export default async function ReportsPage({
         </section>
       </div>
 
-      <section aria-labelledby="utilization-heading" className="mt-10">
+      <section
+        aria-labelledby="utilization-heading"
+        className="mt-6 rounded-[1.75rem] border border-[#DCE4EC] bg-white p-5 shadow-[0_8px_24px_rgba(11,42,74,0.04)] sm:p-6"
+      >
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h2 id="utilization-heading" className="text-lg font-semibold text-white">
             Resource utilization

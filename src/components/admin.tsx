@@ -28,11 +28,19 @@ export type AdminNavItem = {
 /** Active-route-aware navigation shared by the desktop rail and mobile menu. */
 export function AdminNavLinks({ items, mobile = false }: { items: AdminNavItem[]; mobile?: boolean }) {
   const pathname = usePathname();
+  // Nested routes such as /admin/reports/payroll used to highlight both
+  // "Reports" and "Payroll". Prefer the most specific matching destination so
+  // the navigation always communicates one current location.
+  const activeHref = items
+    .filter((item) =>
+      item.href === "/admin" ? pathname === item.href : pathname.startsWith(item.href),
+    )
+    .sort((a, b) => b.href.length - a.href.length)[0]?.href;
 
   return (
     <nav aria-label={mobile ? "Mobile admin navigation" : "Admin navigation"} className={mobile ? "grid grid-cols-2 gap-1.5" : "space-y-1"}>
       {items.map((item) => {
-        const active = item.href === "/admin" ? pathname === item.href : pathname.startsWith(item.href);
+        const active = item.href === activeHref;
         return (
           <Link
             key={item.href}

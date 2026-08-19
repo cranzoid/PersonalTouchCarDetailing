@@ -53,36 +53,38 @@ export function PeriodNav({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-3">
-      <div className="flex items-center gap-1 rounded-xl border border-ink-700 bg-ink-900/50 p-1">
+    <div className="flex flex-wrap items-center gap-2.5">
+      <div className="flex items-center gap-1 rounded-xl border border-[#D4DEE7] bg-[#F5F7FA] p-1">
         <button
           type="button"
           onClick={() => step(-1)}
           aria-label="Previous period"
-          className="rounded-lg px-3 py-2 text-ink-300 hover:bg-ink-800 hover:text-white"
+          className="grid min-h-9 min-w-9 place-items-center rounded-lg text-[#607386] outline-none transition hover:bg-white hover:text-[#0B2A4A] focus-visible:ring-2 focus-visible:ring-[#E0A93B]"
         >
           ←
         </button>
-        <span className="min-w-40 px-2 text-center text-sm font-semibold text-white">
+        <span className="min-w-36 px-2 text-center text-sm font-bold text-[#0B2A4A] sm:min-w-40">
           {period.label}
         </span>
         <button
           type="button"
           onClick={() => step(1)}
           aria-label="Next period"
-          className="rounded-lg px-3 py-2 text-ink-300 hover:bg-ink-800 hover:text-white"
+          className="grid min-h-9 min-w-9 place-items-center rounded-lg text-[#607386] outline-none transition hover:bg-white hover:text-[#0B2A4A] focus-visible:ring-2 focus-visible:ring-[#E0A93B]"
         >
           →
         </button>
       </div>
-      <div className="flex rounded-xl border border-ink-700 bg-ink-900/50 p-1">
+      <div className="flex rounded-xl border border-[#D4DEE7] bg-[#F5F7FA] p-1">
         {(["month", "quarter", "year"] as const).map((kind) => (
           <button
             key={kind}
             type="button"
             onClick={() => switchKind(kind)}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium capitalize transition-colors ${
-              period.kind === kind ? "bg-accent-400 text-ink-950" : "text-ink-300 hover:text-white"
+            className={`min-h-9 rounded-lg px-3 py-1.5 text-xs font-semibold capitalize outline-none transition-colors focus-visible:ring-2 focus-visible:ring-[#E0A93B] ${
+              period.kind === kind
+                ? "bg-[#0B2A4A] text-[#FFFFFF] shadow-sm"
+                : "text-[#607386] hover:bg-white hover:text-[#0B2A4A]"
             }`}
           >
             {kind}

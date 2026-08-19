@@ -3,6 +3,12 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import {
+  FinanceMetric,
+  FinanceWorkspaceHeader,
+  financeButton,
+  financePrimaryButton,
+} from "@/components/finance-workspace";
 import { formatCents } from "@/lib/money";
 import { PAY_TYPE_LABELS, type PayType } from "@/lib/types";
 import { saveTimesheetWeekAction } from "./actions";
@@ -28,7 +34,7 @@ type Week = {
 };
 
 const inputClass =
-  "w-full rounded-lg border border-ink-600 bg-ink-950 px-2 py-2 text-center text-sm text-white placeholder:text-ink-600 focus:border-accent-500 focus:outline-none";
+  "w-full min-h-11 rounded-xl border border-[#C9D5E0] bg-white px-2 py-2 text-center text-sm font-semibold text-[#17344F] shadow-sm outline-none placeholder:text-[#A0ADBA] focus:border-[#0B2A4A] focus:ring-2 focus:ring-[#E0A93B]/35";
 
 const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
@@ -103,14 +109,20 @@ export function TimesheetWeekGrid({
   const totals = useMemo(() => {
     let minutes = 0;
     let payCents = 0;
+    const people = new Set<string>();
+    const days = new Set<string>();
     for (const person of visible) {
       for (const day of week.days) {
         const dayMinutes = hoursToMinutes(hours[`${person.id}|${day}`] ?? "");
         minutes += dayMinutes;
         payCents += previewDayPayCents(person, dayMinutes);
+        if (dayMinutes > 0) {
+          people.add(person.id);
+          days.add(day);
+        }
       }
     }
-    return { minutes, payCents };
+    return { minutes, payCents, people: people.size, days: days.size };
   }, [hours, visible, week.days]);
 
   const dirty = visible.some((person) =>
@@ -152,27 +164,49 @@ export function TimesheetWeekGrid({
   }
 
   return (
-    <div className="max-w-6xl pb-24">
-      <h1 className="text-2xl font-bold text-white">Hours</h1>
-      <p className="mt-1 text-sm text-ink-400">
-        Who worked, and for how long. Feeds the payroll balance in Reports. Leave a day blank if
-        they did not work it.
-      </p>
+    <div className="max-w-[88rem] pb-24">
+      <FinanceWorkspaceHeader
+        active="hours"
+        title="Staff hours"
+        description="Enter the time each person worked. Saved hours freeze hourly and day-rate earnings for payroll; salaried staff hours remain an activity record."
+      />
 
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-[#DCE4EC] bg-white p-4 shadow-[0_8px_24px_rgba(11,42,74,0.04)]">
         <WeekNav weekStart={week.weekStart} label={week.label} />
         {week.weekStart !== thisWeekStart && (
           <Link
             href={`/admin/timesheets?week=${thisWeekStart}`}
-            className="rounded-lg border border-ink-600 px-3 py-2 text-xs font-medium text-ink-200 hover:bg-ink-800"
+            className={financeButton}
           >
             This week
           </Link>
         )}
       </div>
 
+      {visible.length > 0 && (
+        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          <FinanceMetric
+            label="Hours this week"
+            value={`${(totals.minutes / 60).toFixed(totals.minutes % 60 === 0 ? 0 : 1)}h`}
+            detail={`${totals.days} ${totals.days === 1 ? "day has" : "days have"} time entered`}
+            tone="accent"
+          />
+          <FinanceMetric
+            label="Hourly & day-rate earnings"
+            value={money(totals.payCents)}
+            detail="Live estimate; the server confirms and freezes pay when saved"
+            tone="positive"
+          />
+          <FinanceMetric
+            label="Staff with time"
+            value={`${totals.people} of ${visible.length}`}
+            detail="Leave a day empty when a person did not work"
+          />
+        </div>
+      )}
+
       {visible.length === 0 ? (
-        <p className="mt-8 rounded-xl border border-dashed border-ink-700 p-8 text-center text-sm text-ink-400">
+        <p className="mt-6 rounded-2xl border border-dashed border-[#C9D5E0] bg-white p-8 text-center text-sm text-[#687B8E]">
           No staff accounts yet.{" "}
           <Link href="/admin/staff" className="text-accent-300 hover:underline">
             Add one
@@ -180,7 +214,7 @@ export function TimesheetWeekGrid({
           and set their pay type and rate before logging hours.
         </p>
       ) : (
-        <div className="mt-4 space-y-4">
+        <div className="mt-6 space-y-4">
           {visible.map((person) => (
             <StaffWeek
               key={person.id}
@@ -197,14 +231,14 @@ export function TimesheetWeekGrid({
       )}
 
       {visible.length > 0 && (
-        <div className="sticky bottom-0 mt-6 -mx-4 border-t border-ink-700 bg-ink-950/95 px-4 py-3 backdrop-blur md:-mx-7 md:px-7">
+        <div className="sticky bottom-3 z-20 mt-6 rounded-2xl border border-[#CCD7E1] bg-white/95 px-4 py-3 shadow-[0_16px_42px_rgba(11,42,74,0.16)] backdrop-blur md:px-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-ink-300">
+            <p className="text-sm text-[#5D7084]">
               Week total{" "}
-              <span className="font-semibold text-white">
+              <span className="font-semibold text-[#0B2A4A]">
                 {(totals.minutes / 60).toFixed(totals.minutes % 60 === 0 ? 0 : 1)}h
               </span>{" "}
-              · <span className="font-semibold text-white">{money(totals.payCents)}</span> of hourly
+              · <span className="font-semibold text-[#0B2A4A]">{money(totals.payCents)}</span> of hourly
               and daily pay
             </p>
             <div className="flex items-center gap-3">
@@ -214,7 +248,7 @@ export function TimesheetWeekGrid({
                 type="button"
                 onClick={() => void save()}
                 disabled={busy || !dirty}
-                className="rounded-lg bg-accent-400 px-5 py-2 text-sm font-semibold text-ink-950 hover:bg-accent-300 disabled:opacity-40"
+                className={financePrimaryButton}
               >
                 {busy ? "Saving…" : dirty ? "Save hours" : "Saved"}
               </button>
@@ -255,18 +289,18 @@ function StaffWeek({
 
   return (
     <article
-      className={`rounded-2xl border p-4 ${person.active ? "border-ink-700 bg-ink-900/50" : "border-ink-800 opacity-70"}`}
+      className={`overflow-hidden rounded-2xl border bg-white shadow-[0_8px_24px_rgba(11,42,74,0.04)] ${person.active ? "border-[#DCE4EC]" : "border-[#E5E9EE] opacity-70"}`}
     >
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#E7ECF1] bg-[#FAFBFC] px-4 py-4 sm:px-5">
         <div>
-          <h2 className="font-semibold text-white">
+          <h2 className="font-semibold text-[#0B2A4A]">
             {person.name}
             {!person.active && <span className="ml-2 text-xs text-ink-500">(inactive)</span>}
           </h2>
-          <p className="text-xs text-ink-400">{rateNote(person, currency)}</p>
+          <p className="mt-0.5 text-xs text-[#6B7D90]">{rateNote(person, currency)}</p>
         </div>
-        <p className="text-sm text-ink-300">
-          <span className="font-semibold text-white">
+        <p className="rounded-xl border border-[#DDE5EC] bg-white px-3 py-2 text-sm text-[#607386] shadow-sm">
+          <span className="font-semibold text-[#0B2A4A]">
             {(weekMinutes / 60).toFixed(weekMinutes % 60 === 0 ? 0 : 1)}h
           </span>
           {person.payType !== "monthly_fixed" && (
@@ -275,18 +309,24 @@ function StaffWeek({
         </p>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
+      <div className="grid grid-cols-2 gap-2 p-4 sm:grid-cols-4 sm:p-5 lg:grid-cols-7">
         {week.days.map((day, index) => {
           const key = `${person.id}|${day}`;
           const minutes = hoursToMinutes(hours[key] ?? "");
           return (
             <label
               key={day}
-              className={`rounded-xl border p-2 ${day === today ? "border-accent-500/60 bg-accent-400/5" : "border-ink-800"}`}
+              className={`rounded-xl border p-2.5 ${
+                day === today
+                  ? "border-[#E0A93B] bg-[#FFF9EB] shadow-[inset_0_0_0_1px_rgba(224,169,59,0.18)]"
+                  : index > 4
+                    ? "border-[#E2E7ED] bg-[#F8FAFC]"
+                    : "border-[#DDE5EC] bg-white"
+              }`}
             >
               <span className="flex items-baseline justify-between">
-                <span className="text-xs font-medium text-ink-300">{WEEKDAYS[index]}</span>
-                <span className="text-[10px] text-ink-500">{day.slice(8)}</span>
+                <span className="text-xs font-semibold text-[#435B71]">{WEEKDAYS[index]}</span>
+                <span className="text-[10px] text-[#8493A2]">{day.slice(8)}</span>
               </span>
               <input
                 type="number"
@@ -300,7 +340,7 @@ function StaffWeek({
                 onChange={(event) => onHours(key, event.target.value)}
                 className={`${inputClass} mt-1`}
               />
-              <span className="mt-1 block h-4 text-center text-[10px] text-ink-500">
+              <span className="mt-1 block h-4 text-center text-[10px] font-medium text-[#718296]">
                 {minutes > 0 && person.payType !== "monthly_fixed"
                   ? money(previewDayPayCents(person, minutes))
                   : ""}
@@ -320,19 +360,19 @@ function WeekNav({ weekStart, label }: { weekStart: string; label: string }) {
     return new Date(Date.UTC(year, month - 1, day + days)).toISOString().slice(0, 10);
   };
   return (
-    <div className="flex items-center gap-1 rounded-xl border border-ink-700 bg-ink-900/50 p-1">
+    <div className="flex items-center gap-1 rounded-xl border border-[#D4DEE7] bg-[#F5F7FA] p-1">
       <Link
         href={`/admin/timesheets?week=${shift(-7)}`}
         aria-label="Previous week"
-        className="rounded-lg px-3 py-2 text-ink-300 hover:bg-ink-800 hover:text-white"
+        className="rounded-lg px-3 py-2 text-[#607386] hover:bg-white hover:text-[#0B2A4A]"
       >
         ←
       </Link>
-      <span className="min-w-44 px-2 text-center text-sm font-semibold text-white">{label}</span>
+      <span className="min-w-44 px-2 text-center text-sm font-semibold text-[#0B2A4A]">{label}</span>
       <Link
         href={`/admin/timesheets?week=${shift(7)}`}
         aria-label="Next week"
-        className="rounded-lg px-3 py-2 text-ink-300 hover:bg-ink-800 hover:text-white"
+        className="rounded-lg px-3 py-2 text-[#607386] hover:bg-white hover:text-[#0B2A4A]"
       >
         →
       </Link>
