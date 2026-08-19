@@ -4,8 +4,7 @@ import {
   isPaymentMethodTaxable,
   noTaxReasonForMethod,
   paymentMethodConflict,
-  resolveInvoiceTax,
-  taxTreatmentForMethod,
+  resolvePaymentTax,
 } from "../src/lib/invoices";
 import { PAYMENT_METHOD_TAXABLE, QUOTED_PAYMENT_METHODS } from "../src/lib/types";
 import { buildAttentionQueue } from "../src/lib/attention";
@@ -42,121 +41,144 @@ describe("PAYMENT_METHOD_TAXABLE", () => {
   });
 });
 
-describe("the spec §4.1 worked example", () => {
-  // Sedan, Package #2 ($175), Wax/Buff add-on ($120), 10% discount, paid Credit
-  const lines = [
-    { quantity: 1, unitPriceCents: 17500 },
-    { quantity: 1, unitPriceCents: 12000 },
-  ];
-  const discountCents = 2950; // 10% of 29500
+const LINES = [
+  { quantity: 1, unitPriceCents: 17500 }, // Package #2, sedan
+  { quantity: 1, unitPriceCents: 12000 }, // Wax / Buff add-on
+];
+const DISCOUNT = 2950; // 10% of 29500
 
-  it("bills 300.02 on credit", () => {
-    const tax = resolveInvoiceTax({ method: "card_terminal", baseTaxRateBp: HST, taxLabel: "HST" });
-    const totals = computeInvoiceTotals(lines, discountCents, tax.taxRateBp);
+/** An invoice as issued: full price, tax on, nobody has paid yet. */
+const issued = {
+  taxCents: 3452,
+  totalCents: 30002,
+  taxExempt: false,
+  taxTreatment: "added",
+  quotedPaymentMethod: null as string | null,
+};
+
+describe("the spec §4.1 worked example", () => {
+  it("issues at 300.02 — discount before tax, tax on, because nobody has paid yet", () => {
+    const totals = computeInvoiceTotals(LINES, DISCOUNT, HST);
     expect(totals.subtotalCents).toBe(29500);
     expect(totals.discountCents).toBe(2950);
     expect(totals.taxCents).toBe(3452);
     expect(totals.totalCents).toBe(30002);
+    // Taxing the gross first would give 3835 and the customer would overpay.
   });
 
-  it("bills 265.50 for the same job in cash", () => {
-    const tax = resolveInvoiceTax({ method: "cash", baseTaxRateBp: HST, taxLabel: "HST" });
-    const totals = computeInvoiceTotals(lines, discountCents, tax.taxRateBp);
-    expect(totals.taxCents).toBe(0);
-    expect(totals.totalCents).toBe(26550);
+  it("drops to 265.50 the moment the customer pays cash", () => {
+    const outcome = resolvePaymentTax({
+      invoice: issued, method: "cash", taxLabel: "HST", alreadyPaidAgainst: false,
+    });
+    expect(outcome.ok).toBe(true);
+    if (!outcome.ok) return;
+    expect(outcome.totalCents).toBe(26550);
+    expect(outcome.changes).toEqual({
+      taxRateBp: 0,
+      taxCents: 0,
+      totalCents: 26550,
+      taxExempt: true,
+      taxExemptReason: "Cash sale — no HST charged",
+      taxTreatment: "none",
+      quotedPaymentMethod: "cash",
+    });
   });
 
-  it("discounts before tax, never after", () => {
-    const totals = computeInvoiceTotals(lines, discountCents, HST);
-    // Taxing the gross first would give 3835, and the customer would overpay.
-    expect(totals.taxCents).toBe(3452);
+  it("stays at 300.02 when they pay by card", () => {
+    const outcome = resolvePaymentTax({
+      invoice: issued, method: "card_terminal", taxLabel: "HST", alreadyPaidAgainst: false,
+    });
+    if (!outcome.ok) return expect.fail("should not conflict");
+    expect(outcome.totalCents).toBe(30002);
+    // Only the method is stamped — the rate the invoice was issued at is not
+    // ours to substitute, so a zero-rated appointment stays zero-rated.
+    expect(outcome.changes).toEqual({ taxTreatment: "added", quotedPaymentMethod: "card_terminal" });
   });
 });
 
-describe("resolveInvoiceTax", () => {
-  it("records a cash sale as exempt with a reason the tax report can group on", () => {
-    const tax = resolveInvoiceTax({ method: "cash", baseTaxRateBp: HST, taxLabel: "HST" });
-    expect(tax).toEqual({
-      taxRateBp: 0,
-      taxTreatment: "none",
-      quotedPaymentMethod: "cash",
-      taxExempt: true,
-      taxExemptReason: "Cash sale — no HST charged",
+describe("resolvePaymentTax", () => {
+  it("treats e-transfer exactly like cash, and cheque exactly like card", () => {
+    for (const method of ["cash", "etransfer"] as const) {
+      const o = resolvePaymentTax({ invoice: issued, method, taxLabel: "HST", alreadyPaidAgainst: false });
+      expect(o.ok && o.totalCents).toBe(26550);
+    }
+    for (const method of ["cheque", "card_terminal", "stripe"] as const) {
+      const o = resolvePaymentTax({ invoice: issued, method, taxLabel: "HST", alreadyPaidAgainst: false });
+      expect(o.ok && o.totalCents).toBe(30002);
+    }
+  });
+
+  it("strips tax by subtracting the snapshot, so an invoice with no lines is never zeroed", () => {
+    // Recomputing from line items would write $0.00 onto a real document if the
+    // lines were ever missing. total − tax is exact and cannot do that.
+    const noLines = { ...issued, taxCents: 3452, totalCents: 30002 };
+    const o = resolvePaymentTax({ invoice: noLines, method: "cash", taxLabel: "HST", alreadyPaidAgainst: false });
+    expect(o.ok && o.totalCents).toBe(26550);
+  });
+
+  it("never re-prices an invoice that already has a payment against it", () => {
+    // Re-pricing underneath a customer who has paid part of a taxed total is
+    // worse than the inconsistency it fixes. Also covers every invoice
+    // part-paid before this rule existed.
+    const outcome = resolvePaymentTax({
+      invoice: issued, method: "cash", taxLabel: "HST", alreadyPaidAgainst: true,
     });
+    if (!outcome.ok) return expect.fail("legacy part-paid invoices must not be blocked");
+    expect(outcome.totalCents).toBe(30002);
+    expect(outcome.changes).toBeNull();
   });
 
-  it("keeps a card sale fully taxed with no exemption to explain away", () => {
-    const tax = resolveInvoiceTax({ method: "stripe", baseTaxRateBp: HST, taxLabel: "HST" });
-    expect(tax.taxRateBp).toBe(HST);
-    expect(tax.taxTreatment).toBe("added");
-    expect(tax.taxExempt).toBe(false);
-    expect(tax.taxExemptReason).toBeNull();
-  });
-
-  it("preserves a legitimately zero-rated appointment rather than substituting the settings rate", () => {
-    const tax = resolveInvoiceTax({ method: "cheque", baseTaxRateBp: 0, taxLabel: "HST" });
-    expect(tax.taxRateBp).toBe(0);
-    expect(tax.taxTreatment).toBe("added");
-  });
-
-  it("lets a staff exemption outrank the payment method, and leaves no method bound to the invoice", () => {
-    const tax = resolveInvoiceTax({
-      method: "card_terminal",
-      baseTaxRateBp: HST,
-      taxLabel: "HST",
-      staffExempt: true,
-      staffExemptReason: "Out-of-province customer",
+  it("leaves a staff exemption alone and binds nobody to a method", () => {
+    const exempt = { ...issued, taxExempt: true, taxTreatment: "none", taxCents: 0, totalCents: 26550 };
+    const outcome = resolvePaymentTax({
+      invoice: exempt, method: "card_terminal", taxLabel: "HST", alreadyPaidAgainst: false,
     });
-    expect(tax.taxRateBp).toBe(0);
-    expect(tax.taxTreatment).toBe("none");
-    expect(tax.taxExemptReason).toBe("Out-of-province customer");
-    // The restatement query is `tax_treatment = 'none' AND quoted_payment_method
-    // IS NOT NULL`, so a staff exemption must NOT be swept into it.
-    expect(tax.quotedPaymentMethod).toBeNull();
+    if (!outcome.ok) return expect.fail("a staff exemption must not block any method");
+    expect(outcome.changes).toBeNull();
+    // Keeps the restatement query pointed at payment-method sales only.
+    expect(exempt.quotedPaymentMethod).toBeNull();
+  });
+
+  it("holds the answer steady once a first payment has settled it", () => {
+    const settledCash = { ...issued, taxTreatment: "none", taxCents: 0, totalCents: 26550, quotedPaymentMethod: "cash" };
+    const blocked = resolvePaymentTax({
+      invoice: settledCash, method: "card_terminal", taxLabel: "HST", alreadyPaidAgainst: true,
+    });
+    expect(blocked.ok).toBe(false);
+    if (blocked.ok) return;
+    expect(blocked.conflict).toContain("already part-paid");
+
+    const allowed = resolvePaymentTax({
+      invoice: settledCash, method: "etransfer", taxLabel: "HST", alreadyPaidAgainst: true,
+    });
+    expect(allowed.ok).toBe(true);
   });
 
   it("names the method in the reason so the tax report separates cash from e-transfer", () => {
     expect(noTaxReasonForMethod("cash", "HST")).toBe("Cash sale — no HST charged");
     expect(noTaxReasonForMethod("etransfer", "HST")).toBe("Interac e-transfer sale — no HST charged");
-    expect(taxTreatmentForMethod("cheque")).toBe("added");
-    expect(taxTreatmentForMethod("etransfer")).toBe("none");
   });
 });
 
 describe("paymentMethodConflict", () => {
-  const cashInvoice = { taxTreatment: "none", quotedPaymentMethod: "cash" };
-  const cardInvoice = { taxTreatment: "added", quotedPaymentMethod: "card_terminal" };
-
-  it("lets a matching method through", () => {
-    expect(paymentMethodConflict(cashInvoice, "cash", "HST")).toBeNull();
-    expect(paymentMethodConflict(cashInvoice, "etransfer", "HST")).toBeNull();
-    expect(paymentMethodConflict(cardInvoice, "cheque", "HST")).toBeNull();
-    expect(paymentMethodConflict(cardInvoice, "stripe", "HST")).toBeNull();
+  it("says nothing about an invoice nobody has paid yet — the method is still free", () => {
+    expect(paymentMethodConflict({ taxTreatment: "added", quotedPaymentMethod: null }, "cash", "HST")).toBeNull();
   });
 
-  it("blocks a card payment on an untaxed invoice and says to re-issue", () => {
-    const message = paymentMethodConflict(cashInvoice, "card_terminal", "HST");
-    expect(message).toContain("cancel this invoice and re-issue");
-    expect(message).toContain("no HST");
-  });
-
-  it("blocks a cash payment on a taxed invoice", () => {
-    expect(paymentMethodConflict(cardInvoice, "cash", "HST")).toContain("cancel this invoice and re-issue");
+  it("blocks the opposite method once one has settled it, in both directions", () => {
+    const cash = { taxTreatment: "none", quotedPaymentMethod: "cash" };
+    const card = { taxTreatment: "added", quotedPaymentMethod: "card_terminal" };
+    expect(paymentMethodConflict(cash, "cheque", "HST")).toContain("already part-paid");
+    expect(paymentMethodConflict(card, "cash", "HST")).toContain("already part-paid");
+    expect(paymentMethodConflict(cash, "etransfer", "HST")).toBeNull();
+    expect(paymentMethodConflict(card, "stripe", "HST")).toBeNull();
   });
 
   it("leaves pre-Release-3 invoices alone, so open invoices stay payable across the swap", () => {
-    // Every invoice raised before 0008 defaults to tax_treatment 'added' with
-    // no quoted method. Enforcing against those would have stopped the shop
-    // taking cash on anything already open.
     const legacy = { taxTreatment: "added", quotedPaymentMethod: null };
     for (const method of QUOTED_PAYMENT_METHODS) {
       expect(paymentMethodConflict(legacy, method, "HST")).toBeNull();
     }
-  });
-
-  it("stays quiet once a staff exemption has cleared the quoted method", () => {
-    const exempted = { taxTreatment: "none", quotedPaymentMethod: null };
-    expect(paymentMethodConflict(exempted, "card_terminal", "HST")).toBeNull();
   });
 });
 
