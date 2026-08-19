@@ -68,6 +68,7 @@ export async function getStaff(): Promise<StaffContext | null> {
       email: schema.staffUsers.email,
       role: schema.staffUsers.role,
       active: schema.staffUsers.active,
+      removedAt: schema.staffUsers.removedAt,
     })
     .from(schema.staffSessions)
     .innerJoin(schema.staffUsers, eq(schema.staffSessions.staffUserId, schema.staffUsers.id))
@@ -80,7 +81,7 @@ export async function getStaff(): Promise<StaffContext | null> {
     )
     .limit(1);
   const row = rows[0];
-  if (!row || !row.active) return null;
+  if (!row || !row.active || row.removedAt) return null;
   return { id: row.id, name: row.name, email: row.email, role: row.role as StaffRole };
 }
 

@@ -1,4 +1,4 @@
-import { asc, desc } from "drizzle-orm";
+import { asc, desc, isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requirePageStaff } from "@/lib/auth/page";
 import { getSettings } from "@/lib/settings";
@@ -24,6 +24,7 @@ export default async function StaffPage() {
       createdAt: schema.staffUsers.createdAt,
     })
     .from(schema.staffUsers)
+    .where(isNull(schema.staffUsers.removedAt))
     .orderBy(desc(schema.staffUsers.active), asc(schema.staffUsers.name));
   const schedules = await db().select().from(schema.staffSchedules).orderBy(asc(schema.staffSchedules.weekday));
   const settings = await getSettings();

@@ -9,6 +9,7 @@ import { formatCents } from "@/lib/money";
 import { getSettings } from "@/lib/settings";
 import { formatInZone } from "@/lib/tz";
 import { CustomerActionPanels } from "../../customers/[id]/customer-actions";
+import { VehicleList } from "../../customers/[id]/vehicle-list";
 import { ConsolidatedInvoiceBuilder } from "../consolidated-invoice-builder";
 
 export const dynamic = "force-dynamic";
@@ -67,19 +68,7 @@ export default async function FleetDetailPage({ params }: { params: Promise<{ id
         anonymizedAt: customer.anonymizedAt?.toISOString() ?? null,
       }} />
 
-      <section className="mt-8">
-        <h2 className="text-lg font-semibold text-white">Fleet vehicles ({vehicles.length})</h2>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {vehicles.map((vehicle) => (
-            <div key={vehicle.id} className="rounded-xl border border-ink-800 p-4 text-sm">
-              <p className="font-medium text-white">{[vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ")}</p>
-              <p className="mt-1 capitalize text-ink-400">{vehicle.category.replaceAll("_", " ")}{vehicle.colour ? ` · ${vehicle.colour}` : ""}</p>
-              {vehicle.licencePlate && <p className="mt-1 font-mono text-xs text-ink-500">{vehicle.licencePlate}</p>}
-            </div>
-          ))}
-          {vehicles.length === 0 && <p className="text-sm text-ink-500">No fleet vehicles yet.</p>}
-        </div>
-      </section>
+      <VehicleList customerId={customer.id} vehicles={vehicles} title="Fleet vehicles" emptyText="No fleet vehicles yet." columns="sm:grid-cols-2 lg:grid-cols-3" />
 
       {roleHas(staff.role, "manage_invoices") && <ConsolidatedInvoiceBuilder customerId={customer.id} jobs={eligibleJobs} />}
 

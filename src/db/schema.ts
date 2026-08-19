@@ -38,6 +38,12 @@ export const staffUsers = pgTable("staff_users", {
   skills: text("skills").array().notNull().default([]),
   active: boolean("active").notNull().default(true),
   /**
+   * A removed login stays as a tombstone so appointments, payroll and other
+   * historical rows keep their original staff attribution. Removed accounts
+   * are hidden from access management and can never authenticate again.
+   */
+  removedAt: timestamp("removed_at", { withTimezone: true }),
+  /**
    * How this person is paid — hourly | daily_fixed | monthly_fixed (PAY_TYPES).
    * Everyone starts `hourly` at a zero rate, which earns nothing, so the
    * defaults cannot invent payroll for staff whose terms nobody has entered.

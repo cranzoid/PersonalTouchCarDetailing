@@ -64,6 +64,13 @@
       "when": 1787096806495,
       "tag": "0008_tax_treatment",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787115599425,
+      "tag": "0009_soft_celestials",
+      "breakpoints": true
     }
   ]
 }

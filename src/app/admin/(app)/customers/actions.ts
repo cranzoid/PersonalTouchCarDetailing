@@ -1,6 +1,6 @@
 "use server";
 
-import { eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, or } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db, schema } from "@/db";
@@ -244,6 +244,93 @@ export async function addCustomerVehicleAction(
   } catch (error) {
     if (error instanceof AuthError) return { ok: false, error: error.message };
     console.error("addCustomerVehicleAction failed", error);
+    return { ok: false, error: "Something went wrong" };
+  }
+}
+
+/**
+ * Removes a vehicle that was added by mistake. Once any operational record or
+ * file points at it, the vehicle becomes part of the business history and is
+ * deliberately protected from deletion.
+ */
+export async function removeCustomerVehicleAction(raw: unknown): Promise<CustomerActionResult> {
+  try {
+    const staff = await requireStaff("manage_customers");
+    const parsed = z.object({
+      customerId: z.string().min(1),
+      vehicleId: z.string().min(1),
+      confirmation: z.literal("REMOVE"),
+    }).safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Invalid vehicle removal request" };
+    const input = parsed.data;
+
+    const result = await db().transaction(async (tx): Promise<CustomerActionResult> => {
+      const [vehicle] = await tx
+        .select()
+        .from(schema.vehicles)
+        .where(and(eq(schema.vehicles.id, input.vehicleId), eq(schema.vehicles.customerId, input.customerId)))
+        .for("update");
+      if (!vehicle) return { ok: false, error: "Vehicle not found on this account" };
+
+      const references: Array<{ label: string; exists: boolean }> = [];
+      const [appointment] = await tx.select({ id: schema.appointments.id }).from(schema.appointments)
+        .where(eq(schema.appointments.vehicleId, vehicle.id)).limit(1);
+      references.push({ label: "an appointment", exists: Boolean(appointment) });
+      const [quoteRequest] = await tx.select({ id: schema.quoteRequests.id }).from(schema.quoteRequests)
+        .where(eq(schema.quoteRequests.vehicleId, vehicle.id)).limit(1);
+      references.push({ label: "a quote request", exists: Boolean(quoteRequest) });
+      const [estimate] = await tx.select({ id: schema.estimates.id }).from(schema.estimates)
+        .where(eq(schema.estimates.vehicleId, vehicle.id)).limit(1);
+      references.push({ label: "an estimate", exists: Boolean(estimate) });
+      const [job] = await tx.select({ id: schema.jobs.id }).from(schema.jobs)
+        .where(eq(schema.jobs.vehicleId, vehicle.id)).limit(1);
+      references.push({ label: "a job", exists: Boolean(job) });
+      const [invoice] = await tx.select({ id: schema.invoices.id }).from(schema.invoices)
+        .where(eq(schema.invoices.vehicleId, vehicle.id)).limit(1);
+      references.push({ label: "an invoice", exists: Boolean(invoice) });
+      const [file] = await tx.select({ id: schema.files.id }).from(schema.files)
+        .where(and(eq(schema.files.entityType, "vehicle"), eq(schema.files.entityId, vehicle.id))).limit(1);
+      references.push({ label: "a file or photo", exists: Boolean(file) });
+
+      const firstReference = references.find((reference) => reference.exists);
+      if (firstReference) {
+        return {
+          ok: false,
+          error: `This vehicle cannot be removed because it is used by ${firstReference.label}. Historical records must be preserved.`,
+        };
+      }
+
+      await audit(tx, {
+        actorType: "staff",
+        actorId: staff.id,
+        action: "customer.vehicle_removed",
+        entityType: "vehicle",
+        entityId: vehicle.id,
+        before: {
+          customerId: vehicle.customerId,
+          year: vehicle.year,
+          make: vehicle.make,
+          model: vehicle.model,
+          trim: vehicle.trim,
+          category: vehicle.category,
+          colour: vehicle.colour,
+          licencePlate: vehicle.licencePlate,
+        },
+      });
+      await tx.delete(schema.vehicles).where(eq(schema.vehicles.id, vehicle.id));
+      return { ok: true };
+    });
+
+    if (result.ok) {
+      revalidatePath(`/admin/customers/${input.customerId}`);
+      revalidatePath(`/admin/fleet/${input.customerId}`);
+      revalidatePath("/admin/customers");
+      revalidatePath("/admin/fleet");
+    }
+    return result;
+  } catch (error) {
+    if (error instanceof AuthError) return { ok: false, error: error.message };
+    console.error("removeCustomerVehicleAction failed", error);
     return { ok: false, error: "Something went wrong" };
   }
 }

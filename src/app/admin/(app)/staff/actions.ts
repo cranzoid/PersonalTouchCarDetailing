@@ -35,6 +35,11 @@ const resetPasswordSchema = z.object({
   password: passwordSchema,
 });
 
+const removeStaffSchema = z.object({
+  staffUserId: z.string().min(1),
+  confirmation: z.literal("REMOVE"),
+});
+
 const moneySchema = z.number().int().min(0).max(100_000_000);
 
 const payTermsSchema = z.object({
@@ -117,7 +122,11 @@ export async function updateStaffAction(raw: unknown): Promise<ActionResult> {
       const activeOwners = await tx
         .select({ id: schema.staffUsers.id })
         .from(schema.staffUsers)
-        .where(and(eq(schema.staffUsers.role, "owner"), eq(schema.staffUsers.active, true)))
+        .where(and(
+          eq(schema.staffUsers.role, "owner"),
+          eq(schema.staffUsers.active, true),
+          isNull(schema.staffUsers.removedAt),
+        ))
         .orderBy(asc(schema.staffUsers.id))
         .for("update");
       const target = (
@@ -127,7 +136,7 @@ export async function updateStaffAction(raw: unknown): Promise<ActionResult> {
           .where(eq(schema.staffUsers.id, input.staffUserId))
           .for("update")
       )[0];
-      if (!target) return { ok: false, error: "Staff user not found" };
+      if (!target || target.removedAt) return { ok: false, error: "Staff user not found" };
       if (target.id === actor.id && !input.active) {
         return { ok: false, error: "You cannot deactivate your own account" };
       }
@@ -186,12 +195,12 @@ export async function resetStaffPasswordAction(raw: unknown): Promise<ActionResu
     const result = await db().transaction(async (tx): Promise<ActionResult> => {
       const target = (
         await tx
-          .select({ id: schema.staffUsers.id })
+          .select({ id: schema.staffUsers.id, removedAt: schema.staffUsers.removedAt })
           .from(schema.staffUsers)
           .where(eq(schema.staffUsers.id, input.staffUserId))
           .for("update")
       )[0];
-      if (!target) return { ok: false, error: "Staff user not found" };
+      if (!target || target.removedAt) return { ok: false, error: "Staff user not found" };
 
       await tx
         .update(schema.staffUsers)
@@ -223,6 +232,96 @@ export async function resetStaffPasswordAction(raw: unknown): Promise<ActionResu
   }
 }
 
+/**
+ * Removes sign-in access without deleting historical staff attribution. The
+ * original email is moved onto an inert tombstone so it can be used for a
+ * corrected/re-created account immediately.
+ */
+export async function removeStaffAction(raw: unknown): Promise<ActionResult> {
+  try {
+    const actor = await requireStaff("manage_staff");
+    const parsed = removeStaffSchema.safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Invalid staff removal request" };
+    const input = parsed.data;
+
+    const result = await db().transaction(async (tx): Promise<ActionResult> => {
+      const activeOwners = await tx
+        .select({ id: schema.staffUsers.id })
+        .from(schema.staffUsers)
+        .where(and(
+          eq(schema.staffUsers.role, "owner"),
+          eq(schema.staffUsers.active, true),
+          isNull(schema.staffUsers.removedAt),
+        ))
+        .orderBy(asc(schema.staffUsers.id))
+        .for("update");
+      const [target] = await tx
+        .select()
+        .from(schema.staffUsers)
+        .where(eq(schema.staffUsers.id, input.staffUserId))
+        .for("update");
+      if (!target || target.removedAt) return { ok: false, error: "Staff user not found" };
+      if (target.id === actor.id) return { ok: false, error: "You cannot remove your own account" };
+      if (target.active && target.role === "owner" && activeOwners.length <= 1) {
+        return { ok: false, error: "At least one active owner account is required" };
+      }
+
+      const removedAt = new Date();
+      const revoked = await tx
+        .update(schema.staffSessions)
+        .set({ revokedAt: removedAt })
+        .where(and(eq(schema.staffSessions.staffUserId, target.id), isNull(schema.staffSessions.revokedAt)))
+        .returning({ id: schema.staffSessions.id });
+      const removedSchedules = await tx
+        .delete(schema.staffSchedules)
+        .where(eq(schema.staffSchedules.staffUserId, target.id))
+        .returning({ id: schema.staffSchedules.id });
+      await tx
+        .update(schema.staffUsers)
+        .set({
+          active: false,
+          removedAt,
+          email: `removed.${target.id}@deleted.invalid`,
+          skills: [],
+          updatedAt: removedAt,
+        })
+        .where(eq(schema.staffUsers.id, target.id));
+      await audit(tx, {
+        actorType: "staff",
+        actorId: actor.id,
+        action: "staff.removed",
+        entityType: "staff_user",
+        entityId: target.id,
+        before: {
+          name: target.name,
+          email: target.email,
+          role: target.role,
+          active: target.active,
+        },
+        after: {
+          active: false,
+          removedAt: removedAt.toISOString(),
+          revokedSessions: revoked.length,
+          removedSchedules: removedSchedules.length,
+        },
+      });
+      return { ok: true };
+    });
+
+    if (result.ok) {
+      revalidatePath("/admin/staff");
+      revalidatePath("/admin/appointments");
+      revalidatePath("/admin/timesheets");
+      revalidatePath("/admin/reports/payroll");
+    }
+    return result;
+  } catch (err) {
+    if (err instanceof AuthError) return { ok: false, error: err.message };
+    console.error("removeStaffAction failed", err);
+    return { ok: false, error: "Something went wrong" };
+  }
+}
+
 /** Owner-managed skill profile and one weekly shift per weekday. */
 export async function updateStaffSchedulingAction(raw: unknown): Promise<ActionResult> {
   try {
@@ -243,7 +342,7 @@ export async function updateStaffSchedulingAction(raw: unknown): Promise<ActionR
       // under this row lock makes schedule reads and final assignment atomic.
       const [target] = await tx.select().from(schema.staffUsers)
         .where(eq(schema.staffUsers.id, input.staffUserId)).for("update");
-      if (!target) return { ok: false, error: "Staff user not found" };
+      if (!target || target.removedAt) return { ok: false, error: "Staff user not found" };
       const beforeShifts = await tx.select().from(schema.staffSchedules)
         .where(eq(schema.staffSchedules.staffUserId, target.id));
 
@@ -312,7 +411,7 @@ export async function updateStaffPayAction(raw: unknown): Promise<ActionResult> 
         .from(schema.staffUsers)
         .where(eq(schema.staffUsers.id, input.staffUserId))
         .for("update");
-      if (!target) return { ok: false, error: "Staff user not found" };
+      if (!target || target.removedAt) return { ok: false, error: "Staff user not found" };
 
       await tx
         .update(schema.staffUsers)

@@ -23,6 +23,7 @@ import { verifyPassword } from "../src/lib/auth/password";
 import { newId } from "../src/lib/id";
 import {
   createStaffAction,
+  removeStaffAction,
   resetStaffPasswordAction,
   updateStaffSchedulingAction,
   updateStaffAction,
@@ -157,6 +158,46 @@ describe("owner staff management", () => {
       .from(schema.auditLog)
       .where(eq(schema.auditLog.action, "staff.updated"));
     expect(audits).toHaveLength(1);
+  });
+
+  it("removes another user, revokes access, clears shifts and releases their email", async () => {
+    const email = "mistake@example.com";
+    const targetId = await insertStaff({ email, role: "technician" });
+    const sessionId = await insertSession(targetId);
+    await db().insert(schema.staffSchedules).values({
+      id: newId("sch"),
+      staffUserId: targetId,
+      weekday: 2,
+      start: "09:00",
+      end: "17:00",
+    });
+
+    expect(await removeStaffAction({ staffUserId: targetId, confirmation: "REMOVE" })).toEqual({ ok: true });
+
+    const [target] = await db().select().from(schema.staffUsers).where(eq(schema.staffUsers.id, targetId));
+    const [session] = await db().select().from(schema.staffSessions).where(eq(schema.staffSessions.id, sessionId));
+    expect(target.active).toBe(false);
+    expect(target.removedAt).toBeInstanceOf(Date);
+    expect(target.email).toBe(`removed.${targetId}@deleted.invalid`);
+    expect(target.skills).toEqual([]);
+    expect(session.revokedAt).toBeInstanceOf(Date);
+    expect(await db().select().from(schema.staffSchedules).where(eq(schema.staffSchedules.staffUserId, targetId))).toHaveLength(0);
+
+    const recreated = await createStaffAction({
+      name: "Corrected Staff",
+      email,
+      role: "technician",
+      password: "corrected-password-123",
+    });
+    expect(recreated.ok).toBe(true);
+    const [entry] = await db().select().from(schema.auditLog).where(eq(schema.auditLog.action, "staff.removed"));
+    expect(entry.entityId).toBe(targetId);
+    expect(entry.before).toMatchObject({ email, role: "technician" });
+  });
+
+  it("prevents the owner from removing their own account", async () => {
+    expect(await removeStaffAction({ staffUserId: auth.actor.id, confirmation: "REMOVE" }))
+      .toEqual({ ok: false, error: "You cannot remove your own account" });
   });
 
   it("resets a password, revokes sessions and audits without exposing the hash", async () => {

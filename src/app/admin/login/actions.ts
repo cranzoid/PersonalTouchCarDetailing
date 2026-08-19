@@ -41,7 +41,7 @@ export async function loginAction(_prev: unknown, formData: FormData): Promise<L
     .limit(1);
   const user = rows[0];
   const valid = await verifyPassword(parsed.data.password, user?.passwordHash ?? DUMMY_PASSWORD_HASH);
-  if (!user || !user.active || !valid) return invalid;
+  if (!user || !user.active || user.removedAt || !valid) return invalid;
 
   const h = await headers();
   await createStaffSession(user.id, {

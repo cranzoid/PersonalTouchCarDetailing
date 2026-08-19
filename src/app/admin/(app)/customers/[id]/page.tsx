@@ -7,6 +7,7 @@ import { formatCents } from "@/lib/money";
 import { formatInZone } from "@/lib/tz";
 import { getSettings } from "@/lib/settings";
 import { CustomerActionPanels } from "./customer-actions";
+import { VehicleList } from "./vehicle-list";
 import { requirePageStaff } from "@/lib/auth/page";
 import { summarizeRevenue } from "@/lib/reporting";
 
@@ -74,25 +75,7 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
         anonymizedAt: customer.anonymizedAt?.toISOString() ?? null,
       }} />
 
-      <section className="mt-8">
-        <h2 className="text-lg font-semibold text-white">Vehicles ({vehicles.length})</h2>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          {vehicles.map((v) => (
-            <div key={v.id} className="rounded-xl border border-ink-800 p-4 text-sm">
-              <p className="font-medium text-white">
-                {v.year ?? ""} {v.make} {v.model}
-              </p>
-              <p className="mt-1 text-ink-400 capitalize">
-                {v.category}
-                {v.colour ? ` · ${v.colour}` : ""}
-                {v.licencePlate ? ` · ${v.licencePlate}` : ""}
-              </p>
-              {v.conditionNotes && <p className="mt-1 text-xs text-ink-500">{v.conditionNotes}</p>}
-            </div>
-          ))}
-          {vehicles.length === 0 && <p className="text-sm text-ink-500">No vehicles on file.</p>}
-        </div>
-      </section>
+      <VehicleList customerId={customer.id} vehicles={vehicles} />
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold text-white">Appointments ({appointments.length})</h2>
