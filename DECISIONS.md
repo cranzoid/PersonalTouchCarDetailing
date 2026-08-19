@@ -297,10 +297,13 @@ rather than resolved in code.
   this safe for anything caught mid-payment by the release: those rows have
   `quoted_payment_method` NULL and a payment against them, so they simply carry
   on under the rate they were issued at.
-- **The customer's copy shows the cash price.** The invoice goes out with tax on
-  it, so the portal names the other figure — *"Paying in cash or by Interac
-  e-transfer? $175.00"* — rather than quietly asking for more than the counter
-  will charge.
+- **The customer's copy does NOT show the cash price**, and briefly did, which
+  was wrong. A cash sale is invoiced for the shop's records and **never sent**;
+  every invoice that reaches a customer is therefore one being settled by card,
+  cheque or online. Telling that customer they could have had 13% off is an odd
+  thing for a bill to say, and it would invite a renegotiation at the moment of
+  payment. The two prices belong on the public service pages, where quoting
+  happens. The invoice is the bill for the method already agreed.
 - **This deliberately breaks the appointment↔invoice reconciliation of #14.** An
   appointment snapshots a tax-added total at booking, and a cash job now invoices
   for less than the appointment quoted. That is the price of the rule, not a
