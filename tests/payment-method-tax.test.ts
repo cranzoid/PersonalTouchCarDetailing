@@ -226,37 +226,28 @@ describe("duplicatePhoneNumbers", () => {
 });
 
 describe("buildAttentionQueue", () => {
-  const money = (cents: number) => formatCents(cents);
-
-  it("puts uninvoiced cars above unexplained discounts — that is money not yet asked for", () => {
+  it("lists cars handed back but never invoiced — money not yet asked for", () => {
     const queue = buildAttentionQueue({
-      discountedInvoices: [{ id: "inv_1", number: 1042, discountCents: 2500, customerName: "Dana Q" }],
       uninvoicedJobs: [{ id: "job_1", vehicleLabel: "2021 Toyota Highlander", readySinceLabel: "Aug 14" }],
-      formatMoney: money,
     });
-    expect(queue.total).toBe(2);
+    expect(queue.total).toBe(1);
     expect(queue.items[0]!.kind).toBe("uninvoiced_job");
-    expect(queue.items[1]!.label).toContain("$25.00 off with no reason");
-    expect(queue.items[1]!.href).toBe("/admin/invoices/inv_1");
+    expect(queue.items[0]!.label).toContain("never invoiced");
+    expect(queue.items[0]!.href).toBe("/admin/jobs/job_1");
   });
 
   it("is empty when the shop is tidy, so the card does not render at all", () => {
-    const queue = buildAttentionQueue({ discountedInvoices: [], uninvoicedJobs: [], formatMoney: money });
+    const queue = buildAttentionQueue({ uninvoicedJobs: [] });
     expect(queue.total).toBe(0);
     expect(queue.items).toEqual([]);
   });
 
-  it("counts each rule separately", () => {
-    const queue = buildAttentionQueue({
-      discountedInvoices: [
-        { id: "a", number: 1, discountCents: 100, customerName: "A" },
-        { id: "b", number: 2, discountCents: 200, customerName: "B" },
-      ],
-      uninvoicedJobs: [{ id: "j", vehicleLabel: "Van", readySinceLabel: "Aug 1" }],
-      formatMoney: money,
-    });
-    expect(queue.discountWithoutReason).toBe(2);
-    expect(queue.uninvoicedJobs).toBe(1);
-    expect(queue.total).toBe(3);
+  it("never flags a discount, however large and however unexplained", () => {
+    // Built, shipped and withdrawn the same day: the owner does not record why
+    // a discount was given, so the rule flagged every discounted invoice in the
+    // shop and the card opened with ten rows nobody could act on.
+    const queue = buildAttentionQueue({ uninvoicedJobs: [] });
+    expect(queue.items.some((item) => item.label.includes("reason"))).toBe(false);
+    expect(Object.keys(queue)).toEqual(["items", "uninvoicedJobs", "total"]);
   });
 });

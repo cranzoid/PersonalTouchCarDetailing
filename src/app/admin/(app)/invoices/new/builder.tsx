@@ -546,9 +546,7 @@ export function NewInvoiceBuilder({
 
           {totals.discountCents > 0 && (
             <label className="mt-4 block">
-              <span className={labelClass}>
-                Why the discount? (required — shown on the invoice and in Reports)
-              </span>
+              <span className={labelClass}>Why the discount? (optional — shown on the invoice)</span>
               <input
                 className={inputClass}
                 value={discountReason}

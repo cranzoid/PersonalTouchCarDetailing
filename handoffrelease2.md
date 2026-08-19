@@ -490,12 +490,37 @@ NULL` — the cash and Interac sales, and nothing else.
   so they cannot drift.
 - `src/lib/phone.ts` — `normalizePhone`, `formatPhone`, `duplicatePhoneNumbers`.
 - `src/lib/attention.ts` + `src/app/admin/(app)/attention-card.tsx` — the
-  needs-attention queue, bounded to 90 days.
+  needs-attention queue, bounded to 90 days. **One rule, not two:** spec §5's
+  "discount with no reason" was built, shipped and withdrawn the same day (see
+  §7.0.3).
 - `withTaxCents` / `dualPriceLabel` in `src/lib/money.ts`; both prices on the
   service pages, the booking wizard and the invoice builder.
 - The spec §4.5 footnote on the tax report.
 - `tests/payment-method-tax.test.ts` (29) and
   `tests/payment-method-invoicing.test.ts` (19).
+
+### 7.0.3 Withdrawn hours after the swap: the required discount reason
+
+Spec §7.5 asked for a `discount_reason` "required when a discount > 0", and an
+attention rule for discounts lacking one. Both shipped; the owner rejected them
+on sight — **the shop does not record why it discounts**. Withdrawn in a
+follow-up release the same day.
+
+Two lessons worth carrying, because the second was my error:
+
+1. **A required field is a tax on the till.** Making an invoice un-raisable until
+   someone types a justification does not produce data, it produces the word
+   "discount" typed forty times.
+2. **The 90-day bound did not do what I claimed it did.** The code comment said
+   it stopped the card filling with pre-Release-3 invoices. It does not — it
+   excludes rows *older* than 90 days, so every discounted invoice from the
+   previous quarter qualified. The owner's home screen opened with ten rows that
+   could never be cleared, because the column did not exist when those invoices
+   were raised. Before bounding a queue by age, check what the bound actually
+   excludes.
+
+The column and the optional field remain. `DECISIONS.md` §18 carries the full
+reasoning.
 
 ### 7.0.2 The plan as written, for reference
 

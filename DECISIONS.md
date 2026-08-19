@@ -299,12 +299,33 @@ rather than resolved in code.
   manual exemption is a different reason, and leaving the old method there would
   go on blocking payments under a rule that no longer applies.
 
-**Also in this release, and much smaller:** a `discount_reason` the staff
-builders require whenever a discount is actually applied (checked against the
-resolved amount, so a 0% discount needs no story), and a "needs attention" card
-on Home listing discounts with no reason and cars handed back but never
-invoiced. Both are soft rules — the card links to the record and empties as the
-work is done, and nothing is ever auto-corrected.
+**Also in this release, and much smaller:** an optional `discount_reason` shown
+on the invoice when staff fill it in, and a "needs attention" card on Home
+listing cars handed back but never invoiced. The card links to the record and
+empties as the work is done, and nothing is ever auto-corrected.
+
+**The discount reason was required for about an hour, and that was wrong.** Spec
+§5 asked for it and the handoff repeated it, so it shipped as a blocking field
+plus an attention rule for discounts that lacked one. The owner's answer on
+seeing it was immediate: *we don't need a reason for a discount.* Two things
+were wrong with it.
+
+- **It blocked the counter on a fact nobody records.** The shop discounts for
+  reasons that live in the conversation, not the ledger. Making an invoice
+  un-raisable until someone types a story is a tax on the till, and staff under
+  pressure would have typed "discount".
+- **The attention rule could not be emptied.** It was bounded to 90 days, and I
+  wrote in the code that this stopped it filling with pre-Release-3 invoices.
+  That reasoning was simply wrong: the bound excludes rows *older* than 90 days,
+  so every discounted invoice from the previous quarter qualified — ten of them,
+  none of which could ever have carried a reason, because the column did not
+  exist when they were raised. **A queue that cannot be emptied teaches people to
+  ignore the queue**, which costs more than the rule was ever worth. The
+  uninvoiced-car rule is kept because it *can* be cleared, by invoicing the car.
+
+The column stays — it is written when someone chooses to fill it in, the
+job-derived paths still record the promo that produced the discount, and
+`summarizeDiscounts` already reports the totals for anyone who wants to look.
 
 **Phone normalization is staff-side only.** `customers.phone_normalized` is bare
 digits with a leading North American `1` dropped, written on every customer

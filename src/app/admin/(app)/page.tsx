@@ -84,12 +84,10 @@ export default async function AdminDashboard() {
   const books = canSeeMoney ? await getBooksSnapshot("month", y, m) : null;
   const billsToConfirm = canManageExpenses ? await listUnconfirmedBills(now) : [];
   // Bounded to the last 90 days so the card is about work in flight, not an
-  // archive — and so it does not open on the swap full of pre-Release-3
-  // invoices whose discount reason is NULL only because the column is new.
+  // archive.
   const attention = canManageInvoices
     ? await getAttentionQueue({
         since: new Date(now.getTime() - 90 * 86_400_000),
-        formatMoney: (cents) => formatCents(cents, settings.currency),
         formatDate: (date) => formatInZone(date, tz, { month: "short", day: "numeric" }),
       })
     : null;
