@@ -441,10 +441,63 @@ arithmetic.
 
 ---
 
-## 7. Release 3 — Payment-method tax and hygiene (NOT STARTED)
+## 7. Release 3 — SHIPPED and LIVE (2026-08-19)
 
-Independent of Release 2. **This is the only release that touches live financial
-write paths.** Treat it with more care than the other two.
+PR #14, squashed to `56b39bd`. Deployed via stage → verify → swap; restore point
+`2026-08-19T00:16:18Z`. This was the only release that touched live financial
+write paths.
+
+The additive-migration guarantee held again: with `0008` already applied to the
+production database, the **old** build kept serving normally — healthy, public
+pages 200 — with three columns it had never heard of on `invoices` and one on
+`customers`. After the swap production was verified healthy, the sitemap
+identical to the pre-deploy baseline apart from `<lastmod>`, and the six package
+prices unchanged and now shown both ways: **$200/$226, $175/$197.75,
+$150/$169.50, $70/$79.10, $50/$56.50, $30/$33.90**.
+
+**368 tests passing, 48 added.** `DECISIONS.md` §18 records the reasoning; what
+follows is what was built and the three places it departed from the plan below.
+
+### 7.0 Where the build departed from this plan, and why
+
+1. **The payment-method selector went on *three* creation paths, not two.**
+   `createConsolidatedInvoiceAction` was not in §7.3's list. Without it a fleet
+   account could only ever be billed tax-added, and the §7.3 payment block would
+   then have made those invoices unpayable by any account settling in cash or by
+   e-transfer.
+2. **The payment block is gated on `quoted_payment_method` being set.** Applying
+   it to every invoice would have meant the shop could take no cash on anything
+   already open at the moment of the swap — every pre-Release-3 invoice defaults
+   to `tax_treatment = 'added'` with no quoted method. Legacy invoices behave
+   exactly as they did; there is a test pinning it.
+3. **Online card checkout is refused on an untaxed invoice**, in
+   `claimInvoiceCheckout` inside the row lock, not just by hiding the button.
+   Card is a taxable method, so paying a cash-priced invoice online would settle
+   a tax document describing a different sale. Not in the plan; the same hole.
+
+Also worth knowing: a staff exemption (out-of-province, exempt organisation)
+**outranks** the payment-method rule and clears `quoted_payment_method`, so the
+restatement query is `tax_treatment = 'none' AND quoted_payment_method IS NOT
+NULL` — the cash and Interac sales, and nothing else.
+
+### 7.0.1 What was built
+
+- `PAYMENT_METHOD_TAXABLE`, `QUOTED_PAYMENT_METHODS` and `TAX_TREATMENTS` in
+  `src/lib/types.ts`.
+- `resolveInvoiceTax`, `paymentMethodConflict`, `isPaymentMethodTaxable`,
+  `taxTreatmentForMethod`, `noTaxReasonForMethod` in `src/lib/invoices.ts` —
+  all pure, all unit-tested. The three creation paths share `resolveInvoiceTax`
+  so they cannot drift.
+- `src/lib/phone.ts` — `normalizePhone`, `formatPhone`, `duplicatePhoneNumbers`.
+- `src/lib/attention.ts` + `src/app/admin/(app)/attention-card.tsx` — the
+  needs-attention queue, bounded to 90 days.
+- `withTaxCents` / `dualPriceLabel` in `src/lib/money.ts`; both prices on the
+  service pages, the booking wizard and the invoice builder.
+- The spec §4.5 footnote on the tax report.
+- `tests/payment-method-tax.test.ts` (29) and
+  `tests/payment-method-invoicing.test.ts` (19).
+
+### 7.0.2 The plan as written, for reference
 
 ### 7.1 The pricing rule (spec §2)
 
@@ -693,12 +746,24 @@ a job · print a receipt · where this month's profit is · logging hours), and 
 
 ## 12. Start here
 
-1. Read `DECISIONS.md` §15–§17, then `src/lib/books.ts` and `src/lib/payroll.ts`
-   with their tests — they are the template for Release 3's shape.
-2. Chase the owner on §8.2 (pay types and rates). Release 2 is live but records
-   nothing until those are entered, and hours logged against a $0.00 rate freeze
-   at $0.00 and have to be re-entered.
-3. Build Release 3 per §7, keeping migration `0008` additive-only (§3.1), and
-   remember it is the only release that touches live financial write paths.
-4. Release per §10, verifying production on the migrated database *before* the
-   swap.
+**All three releases are live. There is no Release 4 planned.** What is left is
+not code:
+
+1. **Chase the owner on §8.1 and §8.2** — the six recurring bills are still
+   seeded INACTIVE with sample amounts, and every staff member is still hourly at
+   $0.00. Until those are entered the books and payroll stay empty *and correct*,
+   by design. Hours logged against a $0.00 rate freeze at $0.00 and have to be
+   re-entered, so §8.2 is the more urgent of the two.
+2. **Run the rollout in §11** — two weeks parallel, reconcile a month, then the
+   20-jobs/10-expenses acceptance test. Expect exactly the two divergences listed
+   there, and confirm each is the CRM being right.
+3. **Get the accountant's ruling on the cash/Interac treatment** (§4 and
+   `DECISIONS.md` §18). If they disagree with the owner, the restatement is
+   `SELECT … WHERE tax_treatment = 'none' AND quoted_payment_method IS NOT NULL`
+   — which is exactly why those two columns exist.
+4. Customer **deduplication** on `phone_normalized`, and any unique constraint,
+   remain a separate owner-reviewed exercise. The index shipped non-unique
+   because live data already contains duplicates.
+
+If you do write code, read `DECISIONS.md` §15–§18 and keep §3's additive-only
+migration rule — none of that has changed.
