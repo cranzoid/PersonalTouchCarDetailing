@@ -78,6 +78,17 @@ const nextConfig: NextConfig = {
         ],
       },
       {
+        // The unsubscribe token identifies one recipient of one campaign. Keep
+        // it out of search indexes and out of any Referer header the page's own
+        // requests would otherwise leak it into.
+        source: "/unsubscribe/:path*",
+        headers: [
+          { key: "X-Robots-Tag", value: "noindex, nofollow, noarchive" },
+          { key: "Referrer-Policy", value: "no-referrer" },
+          { key: "Cache-Control", value: "private, no-store" },
+        ],
+      },
+      {
         source: "/:path*",
         headers: [
           { key: "Content-Security-Policy", value: contentSecurityPolicy },

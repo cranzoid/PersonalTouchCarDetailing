@@ -395,3 +395,53 @@ possible with no package attached.
 
 **Revisit when:** the shop wants a deposit on coating work. That needs a deposit
 field on the custom line itself, since there is no catalog row to configure.
+
+## 20. Marketing outreach is a campaign engine, not a second messaging system
+Fleet prospecting (SMS and email) runs through the same `sendMessage` as every
+other message, so the consent gate in #8 covers it by construction. What is new
+is a campaign around it: `outreach_campaigns` holds the wording, and
+`outreach_recipients` holds the list with the destination and merge values
+**snapshotted at queue time** — editing a lead later must not change what we can
+show was sent.
+
+The decisions inside it that would not be obvious from the code alone:
+
+- **Contacts are leads, not customers.** A card collected at a depot is somebody
+  we might do business with, and the existing lead → customer conversion is
+  already the path for when they say yes. This is why #8's gate was widened to
+  accept a consented **lead**, which it previously rejected outright.
+- **Opt-outs are keyed on the destination, not the person.** A consent flag on a
+  lead cannot stop the next campaign when the same number comes back through the
+  booking form as a fresh record. `marketing_suppressions` is keyed on the
+  normalized destination, so an opt-out survives re-entry, duplicate records, and
+  conversion — and binds the *other* channel too. Both the send path and the
+  inbound webhook normalize through one function, because a mismatch there would
+  file an opt-out that never matches anything and looks like it worked.
+- **Never twice, across campaigns.** A unique index on
+  `(campaign_id, destination_normalized)` collapses the same number entered
+  twice; a send-time check against `sent` rows in *other* campaigns is what makes
+  "don't text the same person twice" hold account-wide. `allow_recontact` opts
+  out of the second check deliberately and is off by default.
+- **Claim, then send.** Rows are flipped to `claimed` in a short transaction with
+  `SKIP LOCKED`, and the provider calls happen outside it. Holding row locks
+  across ten HTTP calls would pin a production connection for seconds, and a
+  rollback *after* Twilio accepted a message would lose the record of a text
+  already on its way. A row stuck in `claimed` means a crash mid-batch and is
+  never retried automatically.
+- **Batches, with no "send all" button.** `MAX_BATCH_SIZE` is 25 and the default
+  is 5, so a mistake in the wording costs five messages you can read and stop.
+- **CASL is enforced by the system, not by the person typing.** The email
+  identity block and unsubscribe link are appended at send time rather than
+  trusted to the campaign body; SMS bodies are rejected without an opt-out
+  instruction. Sending is blocked outside 9am–8pm business-local.
+- **The unsubscribe link acts on POST only.** Mail scanners and link-preview
+  bots follow every URL in an email; a GET that unsubscribes would opt people out
+  who never clicked. The token is an HMAC over the recipient row id, so no
+  address appears in a URL and there is no expiry to get wrong.
+- **START lifts the block but does not restore consent.** "You may text me
+  again" is not "I consent to marketing"; a person has to re-record a basis.
+
+**Revisit when:** volume outgrows hand-driven batches. The next step is a queue
+worker over the same `pending` rows — the claim/send split already supports it —
+plus Twilio delivery-status callbacks, which would replace "accepted by the
+provider" with "delivered to the handset".

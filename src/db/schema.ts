@@ -216,6 +216,12 @@ export const leads = pgTable(
     message: text("message"),
     kind: text("kind").notNull().default("general"), // general | quote | booking | fleet | contact
     status: text("status").notNull().default("new"), // new | contacted | qualified | converted | lost
+    /**
+     * The business a fleet contact represents. Only ever set for leads we
+     * entered ourselves (a card collected at a shop or depot); public forms ask
+     * for a person, not a company. Feeds the {{Company}} outreach placeholder.
+     */
+    companyName: text("company_name"),
     attribution: jsonb("attribution").$type<Attribution>(),
     convertedCustomerId: text("converted_customer_id").references(() => customers.id),
     assignedStaffId: text("assigned_staff_id").references(() => staffUsers.id),
@@ -224,10 +230,20 @@ export const leads = pgTable(
     marketingConsentAt: timestamp("marketing_consent_at", { withTimezone: true }),
     marketingConsentSource: text("marketing_consent_source"),
     anonymizedAt: timestamp("anonymized_at", { withTimezone: true }),
+    /**
+     * Same convention and same normalizer as `customers.phone_normalized`
+     * (src/lib/phone.ts). Exists so an inbound SMS — which arrives as E.164 and
+     * carries no id — can be matched back to the lead it answers. Non-unique
+     * for the same reason it is non-unique on customers.
+     */
+    phoneNormalized: text("phone_normalized"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("leads_status_idx").on(t.status)],
+  (t) => [
+    index("leads_status_idx").on(t.status),
+    index("leads_phone_normalized_idx").on(t.phoneNormalized),
+  ],
 );
 
 /* ------------------------------------------------------------------ */
@@ -854,12 +870,13 @@ export const communications = pgTable(
     direction: text("direction").notNull().default("outbound"), // outbound | inbound | internal
     channel: text("channel").notNull(), // email | sms | phone | internal
     kind: text("kind").notNull(), // confirmation | reminder | estimate | approval_request | deposit_reminder |
-    // delay | ready | invoice | receipt | review_request | maintenance | marketing | manual | note | lead_ack
+    // delay | ready | invoice | receipt | review_request | maintenance | marketing | manual | note | lead_ack |
+    // reply | opt_stop | opt_start (inbound, written by the Twilio webhook)
     subject: text("subject"),
     body: text("body").notNull(),
     relatedEntityType: text("related_entity_type"),
     relatedEntityId: text("related_entity_id"),
-    status: text("status").notNull().default("logged"), // queued | sent | failed | logged
+    status: text("status").notNull().default("logged"), // queued | sent | failed | logged | received
     providerRef: text("provider_ref"),
     createdByStaffId: text("created_by_staff_id").references(() => staffUsers.id),
     createdAt: createdAt(),
@@ -1062,5 +1079,108 @@ export const timesheets = pgTable(
      * double submission upserts rather than double-counting a day's pay.
      */
     uniqueIndex("timesheets_staff_day_uq").on(t.staffUserId, t.workDate),
+  ],
+);
+
+/* ------------------------------------------------------------------ */
+/* Marketing outreach                                                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Permanent do-not-contact list, keyed by destination rather than by person.
+ *
+ * A consent flag on a customer or lead is not enough: the same phone number
+ * arrives again as a fresh lead through the booking form, and a row keyed to
+ * the old lead would not stop the next campaign. Keying on the normalized
+ * destination means an opt-out survives re-entry, duplicate records, and a
+ * lead being converted into a customer.
+ *
+ * Twilio already blocks a number that replied STOP on its own side. This table
+ * is what makes that opt-out visible to us and binding on the OTHER channel and
+ * on every future campaign.
+ */
+export const marketingSuppressions = pgTable(
+  "marketing_suppressions",
+  {
+    id: id(),
+    channel: text("channel").notNull(), // email | sms
+    /** Normalized: bare digits for sms, lowercased/trimmed for email. */
+    destination: text("destination").notNull(),
+    reason: text("reason").notNull(), // stop_reply | unsubscribe_link | manual | complaint
+    /** Free-text provenance, e.g. the inbound keyword or the staff member. */
+    source: text("source"),
+    note: text("note"),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("marketing_suppressions_channel_dest_uq").on(t.channel, t.destination)],
+);
+
+/**
+ * One outbound marketing push: a channel, a message body with {{placeholders}},
+ * and the list of people it goes to. Deliberately separate from
+ * `message_templates`, which holds the transactional templates the automations
+ * send on their own — a campaign is a one-off the owner writes, reviews and
+ * releases in batches.
+ */
+export const outreachCampaigns = pgTable("outreach_campaigns", {
+  id: id(),
+  name: text("name").notNull(),
+  channel: text("channel").notNull(), // email | sms
+  subject: text("subject"), // email only
+  body: text("body").notNull(),
+  status: text("status").notNull().default("draft"), // draft | sending | paused | completed | cancelled
+  /**
+   * Off by default, and the reason a second campaign cannot quietly re-text
+   * everyone in the first. Turning it on is a deliberate act by the owner.
+   */
+  allowRecontact: boolean("allow_recontact").notNull().default(false),
+  createdByStaffId: text("created_by_staff_id").references(() => staffUsers.id),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/**
+ * A single person on a campaign, with the destination and merge values
+ * SNAPSHOTTED at queue time. Editing the lead afterwards must not retroactively
+ * change what we can prove we sent, and the rendered body is stored on the row
+ * once it goes out for the same reason.
+ */
+export const outreachRecipients = pgTable(
+  "outreach_recipients",
+  {
+    id: id(),
+    campaignId: text("campaign_id")
+      .notNull()
+      .references(() => outreachCampaigns.id),
+    leadId: text("lead_id").references(() => leads.id),
+    customerId: text("customer_id").references(() => customers.id),
+    destination: text("destination").notNull(),
+    destinationNormalized: text("destination_normalized").notNull(),
+    firstName: text("first_name").notNull().default(""),
+    companyName: text("company_name").notNull().default(""),
+    status: text("status").notNull().default("pending"), // pending | claimed | sent | failed | skipped
+    /** Why a row was skipped or failed, shown verbatim in the admin list. */
+    skipReason: text("skip_reason"),
+    renderedBody: text("rendered_body"),
+    communicationId: text("communication_id").references(() => communications.id),
+    /**
+     * Set in a short transaction before the provider call, so two staff hitting
+     * "send next 10" at once cannot claim the same rows. A row stuck in
+     * `claimed` means the send crashed mid-flight and needs a human look — it
+     * is never silently retried.
+     */
+    claimedAt: timestamp("claimed_at", { withTimezone: true }),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("outreach_recipients_campaign_idx").on(t.campaignId),
+    /**
+     * The same number typed twice — as two cards, or as a lead and a customer —
+     * is one recipient. This is the guarantee behind "never text anyone twice".
+     */
+    uniqueIndex("outreach_recipients_campaign_dest_uq").on(t.campaignId, t.destinationNormalized),
+    index("outreach_recipients_dest_idx").on(t.destinationNormalized),
   ],
 );

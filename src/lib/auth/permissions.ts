@@ -10,6 +10,12 @@ export const PERMISSIONS = {
   /** Provider API credentials — owner only, matching manage_staff. */
   manage_integrations: ["owner"],
   manage_settings: ["owner", "manager"],
+  /**
+   * Outbound marketing campaigns. Narrower than manage_customers on purpose:
+   * this is the one screen that can text or email fifty people at once, at the
+   * shop's cost and under the shop's name, and reception does not need it.
+   */
+  manage_marketing: ["owner", "manager"],
   manage_services: ["owner", "manager"],
   manage_bookings: ["owner", "manager", "reception"],
   manage_customers: ["owner", "manager", "reception"],

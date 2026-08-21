@@ -45,7 +45,10 @@ export type IdPrefix =
   | "exc" // expense category
   | "exp" // expense
   | "rbl" // recurring bill
-  | "tsh"; // timesheet day
+  | "tsh" // timesheet day
+  | "sup" // marketing suppression (do-not-contact)
+  | "ocm" // outreach campaign
+  | "orc"; // outreach recipient
 
 export function newId(prefix: IdPrefix): string {
   return `${prefix}_${randomId()}`;

@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "@/lib/id";
 import { getIntegrationSecret } from "@/lib/integrations";
+import { isSuppressed, type MarketingChannel } from "@/lib/marketing/suppressions";
 
 export type OutboundMessage = {
   customerId?: string;
@@ -92,6 +93,48 @@ export function resolveTemplateDestination(
 const MARKETING_KINDS = new Set(["marketing", "review_request", "maintenance"]);
 
 /**
+ * Why a marketing-class message must not go out, or null if it may.
+ *
+ * Two independent gates, both of which have to pass:
+ *  - CONSENT, recorded on whichever party the message is addressed to. A lead
+ *    counts: a fleet contact who handed over a card at their shop is a real
+ *    consent basis (recorded on the lead), and they are deliberately not a
+ *    customer until they buy something.
+ *  - SUPPRESSION, keyed on the destination itself. This one outlives the record
+ *    — converting a lead to a customer, or re-entering the same number as a new
+ *    lead, must never resurrect a number that replied STOP.
+ */
+async function marketingDenial(msg: OutboundMessage): Promise<string | null> {
+  if (!msg.customerId && !msg.leadId) {
+    throw new Error(
+      `Marketing-class message "${msg.kind}" requires a customer or lead with recorded consent`,
+    );
+  }
+
+  const consented = msg.customerId
+    ? (
+        await db()
+          .select({ marketingConsent: schema.customers.marketingConsent })
+          .from(schema.customers)
+          .where(eq(schema.customers.id, msg.customerId))
+          .limit(1)
+      )[0]?.marketingConsent
+    : (
+        await db()
+          .select({ marketingConsent: schema.leads.marketingConsent })
+          .from(schema.leads)
+          .where(eq(schema.leads.id, msg.leadId!))
+          .limit(1)
+      )[0]?.marketingConsent;
+  if (!consented) return "no marketing consent";
+
+  if (msg.channel === "email" || msg.channel === "sms") {
+    if (await isSuppressed(msg.channel as MarketingChannel, msg.to)) return "opted out";
+  }
+  return null;
+}
+
+/**
  * Sends (or in dev, logs) an outbound message and records it in the unified
  * communications history. Marketing-consent enforcement lives HERE so no
  * caller can accidentally bypass it. Operational messages (confirmations,
@@ -100,23 +143,17 @@ const MARKETING_KINDS = new Set(["marketing", "review_request", "maintenance"]);
  */
 export async function sendMessage(msg: OutboundMessage): Promise<MessageResult> {
   if (MARKETING_KINDS.has(msg.kind)) {
-    if (!msg.customerId) {
-      throw new Error(`Marketing-class message "${msg.kind}" requires a customer with recorded consent`);
-    }
-    const customer = await db()
-      .select({ marketingConsent: schema.customers.marketingConsent })
-      .from(schema.customers)
-      .where(eq(schema.customers.id, msg.customerId))
-      .limit(1);
-    if (!customer[0]?.marketingConsent) {
+    const denial = await marketingDenial(msg);
+    if (denial) {
       const id = newId("com");
       await db().insert(schema.communications).values({
         id,
         customerId: msg.customerId,
+        leadId: msg.leadId,
         channel: msg.channel,
         kind: msg.kind,
         subject: msg.subject,
-        body: `[SUPPRESSED — no marketing consent] ${msg.body.slice(0, 200)}`,
+        body: `[SUPPRESSED — ${denial}] ${msg.body.slice(0, 200)}`,
         relatedEntityType: msg.relatedEntityType,
         relatedEntityId: msg.relatedEntityId,
         status: "failed",
