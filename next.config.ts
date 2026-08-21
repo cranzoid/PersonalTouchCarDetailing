@@ -9,13 +9,14 @@ const META_PIXEL_CONNECT_SRC = "https://www.facebook.com https://connect.faceboo
 const META_PIXEL_IMG_SRC = "https://www.facebook.com";
 
 // The Google tag (gtag.js) loads its script from googletagmanager.com and
-// beacons config/conversion pings to googletagmanager.com, google.com, and
-// the doubleclick conversion-linker domain. Nothing else in the CSP changes
-// for it.
+// sends Analytics and Ads measurement requests to Google's documented tag
+// endpoints. Keep these sources aligned with Google's CSP guidance.
 const GOOGLE_TAG_SCRIPT_SRC = "https://www.googletagmanager.com";
 const GOOGLE_TAG_CONNECT_SRC =
-  "https://www.googletagmanager.com https://www.google.com https://googleads.g.doubleclick.net";
-const GOOGLE_TAG_IMG_SRC = "https://www.googletagmanager.com https://www.google.com";
+  "https://www.googletagmanager.com https://*.google-analytics.com https://*.analytics.google.com https://www.google.com https://*.g.doubleclick.net https://pagead2.googlesyndication.com";
+const GOOGLE_TAG_IMG_SRC =
+  "https://www.googletagmanager.com https://*.google-analytics.com https://www.google.com https://*.g.doubleclick.net";
+const GOOGLE_TAG_FRAME_SRC = "https://www.googletagmanager.com";
 
 const scriptPolicy = process.env.NODE_ENV === "production"
   ? `script-src 'self' 'unsafe-inline' ${META_PIXEL_SCRIPT_SRC} ${GOOGLE_TAG_SCRIPT_SRC}`
@@ -28,6 +29,7 @@ const contentSecurityPolicy = [
   "font-src 'self' data:",
   `connect-src 'self' ${META_PIXEL_CONNECT_SRC} ${GOOGLE_TAG_CONNECT_SRC}`,
   "media-src 'self'",
+  `frame-src 'self' ${GOOGLE_TAG_FRAME_SRC}`,
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",

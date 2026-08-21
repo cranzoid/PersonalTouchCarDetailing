@@ -69,9 +69,9 @@ variable "monthly_budget_inr" {
 }
 
 variable "ga4_measurement_id" {
-  description = "GA4 web-stream measurement ID. Leave empty until the property exists."
+  description = "Production GA4 web-stream measurement ID. The staging slot intentionally omits it."
   type        = string
-  default     = ""
+  default     = "G-JGYHFZP519"
 
   validation {
     condition     = var.ga4_measurement_id == "" || can(regex("^G-[A-Z0-9]+$", var.ga4_measurement_id))

@@ -6,7 +6,7 @@ The application release handles crawlability, canonical URLs, structured data, s
 
 - Point both `personaltouchcardetailing.ca` and `www.personaltouchcardetailing.ca` at the production App Service and keep the certificate valid for both hosts.
 - Apply Terraform so production receives `APP_BASE_URL=https://www.personaltouchcardetailing.ca`, `PUBLIC_SITE_URL=https://www.personaltouchcardetailing.ca` and `SEO_INDEXABLE=true`. Staging must retain its slot URL and `SEO_INDEXABLE=false`.
-- Create the GA4 property and web stream, set `ga4_measurement_id` to the resulting `G-...` value, apply Terraform and deploy.
+- Keep production on GA4 web stream `G-JGYHFZP519`; staging intentionally omits `GA4_MEASUREMENT_ID` so test traffic cannot pollute reports.
 - Run the database migration before the new code serves traffic. Migration `0011_even_psynapse.sql` adds the case-study tables.
 - After the production swap, the release workflow verifies that the homepage, robots and sitemap contain no localhost or Azure hostname and that robots advertises the canonical sitemap.
 

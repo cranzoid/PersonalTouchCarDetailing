@@ -265,7 +265,6 @@ locals {
     AZURE_STORAGE_CONTAINER_NAME               = azurerm_storage_container.private_files.name
     APPLICATIONINSIGHTS_CONNECTION_STRING      = azurerm_application_insights.main.connection_string
     PUBLIC_SITE_URL                            = "https://www.personaltouchcardetailing.ca"
-    GA4_MEASUREMENT_ID                         = var.ga4_measurement_id
     ApplicationInsightsAgent_EXTENSION_VERSION = "~3"
     SCM_DO_BUILD_DURING_DEPLOYMENT             = "false"
     ENABLE_ORYX_BUILD                          = "false"
@@ -313,12 +312,13 @@ resource "azurerm_linux_web_app" "main" {
   }
 
   app_settings = merge(local.web_app_common_settings, {
-    APP_BASE_URL  = "https://www.personaltouchcardetailing.ca"
-    SEO_INDEXABLE = "true"
+    APP_BASE_URL       = "https://www.personaltouchcardetailing.ca"
+    GA4_MEASUREMENT_ID = var.ga4_measurement_id
+    SEO_INDEXABLE      = "true"
   })
 
   sticky_settings {
-    app_setting_names = ["APP_BASE_URL", "SEO_INDEXABLE"]
+    app_setting_names = ["APP_BASE_URL", "GA4_MEASUREMENT_ID", "SEO_INDEXABLE"]
   }
 }
 
