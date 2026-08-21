@@ -67,3 +67,14 @@ variable "monthly_budget_inr" {
   type        = number
   default     = 8000
 }
+
+variable "ga4_measurement_id" {
+  description = "GA4 web-stream measurement ID. Leave empty until the property exists."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.ga4_measurement_id == "" || can(regex("^G-[A-Z0-9]+$", var.ga4_measurement_id))
+    error_message = "ga4_measurement_id must be empty or start with G-."
+  }
+}

@@ -40,6 +40,7 @@ export function trackBookAppointmentConversion() {
       value: 1.0,
       currency: "CAD",
     });
+    window.gtag("event", "booking_completed", { value: 1.0, currency: "CAD" });
   } catch {
     // analytics is best-effort; never surface to the customer
   }
@@ -53,25 +54,41 @@ export function trackRequestQuoteConversion() {
   try {
     if (typeof window === "undefined" || typeof window.gtag !== "function") return;
     window.gtag("event", "conversion", { send_to: REQUEST_QUOTE_CONVERSION_SEND_TO });
+    window.gtag("event", "quote_submitted");
   } catch {
     // analytics is best-effort; never surface to the customer
   }
 }
 
+export function trackGa4Event(name: string, params?: Record<string, string | number | boolean>) {
+  try {
+    if (typeof window === "undefined" || typeof window.gtag !== "function") return;
+    window.gtag("event", name, params ?? {});
+  } catch {
+    // Measurement must never interrupt a customer action.
+  }
+}
+
 // The official base snippet. Config runs once on load; the effect below
 // covers client-side route changes, which gtag does not see on its own.
-const INIT_SNIPPET = `window.dataLayer = window.dataLayer || [];
+function initSnippet(ga4MeasurementId?: string) {
+  const validGa4Id = ga4MeasurementId && /^G-[A-Z0-9]+$/.test(ga4MeasurementId)
+    ? ga4MeasurementId
+    : null;
+  return `window.dataLayer = window.dataLayer || [];
 function gtag(){dataLayer.push(arguments);}
 window.gtag = gtag;
 gtag('js', new Date());
-gtag('config', '${GOOGLE_ADS_ID}');`;
+gtag('config', '${GOOGLE_ADS_ID}');${validGa4Id ? `
+gtag('config', '${validGa4Id}');` : ""}`;
+}
 
 /**
  * Loads the Google tag once for the whole public site and sends a page_view
  * on client-side route changes, so soft navigation between marketing pages
  * is tracked without double-counting the initial load.
  */
-export function GoogleTag() {
+export function GoogleTag({ ga4MeasurementId }: { ga4MeasurementId?: string }) {
   const pathname = usePathname();
   const lastTracked = useRef<string | null>(null);
   const excluded = isExcluded(pathname);
@@ -100,7 +117,7 @@ export function GoogleTag() {
         strategy="afterInteractive"
       />
       <Script id="google-tag-init" strategy="afterInteractive">
-        {INIT_SNIPPET}
+        {initSnippet(ga4MeasurementId)}
       </Script>
     </>
   );

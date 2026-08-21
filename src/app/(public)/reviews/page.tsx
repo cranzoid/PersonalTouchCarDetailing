@@ -1,7 +1,8 @@
 import { Container, SectionHeading, ButtonLink } from "@/components/ui";
 import { getSettings } from "@/lib/settings";
+import { pageMetadata, SEO_PAGES } from "@/lib/seo";
 
-export const metadata = { title: "Reviews" };
+export const metadata = pageMetadata(SEO_PAGES.reviews);
 export const dynamic = "force-dynamic";
 
 /**
@@ -16,8 +17,9 @@ export default async function ReviewsPage() {
       <Container className="py-20 sm:py-28">
         <div className="grid gap-12 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
           <SectionHeading
+            as="h1"
             eyebrow="Customer feedback"
-            title="The work should speak for itself"
+            title={SEO_PAGES.reviews.h1}
             subtitle="We only publish feedback we can verify. Our review collection is growing as customers complete services under the new ownership."
           />
           <div className="rounded-[2rem] border border-accent-400/25 bg-accent-400/[0.06] p-7 sm:p-9">

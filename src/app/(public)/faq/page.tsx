@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { Container, SectionHeading } from "@/components/ui";
+import { StructuredData } from "@/components/structured-data";
+import { pageMetadata, SEO_PAGES } from "@/lib/seo";
 
-export const metadata = { title: "FAQ" };
+export const metadata = pageMetadata(SEO_PAGES.faq);
 
 const FAQS: [string, string][] = [
   [
@@ -41,9 +43,21 @@ const FAQS: [string, string][] = [
 export default function FaqPage() {
   return (
     <Container className="py-20 sm:py-28">
+      <StructuredData
+        data={{
+          "@context": "https://schema.org",
+          "@type": "FAQPage",
+          mainEntity: FAQS.map(([question, answer]) => ({
+            "@type": "Question",
+            name: question,
+            acceptedAnswer: { "@type": "Answer", text: answer },
+          })),
+        }}
+      />
       <SectionHeading
+        as="h1"
         eyebrow="Questions, answered"
-        title="Everything to know before your visit"
+        title={SEO_PAGES.faq.h1}
         subtitle="Clear answers about timing, pricing, approvals and how we care for your vehicle."
       />
       <div className="grid max-w-4xl gap-3">

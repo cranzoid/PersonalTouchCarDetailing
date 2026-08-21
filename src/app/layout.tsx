@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Instrument_Serif, Manrope } from "next/font/google";
+import { PUBLIC_SITE_URL, SEO_PAGES } from "@/lib/seo";
 import "./globals.css";
 
 const manrope = Manrope({
@@ -16,23 +17,26 @@ const instrumentSerif = Instrument_Serif({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.APP_BASE_URL ?? "http://localhost:3000"),
+  metadataBase: new URL(PUBLIC_SITE_URL),
   title: {
-    default: "Personal Touch Car Detailing | Hamilton, Ontario",
+    default: SEO_PAGES.home.title,
     template: "%s | Personal Touch Car Detailing",
   },
-  description:
-    "Professional car detailing, paint correction, ceramic coating, window tinting and vehicle styling in Hamilton, Ontario. Book online or request a quote.",
+  description: SEO_PAGES.home.description,
+  applicationName: "Personal Touch Car Detailing",
+  category: "automotive",
   openGraph: {
     type: "website",
     locale: "en_CA",
-    title: "Personal Touch Car Detailing | Hamilton, Ontario",
-    description:
-      "Professional detailing, paint correction, ceramic coating, window tinting and vehicle styling in Hamilton, Ontario.",
-    images: [{ url: "/og.png", width: 1200, height: 628, alt: "Personal Touch Car Detailing" }],
+    siteName: "Personal Touch Car Detailing",
+    title: SEO_PAGES.home.title,
+    description: SEO_PAGES.home.description,
+    images: [{ url: "/og.png", width: 1200, height: 628, alt: "Personal Touch Car Detailing in Hamilton, Ontario" }],
   },
   twitter: {
     card: "summary_large_image",
+    title: SEO_PAGES.home.title,
+    description: SEO_PAGES.home.description,
     images: ["/og.png"],
   },
 };

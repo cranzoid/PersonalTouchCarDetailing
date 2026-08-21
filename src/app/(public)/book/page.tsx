@@ -4,8 +4,9 @@ import { Container, SectionHeading } from "@/components/ui";
 import { getSettings } from "@/lib/settings";
 import { activePromotion } from "@/lib/promotions";
 import { BookingWizard, type WizardAddon, type WizardService } from "./wizard";
+import { pageMetadata, SEO_PAGES } from "@/lib/seo";
 
-export const metadata = { title: "Book an Appointment" };
+export const metadata = pageMetadata(SEO_PAGES.book);
 export const dynamic = "force-dynamic";
 
 export default async function BookPage({
@@ -69,8 +70,9 @@ export default async function BookPage({
   return (
     <Container className="py-12 sm:py-16">
       <SectionHeading
+        as="h1"
         eyebrow="Online booking"
-        title="Book an appointment"
+        title={SEO_PAGES.book.h1}
         subtitle="Choose a service, tell us about your vehicle, and reserve a convenient time. You’ll see a clear estimate before confirming. Condition-dependent work is quoted first."
       />
       <BookingWizard

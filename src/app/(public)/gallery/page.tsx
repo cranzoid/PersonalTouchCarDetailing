@@ -1,8 +1,9 @@
 import { desc, isNotNull } from "drizzle-orm";
 import { Container, SectionHeading, ButtonLink, Card } from "@/components/ui";
 import { db, schema } from "@/db";
+import { pageMetadata, SEO_PAGES, slugifySeoText } from "@/lib/seo";
 
-export const metadata = { title: "Gallery" };
+export const metadata = pageMetadata(SEO_PAGES.gallery);
 
 /**
  * Consent-gated gallery. The image route repeats the consent check, so a file
@@ -20,22 +21,33 @@ export default async function GalleryPage() {
   return (
     <Container className="py-20 sm:py-28">
       <SectionHeading
+        as="h1"
         eyebrow="Documented results"
-        title="Real vehicles. Published with permission."
+        title={SEO_PAGES.gallery.h1}
         subtitle="Our gallery is built from customer-approved job photos. Consent is separate from service, private by default, and can be withdrawn."
       />
       {photos.length > 0 ? (
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {photos.map((photo) => (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              key={photo.id}
-              src={`/api/gallery/${photo.id}`}
-              alt={`Customer-approved detailing result — ${photo.kind.replaceAll("_", " ")}`}
-              loading="lazy"
-              className="aspect-[4/3] w-full rounded-2xl border border-white/10 bg-ink-900 object-cover shadow-[0_18px_48px_rgba(0,0,0,0.18)]"
-            />
-          ))}
+          {photos.map((photo) => {
+            const label = photo.kind.replaceAll("_", " ");
+            const extension = photo.contentType === "image/png" ? "png" : photo.contentType === "image/webp" ? "webp" : "jpg";
+            const filename = `${slugifySeoText(`hamilton-car-detailing-${label}`)}-${photo.id}.${extension}`;
+            return (
+              <figure key={photo.id}>
+                {/* Consent is rechecked by the public media route on every request. */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={`/media/results/${photo.id}/${filename}`}
+                  alt={`Customer-approved ${label} photo from a car detailing job in Hamilton`}
+                  loading="lazy"
+                  width={1200}
+                  height={900}
+                  className="aspect-[4/3] w-full rounded-2xl border border-white/10 bg-ink-900 object-cover shadow-[0_18px_48px_rgba(0,0,0,0.18)]"
+                />
+                <figcaption className="mt-2 text-xs capitalize text-ink-500">Customer-approved {label} photo</figcaption>
+              </figure>
+            );
+          })}
         </div>
       ) : (
         <Card className="max-w-3xl border-accent-400/25 bg-accent-400/[0.05] p-8 sm:p-10">

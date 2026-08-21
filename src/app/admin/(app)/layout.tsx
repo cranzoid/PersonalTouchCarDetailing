@@ -42,6 +42,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
     items: [
       { href: "/admin/communications", label: "Messages", permission: "manage_settings", icon: "messages" },
       { href: "/admin/marketing", label: "Outreach", permission: "manage_marketing", icon: "messages" },
+      { href: "/admin/results", label: "Case studies", permission: "manage_marketing", icon: "services" },
       { href: "/admin/services", label: "Services", permission: "manage_services", icon: "services" },
       { href: "/admin/staff", label: "Staff", permission: "manage_staff", icon: "staff" },
       { href: "/admin/settings", label: "Settings", permission: "manage_settings", icon: "settings" },

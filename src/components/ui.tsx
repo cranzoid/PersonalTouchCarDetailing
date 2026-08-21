@@ -40,14 +40,17 @@ export function SectionHeading({
   subtitle,
   tone = "dark",
   align = "left",
+  as = "h2",
 }: {
   eyebrow?: string;
   title: string;
   subtitle?: string;
   tone?: "dark" | "light";
   align?: "left" | "center";
+  as?: "h1" | "h2";
 }) {
   const centered = align === "center";
+  const Heading = as;
   return (
     <div className={`mb-12 max-w-3xl ${centered ? "mx-auto text-center" : ""}`}>
       {eyebrow && (
@@ -55,13 +58,13 @@ export function SectionHeading({
           {eyebrow}
         </p>
       )}
-      <h2
+      <Heading
         className={`font-display text-4xl leading-[1.05] tracking-[-0.025em] sm:text-5xl ${
           tone === "light" ? "text-[#1C2026]" : "text-white"
         }`}
       >
         {title}
-      </h2>
+      </Heading>
       {subtitle && (
         <p className={`mt-5 max-w-2xl text-base leading-7 ${centered ? "mx-auto" : ""} ${tone === "light" ? "text-slate-600" : "text-ink-300"}`}>
           {subtitle}

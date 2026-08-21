@@ -1,16 +1,21 @@
 import type { MetadataRoute } from "next";
+import { PUBLIC_SITE_URL, isSeoIndexable } from "@/lib/seo";
 
-function origin(): string {
-  return new URL(process.env.APP_BASE_URL ?? "http://localhost:3000").origin;
-}
+export const dynamic = "force-dynamic";
 
 export default function robots(): MetadataRoute.Robots {
+  if (!isSeoIndexable()) {
+    return {
+      rules: { userAgent: "*", disallow: "/" },
+    };
+  }
   return {
     rules: {
       userAgent: "*",
       allow: "/",
       disallow: ["/admin", "/portal", "/api/"],
     },
-    sitemap: `${origin()}/sitemap.xml`,
+    sitemap: `${PUBLIC_SITE_URL}/sitemap.xml`,
+    host: PUBLIC_SITE_URL,
   };
 }

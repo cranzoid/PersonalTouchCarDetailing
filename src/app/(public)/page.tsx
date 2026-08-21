@@ -4,6 +4,9 @@ import { Container, ButtonLink, SectionHeading, Card } from "@/components/ui";
 import { formatCents } from "@/lib/money";
 import { getPublicHomeCatalog } from "@/lib/public-catalog";
 import { getPublicSettings } from "@/lib/settings";
+import { pageMetadata, SEO_PAGES } from "@/lib/seo";
+
+export const metadata = pageMetadata(SEO_PAGES.home);
 
 const EXPERIENCE_POINTS = [
   {
@@ -50,11 +53,11 @@ export default async function HomePage() {
               Vehicle care in {settings.city}, {settings.province}
             </p>
             <h1 className="font-display text-5xl leading-[0.98] tracking-[-0.035em] text-white sm:text-7xl lg:text-[5.5rem]">
-              Precision in every finish.
-              <span className="mt-2 block text-ink-200">Care in every detail.</span>
+              Hamilton car detailing,
+              <span className="mt-2 block text-ink-200">finished with precision.</span>
             </h1>
             <p className="mt-7 max-w-xl text-base leading-7 text-ink-200 sm:text-lg sm:leading-8">
-              Thoughtful interior and exterior detailing, correction, protection, tinting, and styling—with straightforward booking and clear communication throughout.
+              Professional interior and exterior car detailing in Hamilton, with paint correction, ceramic coating, PPF, tinting and styling supported by straightforward booking and clear communication.
             </p>
             <div className="mt-9 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
               <ButtonLink href="/book" className="px-8 py-3.5 text-base">Book an Appointment</ButtonLink>

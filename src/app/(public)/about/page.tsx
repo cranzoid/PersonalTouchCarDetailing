@@ -1,6 +1,7 @@
 import { Container, SectionHeading, ButtonLink, Card } from "@/components/ui";
+import { pageMetadata, SEO_PAGES } from "@/lib/seo";
 
-export const metadata = { title: "About" };
+export const metadata = pageMetadata(SEO_PAGES.about);
 
 /**
  * Owner asked us to draft this copy (2026-07-19) and will adjust if needed.
@@ -14,8 +15,9 @@ export default function AboutPage() {
       <Container className="py-20 sm:py-28">
         <div className="grid items-end gap-12 lg:grid-cols-[1.15fr_0.85fr]">
           <SectionHeading
+            as="h1"
             eyebrow="About Personal Touch"
-            title="A familiar Hamilton name, thoughtfully renewed"
+            title={SEO_PAGES.about.h1}
             subtitle="Under new ownership, we are pairing personal attention with a clear, modern service process—from the first quote to the final quality check."
           />
           <div className="border-l border-accent-400/60 pl-6 text-lg leading-8 text-ink-200">

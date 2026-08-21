@@ -1,9 +1,13 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import type { Metadata } from "next";
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { Container, ButtonLink, Card } from "@/components/ui";
+import { StructuredData } from "@/components/structured-data";
 import { formatCents, withTaxCents } from "@/lib/money";
+import { BUSINESS_ENTITY_ID, PUBLIC_SITE_URL, absoluteUrl, pageMetadata } from "@/lib/seo";
+import { SERVICE_SEO } from "@/lib/service-seo";
 import { getSettings } from "@/lib/settings";
 import { VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
 
@@ -14,9 +18,22 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     .from(schema.services)
     .where(eq(schema.services.slug, slug))
     .limit(1);
-  return service
-    ? { title: service.name, description: service.description ?? undefined }
-    : { title: "Service" };
+  if (!service) return pageMetadata({
+    title: "Car Detailing Service | Personal Touch Hamilton",
+    description: "Car detailing services from Personal Touch Car Detailing in Hamilton, Ontario.",
+    path: `/services/${slug}`,
+    h1: "Car detailing service in Hamilton",
+    noIndex: true,
+  });
+
+  return pageMetadata(SERVICE_SEO[slug] ?? {
+    title: `${service.name} in Hamilton, ON | Personal Touch`,
+    description: service.description
+      ? `${service.description} Available from Personal Touch Car Detailing in Hamilton, Ontario.`
+      : `Learn about ${service.name.toLowerCase()} from Personal Touch Car Detailing in Hamilton, Ontario.`,
+    path: `/services/${slug}`,
+    h1: `${service.name} in Hamilton`,
+  });
 }
 
 export default async function ServiceDetailPage({
@@ -33,6 +50,7 @@ export default async function ServiceDetailPage({
     .limit(1);
   const svc = rows[0];
   if (!svc || !svc.active) notFound();
+  const seo = SERVICE_SEO[slug];
 
   const adjustments = await db()
     .select()
@@ -52,17 +70,90 @@ export default async function ServiceDetailPage({
           .orderBy(asc(schema.addons.sort))
       : [];
 
+  const relatedServices = seo?.relatedServices.length
+    ? await db()
+        .select({ slug: schema.services.slug, name: schema.services.name })
+        .from(schema.services)
+        .where(and(
+          eq(schema.services.active, true),
+          inArray(schema.services.slug, seo.relatedServices.map((service) => service.slug)),
+        ))
+    : [];
+
   const bookable = svc.bookingMode === "bookable" && svc.basePriceCents !== null;
   const quotePath = svc.bookingMode === "contact_only" ? "/contact" : `/quote?service=${svc.slug}`;
 
+  const canonicalPath = `/services/${svc.slug}`;
+  const serviceSchema = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "Service",
+        "@id": `${absoluteUrl(canonicalPath)}#service`,
+        name: svc.name,
+        description: seo?.description ?? svc.shortDescription,
+        url: absoluteUrl(canonicalPath),
+        provider: { "@id": BUSINESS_ENTITY_ID },
+        areaServed: { "@type": "City", name: "Hamilton", containedInPlace: { "@type": "AdministrativeArea", name: "Ontario" } },
+        serviceType: svc.name,
+        ...(svc.basePriceCents !== null
+          ? { offers: { "@type": "Offer", priceCurrency: "CAD", price: (svc.basePriceCents / 100).toFixed(2), url: absoluteUrl(`/book?service=${svc.slug}`) } }
+          : {}),
+      },
+      {
+        "@type": "BreadcrumbList",
+        itemListElement: [
+          { "@type": "ListItem", position: 1, name: "Home", item: PUBLIC_SITE_URL },
+          { "@type": "ListItem", position: 2, name: "Services", item: absoluteUrl("/services") },
+          { "@type": "ListItem", position: 3, name: svc.name, item: absoluteUrl(canonicalPath) },
+        ],
+      },
+      ...(seo?.faqs.length
+        ? [{
+            "@type": "FAQPage",
+            mainEntity: seo.faqs.map((faq) => ({
+              "@type": "Question",
+              name: faq.question,
+              acceptedAnswer: { "@type": "Answer", text: faq.answer },
+            })),
+          }]
+        : []),
+    ],
+  };
+
   return (
-    <Container className="py-20 sm:py-28">
+    <>
+      <StructuredData data={serviceSchema} />
+      <Container className="py-20 sm:py-28">
+      <nav aria-label="Breadcrumb" className="mb-8 text-sm text-ink-400">
+        <ol className="flex flex-wrap items-center gap-2">
+          <li><Link className="hover:text-accent-300" href="/">Home</Link></li>
+          <li aria-hidden="true">/</li>
+          <li><Link className="hover:text-accent-300" href="/services">Services</Link></li>
+          <li aria-hidden="true">/</li>
+          <li aria-current="page" className="text-ink-200">{svc.name}</li>
+        </ol>
+      </nav>
       <div className="grid gap-14 lg:grid-cols-[minmax(0,1.45fr)_minmax(19rem,0.55fr)]">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-accent-300">Detailing service</p>
-          <h1 className="mt-5 max-w-3xl font-display text-5xl leading-[1.02] tracking-[-0.03em] text-white sm:text-6xl">{svc.name}</h1>
-          <p className="mt-6 max-w-2xl text-lg leading-8 text-ink-200">{svc.shortDescription}</p>
+          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-accent-300">{seo?.eyebrow ?? "Detailing service"}</p>
+          <h1 className="mt-5 max-w-3xl font-display text-5xl leading-[1.02] tracking-[-0.03em] text-white sm:text-6xl">{seo?.h1 ?? `${svc.name} in Hamilton`}</h1>
+          <p className="mt-6 max-w-2xl text-lg leading-8 text-ink-200">{seo?.introduction ?? svc.shortDescription}</p>
           {svc.longDescription && <p className="mt-5 max-w-2xl leading-7 text-ink-300">{svc.longDescription}</p>}
+
+          {seo && (
+            <section className="mt-12" aria-labelledby="benefits-heading">
+              <h2 id="benefits-heading" className="font-display text-3xl text-white">What this service is designed to do</h2>
+              <div className="mt-5 grid gap-4 md:grid-cols-3">
+                {seo.benefits.map((benefit) => (
+                  <Card key={benefit.title} className="p-5">
+                    <h3 className="font-semibold text-white">{benefit.title}</h3>
+                    <p className="mt-2 text-sm leading-6 text-ink-300">{benefit.body}</p>
+                  </Card>
+                ))}
+              </div>
+            </section>
+          )}
 
           {!bookable && (
             <Card className="mt-8 border-accent-500/30">
@@ -147,6 +238,62 @@ export default async function ServiceDetailPage({
               </ul>
             </div>
           )}
+
+          {seo && (
+            <>
+              <section className="mt-14" aria-labelledby="process-heading">
+                <h2 id="process-heading" className="font-display text-3xl text-white">How we approach the work</h2>
+                <ol className="mt-5 grid gap-4 md:grid-cols-3">
+                  {seo.process.map((step, index) => (
+                    <li key={step.title} className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+                      <span className="text-xs font-semibold uppercase tracking-wider text-accent-300">Step {index + 1}</span>
+                      <h3 className="mt-2 font-semibold text-white">{step.title}</h3>
+                      <p className="mt-2 text-sm leading-6 text-ink-300">{step.body}</p>
+                    </li>
+                  ))}
+                </ol>
+              </section>
+
+              <section className="mt-14 grid gap-5 md:grid-cols-2">
+                <Card>
+                  <h2 className="font-display text-2xl text-white">Who it is a good fit for</h2>
+                  <ul className="mt-4 space-y-2 text-sm leading-6 text-ink-300">
+                    {seo.idealFor.map((item) => <li key={item}>• {item}</li>)}
+                  </ul>
+                </Card>
+                <Card>
+                  <h2 className="font-display text-2xl text-white">Aftercare</h2>
+                  <p className="mt-4 text-sm leading-6 text-ink-300">{seo.aftercare}</p>
+                </Card>
+              </section>
+
+              <section className="mt-14" aria-labelledby="faq-heading">
+                <h2 id="faq-heading" className="font-display text-3xl text-white">Frequently asked questions</h2>
+                <div className="mt-5 space-y-3">
+                  {seo.faqs.map((faq) => (
+                    <details key={faq.question} className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
+                      <summary className="cursor-pointer font-semibold text-white">{faq.question}</summary>
+                      <p className="mt-3 max-w-3xl text-sm leading-6 text-ink-300">{faq.answer}</p>
+                    </details>
+                  ))}
+                </div>
+              </section>
+
+              {relatedServices.length > 0 && (
+                <section className="mt-14" aria-labelledby="related-services-heading">
+                  <h2 id="related-services-heading" className="font-display text-3xl text-white">Related Hamilton vehicle-care services</h2>
+                  <div className="mt-5 flex flex-wrap gap-3">
+                    {relatedServices.map((service) => (
+                      <Link key={service.slug} href={`/services/${service.slug}`} className="rounded-full border border-white/15 px-4 py-2 text-sm text-ink-200 transition hover:border-accent-400 hover:text-accent-300">
+                        {service.name}
+                      </Link>
+                    ))}
+                    <Link href="/results" className="rounded-full border border-white/15 px-4 py-2 text-sm text-ink-200 transition hover:border-accent-400 hover:text-accent-300">View real results</Link>
+                  </div>
+                </section>
+              )}
+            </>
+          )}
         </div>
 
         <aside>
@@ -181,7 +328,8 @@ export default async function ServiceDetailPage({
           </Card>
         </aside>
       </div>
-    </Container>
+      </Container>
+    </>
   );
 }
 

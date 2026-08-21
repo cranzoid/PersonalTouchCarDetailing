@@ -1,16 +1,12 @@
 import Image from "next/image";
-import type { Metadata, Viewport } from "next";
+import type { Viewport } from "next";
 import { TrackedLink, type ConnectAction } from "./connect-links";
 import { getPublicSettings } from "@/lib/settings";
+import { pageMetadata, SEO_PAGES } from "@/lib/seo";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
-  title: "Connect",
-  description:
-    "Book car detailing, explore services, see recent work, read reviews, or contact Personal Touch Car Detailing in Hamilton.",
-  alternates: { canonical: "/connect" },
-};
+export const metadata = pageMetadata(SEO_PAGES.connect);
 
 export const viewport: Viewport = {
   themeColor: "#061a2c",

@@ -29,6 +29,8 @@ jobs:
     env:
       TEST_DATABASE_URL: postgresql://ptcd:ptcd@127.0.0.1:5432/ptcd_test
       NEXT_TELEMETRY_DISABLED: "1"
+      PUBLIC_SITE_URL: https://www.personaltouchcardetailing.ca
+      SEO_INDEXABLE: "false"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
@@ -40,6 +42,30 @@ jobs:
       - run: npm test
       - run: ./node_modules/.bin/tsc --noEmit
       - run: npm run build
+      - name: Assert rendered SEO output
+        run: |
+          DATABASE_URL="$TEST_DATABASE_URL" \
+          APP_BASE_URL=https://release-smoke.example.invalid \
+          npm start > seo-smoke.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid"' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --max-time 5 --output /dev/null http://127.0.0.1:3000/api/health; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then cat seo-smoke.log; exit 1; fi
+            sleep 1
+          done
+          curl --fail --silent --show-error http://127.0.0.1:3000/ > /tmp/seo-home.html
+          curl --fail --silent --show-error http://127.0.0.1:3000/robots.txt > /tmp/seo-robots.txt
+          curl --fail --silent --show-error http://127.0.0.1:3000/sitemap.xml > /tmp/seo-sitemap.xml
+          grep -Fq 'https://www.personaltouchcardetailing.ca/' /tmp/seo-home.html
+          grep -Fq 'Disallow: /' /tmp/seo-robots.txt
+          grep -Fq 'https://www.personaltouchcardetailing.ca/' /tmp/seo-sitemap.xml
+          if grep -Eiq 'localhost|azurewebsites\.net' /tmp/seo-home.html /tmp/seo-robots.txt /tmp/seo-sitemap.xml; then
+            echo 'Forbidden development or Azure hostname found in rendered SEO output.'
+            exit 1
+          fi
       - run: npm audit --omit=dev --audit-level=high
 
   terraform:

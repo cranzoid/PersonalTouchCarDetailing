@@ -1,11 +1,16 @@
 import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { asc } from "drizzle-orm";
 import { Container, ButtonLink } from "@/components/ui";
 import { AttributionCapture } from "@/components/attribution";
 import { MetaPixel } from "@/components/meta-pixel";
 import { GoogleTag } from "@/components/google-tag";
+import { SeoClickTracking } from "@/components/seo-click-tracking";
+import { StructuredData } from "@/components/structured-data";
+import { db, schema } from "@/db";
 import { getPublicSettings } from "@/lib/settings";
+import { absoluteUrl, BUSINESS_ENTITY_ID, PUBLIC_SITE_URL, WEBSITE_ENTITY_ID } from "@/lib/seo";
 
 // Public pages read business settings and service data from PostgreSQL. Render
 // them at request time so production builds do not depend on an initialized DB.
@@ -13,7 +18,7 @@ export const dynamic = "force-dynamic";
 
 const PRIMARY_NAV = [
   { href: "/services", label: "Services" },
-  { href: "/gallery", label: "Gallery" },
+  { href: "/results", label: "Results" },
   { href: "/fleet", label: "Commercial" },
   { href: "/about", label: "About" },
   { href: "/contact", label: "Contact" },
@@ -39,12 +44,62 @@ function BrandLogo({ footer = false }: { footer?: boolean }) {
 }
 
 export default async function PublicLayout({ children }: { children: ReactNode }) {
-  const settings = await getPublicSettings();
+  const [settings, hours] = await Promise.all([
+    getPublicSettings(),
+    db().select().from(schema.businessHours).orderBy(asc(schema.businessHours.weekday)),
+  ]);
+  const digits = settings.phone.replace(/\D/g, "");
+  const telephone = digits.length === 10 ? `+1${digits}` : settings.phone;
+  const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const businessSchema = {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": WEBSITE_ENTITY_ID,
+        url: PUBLIC_SITE_URL,
+        name: settings.businessName,
+        inLanguage: "en-CA",
+        publisher: { "@id": BUSINESS_ENTITY_ID },
+      },
+      {
+        "@type": ["AutoWash", "LocalBusiness", "Organization"],
+        "@id": BUSINESS_ENTITY_ID,
+        name: settings.businessName,
+        url: PUBLIC_SITE_URL,
+        logo: absoluteUrl("/brand/personal-touch-logo.png"),
+        image: [absoluteUrl("/og.png"), absoluteUrl("/images/detailing-studio-hero.png")],
+        telephone,
+        email: settings.email,
+        priceRange: "$$",
+        currenciesAccepted: settings.currency,
+        address: {
+          "@type": "PostalAddress",
+          streetAddress: settings.addressLine1,
+          addressLocality: settings.city,
+          addressRegion: settings.province,
+          postalCode: settings.postalCode,
+          addressCountry: "CA",
+        },
+        areaServed: { "@type": "City", name: "Hamilton" },
+        openingHoursSpecification: hours
+          .filter((row) => !row.closed && row.open && row.close)
+          .map((row) => ({
+            "@type": "OpeningHoursSpecification",
+            dayOfWeek: dayNames[row.weekday],
+            opens: row.open,
+            closes: row.close,
+          })),
+      },
+    ],
+  };
   return (
     <div className="flex min-h-screen flex-col bg-ink-950">
+      <StructuredData data={businessSchema} />
       <AttributionCapture />
       <MetaPixel />
-      <GoogleTag />
+      <GoogleTag ga4MeasurementId={process.env.GA4_MEASUREMENT_ID} />
+      <SeoClickTracking />
       <header className="sticky top-0 z-50 border-b border-[#D8D1C4] bg-[#F8F5EE]/95 shadow-[0_8px_30px_rgba(3,15,27,0.1)] backdrop-blur-xl">
         <Container className="flex h-20 items-center justify-between gap-6">
           <Link href="/" aria-label="Personal Touch Car Detailing home" className="shrink-0 rounded-lg">
@@ -126,6 +181,7 @@ export default async function PublicLayout({ children }: { children: ReactNode }
               <ul className="space-y-3 text-sm text-[#5C6876]">
                 <li><Link href="/book" className="transition-colors hover:text-accent-600">Book online</Link></li>
                 <li><Link href="/quote" className="transition-colors hover:text-accent-600">Request a quote</Link></li>
+                <li><Link href="/gallery" className="transition-colors hover:text-accent-600">Photo gallery</Link></li>
                 <li><Link href="/portal" className="transition-colors hover:text-accent-600">Customer access</Link></li>
                 <li><Link href="/reviews" className="transition-colors hover:text-accent-600">Customer reviews</Link></li>
                 <li><Link href="/faq" className="transition-colors hover:text-accent-600">Questions &amp; answers</Link></li>

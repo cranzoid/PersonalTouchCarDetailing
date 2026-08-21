@@ -1,7 +1,8 @@
 import { Container } from "@/components/ui";
 import { getSettings } from "@/lib/settings";
+import { pageMetadata, SEO_PAGES } from "@/lib/seo";
 
-export const metadata = { title: "Cancellation Policy" };
+export const metadata = pageMetadata(SEO_PAGES.cancellation);
 export const dynamic = "force-dynamic";
 
 /**

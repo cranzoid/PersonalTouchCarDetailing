@@ -25,6 +25,7 @@ env:
   AZURE_SLOT_NAME: staging
   STAGING_URL: https://app-ptcd-prod-7mutra-staging.azurewebsites.net
   PRODUCTION_URL: https://www.personaltouchcardetailing.ca
+  PUBLIC_SITE_URL: https://www.personaltouchcardetailing.ca
 
 jobs:
   stage:
@@ -48,6 +49,7 @@ jobs:
     env:
       TEST_DATABASE_URL: postgresql://ptcd:ptcd@127.0.0.1:5432/ptcd_test
       NEXT_TELEMETRY_DISABLED: "1"
+      SEO_INDEXABLE: "false"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
@@ -79,6 +81,8 @@ jobs:
             SEED_ADMIN_EMAIL=release-smoke@example.invalid \
             SEED_ADMIN_PASSWORD=standalone-release-smoke-password \
             APP_BASE_URL=https://release-smoke.example.invalid \
+            PUBLIC_SITE_URL="$PUBLIC_SITE_URL" \
+            SEO_INDEXABLE=false \
             HOSTNAME=127.0.0.1 \
             PORT=3001 \
             node server.js > standalone.log 2>&1 &
@@ -99,6 +103,19 @@ jobs:
               --output /dev/null http://127.0.0.1:3001/
             curl --fail --silent --show-error --max-time 10 \
               --output /dev/null http://127.0.0.1:3001/connect
+            curl --fail --silent --show-error --max-time 10 \
+              http://127.0.0.1:3001/ > /tmp/release-seo-home.html
+            curl --fail --silent --show-error --max-time 10 \
+              http://127.0.0.1:3001/robots.txt > /tmp/release-seo-robots.txt
+            curl --fail --silent --show-error --max-time 10 \
+              http://127.0.0.1:3001/sitemap.xml > /tmp/release-seo-sitemap.xml
+            grep -Fq "$PUBLIC_SITE_URL/" /tmp/release-seo-home.html
+            grep -Fq 'Disallow: /' /tmp/release-seo-robots.txt
+            grep -Fq "$PUBLIC_SITE_URL/" /tmp/release-seo-sitemap.xml
+            if grep -Eiq 'localhost|azurewebsites\.net' /tmp/release-seo-home.html /tmp/release-seo-robots.txt /tmp/release-seo-sitemap.xml; then
+              echo 'Forbidden development or Azure hostname found in rendered SEO output.'
+              exit 1
+            fi
           )
       - name: Create release archive
         run: |
@@ -192,3 +209,12 @@ jobs:
             --retry-all-errors --max-time 15 --output /dev/null "$PRODUCTION_URL/api/health"
           curl --fail --silent --show-error --max-time 20 --output /dev/null "$PRODUCTION_URL/"
           curl --fail --silent --show-error --max-time 20 --output /dev/null "$PRODUCTION_URL/connect"
+          curl --fail --silent --show-error --max-time 20 "$PRODUCTION_URL/" > /tmp/production-seo-home.html
+          curl --fail --silent --show-error --max-time 20 "$PRODUCTION_URL/robots.txt" > /tmp/production-seo-robots.txt
+          curl --fail --silent --show-error --max-time 20 "$PRODUCTION_URL/sitemap.xml" > /tmp/production-seo-sitemap.xml
+          grep -Fq 'Sitemap: https://www.personaltouchcardetailing.ca/sitemap.xml' /tmp/production-seo-robots.txt
+          grep -Fq 'https://www.personaltouchcardetailing.ca/' /tmp/production-seo-sitemap.xml
+          if grep -Eiq 'localhost|azurewebsites\.net' /tmp/production-seo-home.html /tmp/production-seo-robots.txt /tmp/production-seo-sitemap.xml; then
+            echo 'Forbidden development or Azure hostname found in production SEO output.'
+            exit 1
+          fi

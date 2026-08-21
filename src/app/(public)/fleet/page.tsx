@@ -1,7 +1,8 @@
 import { Container, SectionHeading, Card } from "@/components/ui";
 import { ContactForm } from "@/components/contact-form";
+import { pageMetadata, SEO_PAGES } from "@/lib/seo";
 
-export const metadata = { title: "Fleet & Commercial" };
+export const metadata = pageMetadata(SEO_PAGES.fleet);
 
 export default function FleetPage() {
   return (
@@ -9,8 +10,9 @@ export default function FleetPage() {
       <Container className="py-20 sm:py-28">
         <div className="grid gap-12 lg:grid-cols-[1.15fr_0.85fr] lg:items-end">
           <SectionHeading
+            as="h1"
             eyebrow="Fleet & commercial"
-            title="A cleaner fleet, without the administrative drag"
+            title={SEO_PAGES.fleet.h1}
             subtitle="Recurring care for company fleets, dealerships and rideshare vehicles—with priority scheduling, company records and consolidated billing."
           />
           <div className="grid grid-cols-2 gap-3 text-center text-sm">

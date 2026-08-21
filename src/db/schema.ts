@@ -660,6 +660,63 @@ export const files = pgTable(
   (t) => [index("files_entity_idx").on(t.entityType, t.entityId)],
 );
 
+/**
+ * Customer-approved marketing stories. Drafts are private; publishing is
+ * allowed only after the server re-checks every linked file's current consent.
+ */
+export const caseStudies = pgTable(
+  "case_studies",
+  {
+    id: id(),
+    slug: text("slug").notNull().unique(),
+    title: text("title").notNull(),
+    summary: text("summary").notNull().default(""),
+    challenge: text("challenge").notNull().default(""),
+    process: text("process").notNull().default(""),
+    outcome: text("outcome").notNull().default(""),
+    primaryServiceId: text("primary_service_id")
+      .notNull()
+      .references(() => services.id),
+    relatedServiceIds: text("related_service_ids").array().notNull().default([]),
+    status: text("status").notNull().default("draft"), // draft | published
+    consentConfirmedAt: timestamp("consent_confirmed_at", { withTimezone: true }),
+    consentConfirmedByStaffId: text("consent_confirmed_by_staff_id").references(() => staffUsers.id),
+    privacyCheckedAt: timestamp("privacy_checked_at", { withTimezone: true }),
+    privacyCheckedByStaffId: text("privacy_checked_by_staff_id").references(() => staffUsers.id),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    createdByStaffId: text("created_by_staff_id").notNull().references(() => staffUsers.id),
+    updatedByStaffId: text("updated_by_staff_id").notNull().references(() => staffUsers.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("case_studies_status_idx").on(t.status, t.publishedAt),
+    index("case_studies_primary_service_idx").on(t.primaryServiceId),
+  ],
+);
+
+export const caseStudyMedia = pgTable(
+  "case_study_media",
+  {
+    id: id(),
+    caseStudyId: text("case_study_id")
+      .notNull()
+      .references(() => caseStudies.id, { onDelete: "cascade" }),
+    fileId: text("file_id")
+      .notNull()
+      .references(() => files.id),
+    role: text("role").notNull().default("result"), // before | after | result
+    caption: text("caption").notNull().default(""),
+    altText: text("alt_text").notNull(),
+    sort: integer("sort").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("case_study_media_case_file_unique").on(t.caseStudyId, t.fileId),
+    index("case_study_media_case_sort_idx").on(t.caseStudyId, t.sort),
+  ],
+);
+
 export const additionalWorkRequests = pgTable(
   "additional_work_requests",
   {

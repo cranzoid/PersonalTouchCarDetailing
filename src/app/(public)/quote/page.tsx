@@ -2,8 +2,9 @@ import { asc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { Container, SectionHeading } from "@/components/ui";
 import { QuoteForm } from "./form";
+import { pageMetadata, SEO_PAGES } from "@/lib/seo";
 
-export const metadata = { title: "Request a Quote" };
+export const metadata = pageMetadata(SEO_PAGES.quote);
 export const dynamic = "force-dynamic";
 
 export default async function QuotePage({
@@ -27,8 +28,9 @@ export default async function QuotePage({
   return (
     <Container className="py-12 sm:py-16">
       <SectionHeading
+        as="h1"
         eyebrow="Free quote"
-        title="Request a quote"
+        title={SEO_PAGES.quote.h1}
         subtitle="Tell us about your vehicle and its condition. Photos help us give you an accurate price the first time — especially for paint correction, coatings, tinting and wraps. We'll get back to you within one business day."
       />
       <QuoteForm

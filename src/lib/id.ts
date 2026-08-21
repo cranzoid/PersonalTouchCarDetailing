@@ -32,6 +32,8 @@ export type IdPrefix =
   | "insp"
   | "find" // inspection finding
   | "file"
+  | "case" // published marketing case study
+  | "csm" // case study media link
   | "awr" // additional work request
   | "qc"
   | "inv" // invoice

@@ -1,6 +1,7 @@
 import { Container } from "@/components/ui";
+import { pageMetadata, SEO_PAGES } from "@/lib/seo";
 
-export const metadata = { title: "Service Terms" };
+export const metadata = pageMetadata(SEO_PAGES.terms);
 
 /** Deliberately avoids inherited warranties; final counsel review remains an
  * owner-side launch-governance item. */

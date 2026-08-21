@@ -772,6 +772,8 @@ export async function setPhotoPublicConsentAction(raw: unknown): Promise<ActionR
     });
     if (result.ok && result.jobId) revalidatePath(`/admin/jobs/${result.jobId}`);
     revalidatePath("/gallery");
+    revalidatePath("/results");
+    revalidatePath("/sitemap.xml");
     return result.ok ? { ok: true } : result;
   } catch (err) {
     if (err instanceof AuthError) return { ok: false, error: err.message };

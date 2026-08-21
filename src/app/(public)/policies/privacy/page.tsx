@@ -1,6 +1,7 @@
 import { Container } from "@/components/ui";
+import { pageMetadata, SEO_PAGES } from "@/lib/seo";
 
-export const metadata = { title: "Privacy Policy" };
+export const metadata = pageMetadata(SEO_PAGES.privacy);
 
 /** Accurate to the platform's implemented data flows. Owner/legal review is
  * still tracked as a launch-governance item rather than exposed as draft copy

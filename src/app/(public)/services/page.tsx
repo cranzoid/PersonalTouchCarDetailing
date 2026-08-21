@@ -4,8 +4,9 @@ import { db, schema } from "@/db";
 import { Container, SectionHeading, Card, ButtonLink } from "@/components/ui";
 import { formatCents, withTaxCents } from "@/lib/money";
 import { getSettings } from "@/lib/settings";
+import { pageMetadata, SEO_PAGES } from "@/lib/seo";
 
-export const metadata = { title: "Services" };
+export const metadata = pageMetadata(SEO_PAGES.services);
 
 export default async function ServicesPage() {
   const settings = await getSettings();
@@ -23,8 +24,9 @@ export default async function ServicesPage() {
   return (
     <Container className="py-20 sm:py-28">
       <SectionHeading
+        as="h1"
         eyebrow="Service menu"
-        title="Care designed around your vehicle"
+        title={SEO_PAGES.services.h1}
         subtitle={`Prices shown are starting points for a standard sedan — larger vehicles and heavier conditions are adjusted transparently during booking. Condition-dependent services are quoted after we see your vehicle or photos. Listed prices are what you pay in cash or by Interac e-transfer; card and cheque add ${settings.taxLabel}.`}
       />
       <div className="space-y-20">
@@ -32,8 +34,15 @@ export default async function ServicesPage() {
           <section key={cat.id} id={cat.slug} className="scroll-mt-24">
             <div className="flex flex-col gap-3 border-t border-white/10 pt-7 sm:flex-row sm:items-end sm:justify-between">
               <div>
-                <h2 className="font-display text-3xl text-white">{cat.name}</h2>
+                <h2 className="font-display text-3xl text-white">
+                  {cat.slug === "paint-correction" ? (
+                    <Link className="hover:text-accent-300" href="/services/paint-correction">{cat.name}</Link>
+                  ) : cat.name}
+                </h2>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-400">{cat.description}</p>
+                {cat.slug === "paint-correction" && (
+                  <Link className="mt-3 inline-flex text-sm font-semibold text-accent-300 hover:text-accent-200" href="/services/paint-correction">Compare correction levels →</Link>
+                )}
               </div>
               <span className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-300">
                 {services.filter((service) => service.categoryId === cat.id).length} options

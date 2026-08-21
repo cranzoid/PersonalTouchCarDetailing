@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
-import { asc, eq } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { PUBLIC_SITE_URL } from "@/lib/seo";
 
 // Service URLs come from PostgreSQL and must be resolved after startup
 // migrations have initialized the production database.
@@ -9,9 +10,11 @@ export const dynamic = "force-dynamic";
 const PUBLIC_ROUTES = [
   "",
   "/services",
+  "/services/paint-correction",
   "/book",
   "/quote",
   "/gallery",
+  "/results",
   "/fleet",
   "/about",
   "/reviews",
@@ -23,26 +26,30 @@ const PUBLIC_ROUTES = [
 ];
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const base = new URL(process.env.APP_BASE_URL ?? "http://localhost:3000").origin;
-  const services = await db()
-    .select({ slug: schema.services.slug, updatedAt: schema.services.updatedAt })
-    .from(schema.services)
-    .where(eq(schema.services.active, true))
-    .orderBy(asc(schema.services.sort));
-  const now = new Date();
+  const [services, caseStudies] = await Promise.all([
+    db()
+      .select({ slug: schema.services.slug, updatedAt: schema.services.updatedAt })
+      .from(schema.services)
+      .where(eq(schema.services.active, true))
+      .orderBy(asc(schema.services.sort)),
+    db()
+      .select({ slug: schema.caseStudies.slug, updatedAt: schema.caseStudies.updatedAt })
+      .from(schema.caseStudies)
+      .where(eq(schema.caseStudies.status, "published"))
+      .orderBy(desc(schema.caseStudies.publishedAt)),
+  ]);
 
   return [
     ...PUBLIC_ROUTES.map((route) => ({
-      url: `${base}${route}`,
-      lastModified: now,
-      changeFrequency: route === "" ? ("weekly" as const) : ("monthly" as const),
-      priority: route === "" ? 1 : route === "/services" || route === "/book" ? 0.9 : 0.6,
+      url: `${PUBLIC_SITE_URL}${route}`,
     })),
     ...services.map((service) => ({
-      url: `${base}/services/${service.slug}`,
+      url: `${PUBLIC_SITE_URL}/services/${service.slug}`,
       lastModified: service.updatedAt,
-      changeFrequency: "monthly" as const,
-      priority: 0.7,
+    })),
+    ...caseStudies.map((story) => ({
+      url: `${PUBLIC_SITE_URL}/results/${story.slug}`,
+      lastModified: story.updatedAt,
     })),
   ];
 }

@@ -264,6 +264,8 @@ locals {
     AZURE_STORAGE_ACCOUNT_NAME                 = azurerm_storage_account.files.name
     AZURE_STORAGE_CONTAINER_NAME               = azurerm_storage_container.private_files.name
     APPLICATIONINSIGHTS_CONNECTION_STRING      = azurerm_application_insights.main.connection_string
+    PUBLIC_SITE_URL                            = "https://www.personaltouchcardetailing.ca"
+    GA4_MEASUREMENT_ID                         = var.ga4_measurement_id
     ApplicationInsightsAgent_EXTENSION_VERSION = "~3"
     SCM_DO_BUILD_DURING_DEPLOYMENT             = "false"
     ENABLE_ORYX_BUILD                          = "false"
@@ -311,11 +313,12 @@ resource "azurerm_linux_web_app" "main" {
   }
 
   app_settings = merge(local.web_app_common_settings, {
-    APP_BASE_URL = "https://${local.app_name}.azurewebsites.net"
+    APP_BASE_URL  = "https://www.personaltouchcardetailing.ca"
+    SEO_INDEXABLE = "true"
   })
 
   sticky_settings {
-    app_setting_names = ["APP_BASE_URL"]
+    app_setting_names = ["APP_BASE_URL", "SEO_INDEXABLE"]
   }
 }
 
@@ -349,7 +352,8 @@ resource "azurerm_linux_web_app_slot" "staging" {
   }
 
   app_settings = merge(local.web_app_common_settings, {
-    APP_BASE_URL = "https://${local.app_name}-staging.azurewebsites.net"
+    APP_BASE_URL  = "https://${local.app_name}-staging.azurewebsites.net"
+    SEO_INDEXABLE = "false"
   })
 }
 
@@ -433,7 +437,7 @@ resource "azurerm_logic_app_action_http" "cron" {
   name         = "run-application-cron"
   logic_app_id = azurerm_logic_app_workflow.scheduler.id
   method       = "POST"
-  uri          = "https://${local.app_name}.azurewebsites.net/api/cron/tick"
+  uri          = "https://www.personaltouchcardetailing.ca/api/cron/tick"
   headers = {
     Authorization = "Bearer ${random_password.cron_secret.result}"
   }
