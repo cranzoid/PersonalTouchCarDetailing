@@ -180,6 +180,8 @@ jobs:
           done
           curl --fail --silent --show-error --max-time 20 --output /dev/null "$STAGING_URL/"
           curl --fail --silent --show-error --max-time 20 --output /dev/null "$STAGING_URL/connect"
+          curl --fail --silent --show-error --max-time 20 --output /dev/null \
+            "$STAGING_URL/_next/image?url=%2Fbrand%2Fpersonal-touch-logo.png&w=256&q=75"
 
   swap:
     if: github.event.inputs.operation == 'swap' && github.ref == 'refs/heads/main'
@@ -196,6 +198,8 @@ jobs:
           curl --fail --silent --show-error --max-time 10 --output /dev/null "$STAGING_URL/api/health"
           curl --fail --silent --show-error --max-time 20 --output /dev/null "$STAGING_URL/"
           curl --fail --silent --show-error --max-time 20 --output /dev/null "$STAGING_URL/connect"
+          curl --fail --silent --show-error --max-time 20 --output /dev/null \
+            "$STAGING_URL/_next/image?url=%2Fbrand%2Fpersonal-touch-logo.png&w=256&q=75"
       - name: Swap staging into production
         run: |
           az webapp deployment slot swap \
@@ -209,6 +213,8 @@ jobs:
             --retry-all-errors --max-time 15 --output /dev/null "$PRODUCTION_URL/api/health"
           curl --fail --silent --show-error --max-time 20 --output /dev/null "$PRODUCTION_URL/"
           curl --fail --silent --show-error --max-time 20 --output /dev/null "$PRODUCTION_URL/connect"
+          curl --fail --silent --show-error --max-time 20 --output /dev/null \
+            "$PRODUCTION_URL/_next/image?url=%2Fbrand%2Fpersonal-touch-logo.png&w=256&q=75"
           curl --fail --silent --show-error --max-time 20 "$PRODUCTION_URL/" > /tmp/production-seo-home.html
           curl --fail --silent --show-error --max-time 20 "$PRODUCTION_URL/robots.txt" > /tmp/production-seo-robots.txt
           curl --fail --silent --show-error --max-time 20 "$PRODUCTION_URL/sitemap.xml" > /tmp/production-seo-sitemap.xml

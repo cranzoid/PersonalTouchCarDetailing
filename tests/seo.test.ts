@@ -56,6 +56,15 @@ describe("crawl environment controls", () => {
     expect(response.headers.get("location")).toBe("https://www.personaltouchcardetailing.ca/book?service=interior-detail&utm_source=gbp");
   });
 
+  it("does not redirect image source files resolved through the Azure host", () => {
+    process.env.SEO_INDEXABLE = "true";
+    const response = middleware(
+      new NextRequest("https://app-ptcd-prod-7mutra.azurewebsites.net/images/detailing-studio-hero.png"),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
+  });
+
   it("keeps the Azure staging hostname healthy and noindex during swap warm-up", () => {
     process.env.SEO_INDEXABLE = "true";
     const response = middleware(
