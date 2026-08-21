@@ -4,19 +4,21 @@ const PUBLIC_SITE_URL = (
   process.env.PUBLIC_SITE_URL ?? "https://www.personaltouchcardetailing.ca"
 ).replace(/\/$/, "");
 const CANONICAL_HOST = new URL(PUBLIC_SITE_URL).host;
+const AZURE_STAGING_HOST = /-staging\.azurewebsites\.net(?::\d+)?$/i;
 
 export function middleware(request: NextRequest) {
   const indexable = process.env.SEO_INDEXABLE === "true";
   const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
   const requestHost = forwardedHost || request.headers.get("host") || request.nextUrl.host;
+  const isAzureStagingHost = AZURE_STAGING_HOST.test(requestHost);
 
-  if (indexable && requestHost !== CANONICAL_HOST) {
+  if (indexable && !isAzureStagingHost && requestHost !== CANONICAL_HOST) {
     const destination = new URL(`${request.nextUrl.pathname}${request.nextUrl.search}`, PUBLIC_SITE_URL);
     return NextResponse.redirect(destination, 308);
   }
 
   const response = NextResponse.next();
-  if (!indexable) {
+  if (!indexable || isAzureStagingHost) {
     response.headers.set("X-Robots-Tag", "noindex, nofollow, noarchive");
   }
   return response;

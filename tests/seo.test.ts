@@ -56,6 +56,16 @@ describe("crawl environment controls", () => {
     expect(response.headers.get("location")).toBe("https://www.personaltouchcardetailing.ca/book?service=interior-detail&utm_source=gbp");
   });
 
+  it("keeps the Azure staging hostname healthy and noindex during swap warm-up", () => {
+    process.env.SEO_INDEXABLE = "true";
+    const response = middleware(
+      new NextRequest("https://app-ptcd-prod-7mutra-staging.azurewebsites.net/api/health"),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("x-robots-tag")).toBe("noindex, nofollow, noarchive");
+  });
+
   it("publishes the canonical production sitemap location", () => {
     process.env.SEO_INDEXABLE = "true";
     const result = robots();
