@@ -9,6 +9,7 @@ import { requireStaff, AuthError } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { getSettings } from "@/lib/settings";
 import { sendMessageTemplate } from "@/lib/messaging";
+import { parseCcList } from "@/lib/email";
 import { formatCents, percentCents } from "@/lib/money";
 import {
   buildConsolidatedInvoiceLines,
@@ -383,13 +384,31 @@ export async function createConsolidatedInvoiceAction(
 
 export async function sendInvoiceAction(
   raw: unknown,
-): Promise<ActionResult<{ link: string; delivery: "email" | "sms" | null }>> {
+): Promise<ActionResult<{ link: string; delivery: "email" | "sms" | null; cc: string[] }>> {
   try {
     const staff = await requireStaff("manage_invoices");
-    const parsed = z.object({ invoiceId: z.string().min(1) }).safeParse(raw);
+    const parsed = z
+      .object({
+        invoiceId: z.string().min(1),
+        cc: z.array(z.string()).max(20).optional(),
+      })
+      .safeParse(raw);
     if (!parsed.success) return { ok: false, error: "Invalid request" };
     const { invoiceId } = parsed.data;
     const settings = await getSettings();
+
+    // The customer is loaded again after the transaction for the send itself;
+    // this early read exists only so a CC equal to the primary address can be
+    // dropped before anything is written.
+    const [ccCustomer] = await db()
+      .select({ email: schema.customers.email })
+      .from(schema.invoices)
+      .innerJoin(schema.customers, eq(schema.customers.id, schema.invoices.customerId))
+      .where(eq(schema.invoices.id, invoiceId))
+      .limit(1);
+    const ccParsed = parseCcList(parsed.data.cc ?? [], ccCustomer?.email);
+    if (!ccParsed.ok) return { ok: false, error: ccParsed.error };
+    const cc = ccParsed.cc;
 
     const result = await db().transaction(async (tx): Promise<
       | { ok: false; error: string }
@@ -412,6 +431,9 @@ export async function sendInvoiceAction(
           status: invoice.status === "draft" ? "sent" : invoice.status,
           sentAt: invoice.sentAt ?? new Date(),
           dueAt: invoice.dueAt ?? new Date(Date.now() + 14 * 86_400_000),
+          // Replaces, never appends: this is who the current send copies, and
+          // it is what the receipt will go to when the invoice is paid.
+          ccEmails: cc,
           updatedAt: new Date(),
         })
         .where(eq(schema.invoices.id, invoiceId));
@@ -421,8 +443,8 @@ export async function sendInvoiceAction(
         action: "invoice.sent",
         entityType: "invoice",
         entityId: invoiceId,
-        before: { status: invoice.status },
-        after: { status: invoice.status === "draft" ? "sent" : invoice.status },
+        before: { status: invoice.status, cc: invoice.ccEmails },
+        after: { status: invoice.status === "draft" ? "sent" : invoice.status, cc },
       });
       return { ok: true, token, invoice };
     });
@@ -440,6 +462,7 @@ export async function sendInvoiceAction(
           recipient: customer,
           customerId: customer.id,
           kind: "invoice",
+          cc,
           variables: {
             businessName: settings.businessName,
             firstName: customer.firstName,
@@ -454,7 +477,10 @@ export async function sendInvoiceAction(
 
     revalidatePath(`/admin/invoices/${invoiceId}`);
     revalidatePath("/admin/invoices");
-    return { ok: true, link, delivery: message?.sent ? (message.channel ?? null) : null };
+    const delivery = message?.sent ? (message.channel ?? null) : null;
+    // CC only rides on email. Saying so is better than a panel that claims a
+    // copy went out when the owner has switched the template to SMS.
+    return { ok: true, link, delivery, cc: delivery === "email" ? cc : [] };
   } catch (err) {
     if (err instanceof AuthError) return { ok: false, error: err.message };
     console.error("sendInvoiceAction failed", err);

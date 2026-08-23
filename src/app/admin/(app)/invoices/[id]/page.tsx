@@ -244,6 +244,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
 
       <InvoiceActions
         invoiceId={invoice.id}
+        initialCc={invoice.ccEmails}
         status={invoice.status}
         balanceCents={summary.balanceCents}
         untaxedBalanceCents={untaxedSummary.balanceCents}

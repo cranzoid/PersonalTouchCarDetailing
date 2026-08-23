@@ -30,6 +30,12 @@ export type OutboundMessage = {
      */
     | "staff_alert";
   to: string;
+  /**
+   * Extra addresses copied on the message. Email only — SMS has no CC, and
+   * sendMessage strips it rather than silently addressing a second number.
+   * Callers are expected to have run the list through parseCcList first.
+   */
+  cc?: string[];
   subject?: string;
   body: string;
   relatedEntityType?: string;
@@ -162,6 +168,12 @@ export async function sendMessage(msg: OutboundMessage): Promise<MessageResult> 
     }
   }
 
+  // A CC is only meaningful on email, and it must never become a back door
+  // around the consent gate above: marketing-class mail goes to the consenting
+  // party alone, whatever the caller passed.
+  const cc =
+    msg.channel === "email" && !MARKETING_KINDS.has(msg.kind) ? (msg.cc ?? []) : [];
+
   // Local development is deliberately side-effect free. Production never
   // silently falls back to this transport: missing provider credentials are
   // recorded as a failed communication so automations can retry after the
@@ -175,6 +187,7 @@ export async function sendMessage(msg: OutboundMessage): Promise<MessageResult> 
     channel: msg.channel,
     kind: msg.kind,
     subject: msg.subject,
+    cc,
     body: msg.body,
     relatedEntityType: msg.relatedEntityType,
     relatedEntityId: msg.relatedEntityId,
@@ -188,7 +201,7 @@ export async function sendMessage(msg: OutboundMessage): Promise<MessageResult> 
 
   try {
     const providerRef =
-      msg.channel === "email" ? await sendWithResend(msg) : await sendWithTwilio(msg);
+      msg.channel === "email" ? await sendWithResend(msg, cc) : await sendWithTwilio(msg);
     if (!providerRef) {
       await db()
         .update(schema.communications)
@@ -244,6 +257,7 @@ export async function sendMessageTemplate(input: TemplateMessageInput): Promise<
     channel,
     kind: input.kind,
     to,
+    cc: input.cc,
     subject: channel === "email" ? renderTemplate(template.subject ?? "", input.variables) : undefined,
     body: renderTemplate(template.body, input.variables),
     relatedEntityType: input.relatedEntityType,
@@ -264,7 +278,7 @@ export function isTerminalTemplateDelivery(result: TemplateDeliveryResult): bool
   );
 }
 
-async function sendWithResend(msg: OutboundMessage): Promise<string | null> {
+async function sendWithResend(msg: OutboundMessage, cc: readonly string[]): Promise<string | null> {
   const [apiKey, from] = await Promise.all([
     getIntegrationSecret("resendApiKey"),
     getIntegrationSecret("emailFrom"),
@@ -279,6 +293,7 @@ async function sendWithResend(msg: OutboundMessage): Promise<string | null> {
     body: JSON.stringify({
       from,
       to: [msg.to],
+      ...(cc.length > 0 ? { cc: [...cc] } : {}),
       subject: msg.subject ?? "Message from Personal Touch Car Detailing",
       text: msg.body,
     }),

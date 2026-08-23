@@ -828,6 +828,17 @@ export const invoices = pgTable(
     cancelledByStaffId: text("cancelled_by_staff_id").references(() => staffUsers.id),
     cancellationReason: text("cancellation_reason"),
     notes: text("notes"),
+    /**
+     * Addresses copied on the invoice email, captured when staff send it.
+     * Persisted on the invoice rather than only on the communications row
+     * because the receipt has to reach the same people — a bookkeeper who was
+     * CC'd the bill needs the payment confirmation to reconcile against.
+     *
+     * Re-sending replaces the list: what is here is always who the *current*
+     * send copied, never an accumulated history. The per-message history lives
+     * on `communications.cc`.
+     */
+    ccEmails: text("cc_emails").array().notNull().default([]),
     /** Stamped once the post-payment review-request send fires — prevents duplicate sends. */
     reviewRequestSentAt: timestamp("review_request_sent_at", { withTimezone: true }),
     createdAt: createdAt(),
@@ -930,6 +941,8 @@ export const communications = pgTable(
     // delay | ready | invoice | receipt | review_request | maintenance | marketing | manual | note | lead_ack |
     // reply | opt_stop | opt_start (inbound, written by the Twilio webhook)
     subject: text("subject"),
+    /** Addresses copied on this specific send. Email only; always empty for SMS. */
+    cc: text("cc").array().notNull().default([]),
     body: text("body").notNull(),
     relatedEntityType: text("related_entity_type"),
     relatedEntityId: text("related_entity_id"),

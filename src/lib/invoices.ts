@@ -6,6 +6,7 @@ import { taxCents, formatCents } from "@/lib/money";
 import { hashToken } from "@/lib/estimates";
 import { getSettings } from "@/lib/settings";
 import { sendMessageTemplate } from "@/lib/messaging";
+import { parseCcList } from "@/lib/email";
 import { audit } from "@/lib/audit";
 import {
   PAYMENT_METHOD_TAXABLE,
@@ -457,6 +458,11 @@ export async function syncOverdueInvoices(): Promise<string[]> {
  * receipt regardless of payment channel. Safely no-ops if the active
  * template's configured destination is unavailable — payment finalization must not
  * fail because a receipt couldn't be sent.
+ *
+ * Anyone CC'd when the invoice was sent is copied here too: a bookkeeper who
+ * was given the bill needs the payment confirmation to close it out. The list
+ * is re-validated against the customer's *current* email, which may have
+ * changed since the send.
  */
 export async function sendInvoiceReceipt(invoiceId: string, amountCents: number): Promise<void> {
   const [invoice] = await db().select().from(schema.invoices).where(eq(schema.invoices.id, invoiceId)).limit(1);
@@ -471,11 +477,15 @@ export async function sendInvoiceReceipt(invoiceId: string, amountCents: number)
   const settings = await getSettings();
   const payments = await db().select().from(schema.payments).where(eq(schema.payments.invoiceId, invoiceId));
   const { balanceCents } = summarizePayments(invoice.totalCents, invoice.depositAppliedCents, payments);
+  const cc = parseCcList(invoice.ccEmails, customer.email);
   await sendMessageTemplate({
     templateKey: "receipt",
     recipient: customer,
     customerId: customer.id,
     kind: "receipt",
+    // A stored address that no longer parses is skipped rather than failing the
+    // receipt — the customer's own copy matters more than the courtesy copy.
+    cc: cc.ok ? cc.cc : [],
     variables: {
       businessName: settings.businessName,
       firstName: customer.firstName,

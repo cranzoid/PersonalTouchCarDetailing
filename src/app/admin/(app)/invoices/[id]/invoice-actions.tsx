@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatCents } from "@/lib/money";
 import { PAYMENT_METHOD_TAXABLE, type ManualPaymentMethod } from "@/lib/types";
+import { MAX_CC_RECIPIENTS, splitCcInput } from "@/lib/email";
 import {
   sendInvoiceAction,
   recordPaymentAction,
@@ -32,6 +33,7 @@ function newIdempotencyKey(kind: "payment" | "refund"): string {
 
 export function InvoiceActions({
   invoiceId,
+  initialCc,
   status,
   balanceCents,
   untaxedBalanceCents,
@@ -44,6 +46,12 @@ export function InvoiceActions({
   taxLabel,
 }: {
   invoiceId: string;
+  /**
+   * Who the last send copied. Prefilled into the CC box so a re-send keeps them
+   * by default — the action replaces the stored list outright, and an empty box
+   * on a re-send would quietly drop the bookkeeper off the eventual receipt.
+   */
+  initialCc: string[];
   status: string;
   balanceCents: number;
   /**
@@ -65,6 +73,9 @@ export function InvoiceActions({
   const [error, setError] = useState<string | null>(null);
   const [link, setLink] = useState<string | null>(null);
   const [delivery, setDelivery] = useState<"email" | "sms" | null>(null);
+  const [ccInput, setCcInput] = useState(initialCc.join(", "));
+  const [showCc, setShowCc] = useState(initialCc.length > 0);
+  const [ccSent, setCcSent] = useState<string[]>([]);
 
   const [method, setMethod] = useState<(typeof PAYMENT_METHODS)[number]["value"]>("cash");
   // Cash and e-transfer strip the tax when the payment is recorded, so the
@@ -111,11 +122,12 @@ export function InvoiceActions({
   async function send() {
     setBusy(true);
     setError(null);
-    const res = await sendInvoiceAction({ invoiceId });
+    const res = await sendInvoiceAction({ invoiceId, cc: splitCcInput(ccInput) });
     setBusy(false);
     if (res.ok) {
       setLink(res.link);
       setDelivery(res.delivery);
+      setCcSent(res.cc);
       router.refresh();
     } else setError(res.error);
   }
@@ -216,11 +228,56 @@ export function InvoiceActions({
           <p className="mt-2 text-xs text-ink-500">
             Generates a secure link where the customer can view the invoice and pay online.
           </p>
+          {!showCc ? (
+            <button
+              type="button"
+              onClick={() => setShowCc(true)}
+              className="mt-2 text-xs text-accent-400 hover:underline"
+            >
+              Add a CC
+            </button>
+          ) : (
+            <div className="mt-3">
+              <label className="block text-xs text-ink-400">
+                CC (optional) — separate addresses with a comma
+                <input
+                  className={`${input} mt-1 block w-full`}
+                  value={ccInput}
+                  onChange={(event) => setCcInput(event.target.value)}
+                  placeholder="accounts@company.com, manager@company.com"
+                />
+              </label>
+              {/* Anyone copied receives the same secure link, which can be used
+                  to pay. Staff need to know that before typing an address. */}
+              <p className="mt-1 text-xs text-amber-300">
+                Anyone CC&apos;d can view and pay this invoice, and will also receive the
+                payment receipt. Up to {MAX_CC_RECIPIENTS} addresses.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCc(false);
+                  setCcInput("");
+                }}
+                className="mt-1 text-xs text-ink-500 hover:underline"
+              >
+                Remove CC
+              </button>
+            </div>
+          )}
           {link && (
             <div className="mt-2 rounded-lg bg-ink-900 p-3 text-xs">
               <p className={delivery ? "text-emerald-300" : "text-amber-300"}>
                 {delivery ? `Link sent by ${delivery}.` : "Link created but was not sent; copy it below."}
               </p>
+              {ccSent.length > 0 && (
+                <p className="mt-1 text-emerald-300">Copied to {ccSent.join(", ")}.</p>
+              )}
+              {delivery === "sms" && ccInput.trim().length > 0 && (
+                <p className="mt-1 text-amber-300">
+                  The invoice template is set to SMS, so no CC was sent.
+                </p>
+              )}
               <p className="mt-1 break-all font-mono text-emerald-300">{link}</p>
             </div>
           )}
