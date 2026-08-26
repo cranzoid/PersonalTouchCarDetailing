@@ -13,8 +13,14 @@ import { getSettings } from "@/lib/settings";
 import { getAvailableSlots } from "@/lib/booking/availability";
 import { BookingError, createStaffAppointment } from "@/lib/booking/create";
 import { rescheduleAppointment } from "@/lib/booking/reschedule";
+import {
+  reviseAppointmentLines,
+  type ReviseDiscountMode,
+  type ReviseOutcome,
+} from "@/lib/booking/revise";
 import { notifyStaffOfNewAppointment } from "@/lib/staff-notifications";
 import { priceBooking, PricingError } from "@/lib/pricing";
+import { resolveActivePromotion } from "@/lib/promotions";
 import { formatInZone } from "@/lib/tz";
 
 /** Legal appointment status transitions (staff-driven). */
@@ -417,5 +423,218 @@ export async function transitionAppointmentAction(raw: unknown): Promise<ActionR
     if (err instanceof AuthError) return { ok: false, error: err.message };
     console.error("transitionAppointmentAction failed", err);
     return { ok: false, error: "Something went wrong" };
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Counter revision: the customer changed package after booking        */
+/* ------------------------------------------------------------------ */
+
+const reviseSchema = manualSelectionShape
+  .omit({ customerId: true, vehicleId: true })
+  .extend({
+    appointmentId: z.string().min(1),
+    /**
+     * What to do with a promotional discount locked at booking:
+     * re-apply the offer to the new package (the default and the honest
+     * reading of the ad), keep the original cents as goodwill, or drop it.
+     */
+    discountMode: z.enum(["reapply", "keep", "remove"]).default("reapply"),
+    reason: z.string().trim().min(1).max(500),
+    confirmOverlap: z.boolean().optional(),
+  })
+  .refine(hasBookableLine);
+
+export type ReviseAppointmentResult =
+  | { ok: true; warnings: string[]; totalCents: number; depositRefundableCents: number }
+  | { ok: false; error: string }
+  | { ok: false; needsOverlapConfirm: true; warnings: string[] };
+
+/**
+ * Re-prices a booking the customer changed at the counter — an upgrade, a
+ * downgrade, or a swap to a different package entirely.
+ *
+ * Prices through `priceBooking` exactly as booking creation does, so staff pick
+ * catalog ids and the server decides the money. The vehicle category is read
+ * from the database, never accepted from the form: package prices are
+ * size-dependent and a revision has to re-resolve them rather than reuse the
+ * old line prices.
+ */
+export async function reviseAppointmentLinesAction(raw: unknown): Promise<ReviseAppointmentResult> {
+  try {
+    const staff = await requireStaff("manage_bookings");
+    const parsed = reviseSchema.safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Please check the revised packages and give a reason" };
+    const input = parsed.data;
+    const settings = await getSettings();
+
+    const [appointment] = await db()
+      .select()
+      .from(schema.appointments)
+      .where(eq(schema.appointments.id, input.appointmentId))
+      .limit(1);
+    if (!appointment) return { ok: false, error: "Appointment not found" };
+    const vehicle = await loadOwnedVehicle(appointment.customerId, appointment.vehicleId);
+
+    /**
+     * The offer this booking was made under, resolved from the code on the
+     * appointment rather than from anything the browser sends.
+     *
+     * Eligibility is deliberately NOT re-checked. `isFirstTimeDetailCustomer`
+     * fails anyone who "already holds an unfulfilled discounted booking" —
+     * which this customer now does, because of the very booking being revised.
+     * Re-running it would strip the discount from every single revision.
+     */
+    const promo = resolveActivePromotion(settings, appointment.promoCode);
+    const pricing = await priceBooking({
+      serviceIds: input.serviceIds,
+      addonIds: input.addonIds,
+      vehicleCategory: vehicle.category as VehicleCategory,
+      settings,
+      promo,
+      customLines: input.customLines,
+    });
+    if (pricing.durationMin <= 0) return { ok: false, error: "Give the work a duration in minutes" };
+
+    const outcome: ReviseOutcome = await reviseAppointmentLines({
+      appointmentId: input.appointmentId,
+      lines: pricing.lines,
+      reappliedDiscountCents: pricing.discountCents,
+      discountMode: input.discountMode as ReviseDiscountMode,
+      reason: input.reason,
+      staffId: staff.id,
+      settings,
+      confirmOverlap: input.confirmOverlap,
+    });
+    if (!outcome.ok) return { ok: false, needsOverlapConfirm: true, warnings: outcome.warnings };
+
+    revalidatePath("/admin/appointments");
+    revalidatePath(`/admin/appointments/${input.appointmentId}`);
+    revalidatePath("/admin/jobs");
+    if (outcome.rebuiltInvoiceId) {
+      revalidatePath("/admin/invoices");
+      revalidatePath(`/admin/invoices/${outcome.rebuiltInvoiceId}`);
+    }
+    return {
+      ok: true,
+      warnings: outcome.warnings,
+      totalCents: outcome.totalCents,
+      depositRefundableCents: outcome.depositRefundableCents,
+    };
+  } catch (err) {
+    if (err instanceof AuthError || err instanceof BookingError || err instanceof PricingError) {
+      return { ok: false, error: err.message };
+    }
+    console.error("reviseAppointmentLinesAction failed", err);
+    return { ok: false, error: "Something went wrong re-pricing the appointment" };
+  }
+}
+
+const depositRefundInput = z.object({
+  appointmentId: z.string().min(1),
+  method: z.enum(MANUAL_PAYMENT_METHODS),
+  amountCents: z.number().int().min(1).max(10_000_000),
+  reason: z.string().trim().min(1).max(1000),
+  idempotencyKey: idempotencyKeySchema,
+});
+
+/**
+ * Returns deposit a downgraded booking can no longer absorb.
+ *
+ * Deliberately NOT routed through `issueRefundAction`. A deposit payment row
+ * carries `appointment_id` with a null `invoice_id`, and reaches the invoice
+ * only through the `depositAppliedCents` term inside `summarizePayments`. A
+ * refund row written against the *invoice* would therefore push
+ * `netPaidCents` below the total and flip a fully-settled invoice back to
+ * `partially_paid` — chasing the customer for money they do not owe. The
+ * refund belongs against the appointment, which is where the deposit lives.
+ */
+export async function refundAppointmentDepositAction(raw: unknown): Promise<ActionResult> {
+  try {
+    const staff = await requireStaff("issue_refunds");
+    const parsed = depositRefundInput.safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "A method, amount and reason are required" };
+    const input = parsed.data;
+
+    const result = await db().transaction(async (tx): Promise<ActionResult> => {
+      const [appointment] = await tx
+        .select()
+        .from(schema.appointments)
+        .where(eq(schema.appointments.id, input.appointmentId))
+        .for("update");
+      if (!appointment) return { ok: false, error: "Appointment not found" };
+
+      const [existing] = await tx
+        .select()
+        .from(schema.payments)
+        .where(eq(schema.payments.idempotencyKey, input.idempotencyKey))
+        .limit(1);
+      if (existing) {
+        const sameOperation =
+          existing.appointmentId === appointment.id &&
+          existing.invoiceId === null &&
+          existing.customerId === appointment.customerId &&
+          existing.kind === "refund" &&
+          existing.provider === input.method &&
+          existing.amountCents === input.amountCents &&
+          existing.status === "succeeded";
+        return sameOperation
+          ? { ok: true }
+          : { ok: false, error: "That idempotency key was already used for a different refund" };
+      }
+
+      if (input.amountCents > appointment.depositPaidCents) {
+        return { ok: false, error: "That is more than the deposit held on this appointment" };
+      }
+
+      const paymentId = newId("pay");
+      await tx.insert(schema.payments).values({
+        id: paymentId,
+        appointmentId: appointment.id,
+        customerId: appointment.customerId,
+        provider: input.method,
+        idempotencyKey: input.idempotencyKey,
+        kind: "refund",
+        amountCents: input.amountCents,
+        status: "succeeded",
+        receivedAt: new Date(),
+        recordedByStaffId: staff.id,
+      });
+      await tx
+        .update(schema.appointments)
+        .set({
+          depositPaidCents: appointment.depositPaidCents - input.amountCents,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.appointments.id, appointment.id));
+
+      await audit(tx, {
+        actorType: "staff",
+        actorId: staff.id,
+        action: "appointment.deposit_refunded",
+        entityType: "appointment",
+        entityId: appointment.id,
+        before: { depositPaidCents: appointment.depositPaidCents },
+        after: {
+          depositPaidCents: appointment.depositPaidCents - input.amountCents,
+          paymentId,
+          method: input.method,
+          amountCents: input.amountCents,
+        },
+        reason: input.reason,
+      });
+      return { ok: true };
+    });
+
+    if (result.ok) {
+      revalidatePath("/admin/appointments");
+      revalidatePath(`/admin/appointments/${input.appointmentId}`);
+      revalidatePath("/admin/jobs");
+    }
+    return result;
+  } catch (err) {
+    if (err instanceof AuthError) return { ok: false, error: err.message };
+    console.error("refundAppointmentDepositAction failed", err);
+    return { ok: false, error: "Something went wrong refunding the deposit" };
   }
 }

@@ -270,6 +270,11 @@ describe("buildAttentionQueue", () => {
     // shop and the card opened with ten rows nobody could act on.
     const queue = buildAttentionQueue({ uninvoicedJobs: [] });
     expect(queue.items.some((item) => item.label.includes("reason"))).toBe(false);
-    expect(Object.keys(queue)).toEqual(["items", "uninvoicedJobs", "total"]);
+    // Asserted as "no discount rule" rather than an exact key list: the queue
+    // has legitimately grown a refundable-deposit counter since, and pinning
+    // every key made an unrelated addition look like the withdrawn rule
+    // returning.
+    expect(Object.keys(queue).some((key) => key.toLowerCase().includes("discount"))).toBe(false);
+    expect(queue.items.every((item) => item.kind !== ("unexplained_discount" as never))).toBe(true);
   });
 });

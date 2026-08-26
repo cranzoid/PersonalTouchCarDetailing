@@ -445,3 +445,62 @@ The decisions inside it that would not be obvious from the code alone:
 worker over the same `pending` rows — the claim/send split already supports it —
 plus Twilio delivery-status callbacks, which would replace "accepted by the
 provider" with "delivered to the handset".
+
+## 21. Counter revisions: rewrite the booking, not the invoice
+A customer who books Package 2 online and takes Package 3 at the shop had no
+path through the system. `appointment_services` was written by
+`createAppointment` and by nothing else, so an upgrade had to be billed as a
+bolt-on "additional work" line and a downgrade had no path at all short of
+cancelling the invoice and hand-typing a new one — which silently dropped the
+job link, the deposit and the promo provenance.
+
+- **The booking is rewritten, not adjusted.** The invoice should read
+  "Package 3", not "Package 2 + upgrade to Package 3". An adjustment layer would
+  have produced a second source of truth about what the customer bought and left
+  the technician's job sheet disagreeing with the bill.
+- **What was booked survives in two places.** The audit log holds the full
+  before/after lines; `appointments.original_subtotal_cents` holds the first
+  subtotal, because reporting cannot practically join the audit log and "the ad
+  sold a $175 package — what did the counter actually sell?" is the entire point
+  of storing `promo_code`. Both columns are nullable and unbackfilled.
+- **The discount is re-applied by default — a narrow exception to #14.** That
+  rule stops *incidental* code paths from recomputing a stored figure. Here a
+  staff member is knowingly re-pricing a sale that changed, and their choice
+  (re-apply / keep as goodwill / remove) plus a mandatory reason is written to
+  `invoices.discount_reason` and the audit log. Re-applying gives the same
+  percentage of the new price; a package that is not on the offer drops to nil
+  rather than silently carrying a discount the ad never promised.
+- **Promotion eligibility is deliberately NOT re-checked.**
+  `isFirstTimeDetailCustomer` fails anyone already holding an unfulfilled
+  discounted booking — which this customer does, because of the very booking
+  being revised. Re-running it would strip the discount from every revision.
+- **A longer job warns, it does not block.** Whether to take the money and run
+  late is the shop's call. A downgrade shortens the job and is applied silently.
+- **`isJobOpenForRepricing`, not `isJobOpenForSideWork`.** Side work closes at
+  `in_progress`, but an invoice only exists from `ready_for_pickup`. Reusing the
+  side-work gate made the draft-invoice rebuild unreachable — caught by a test,
+  not by review. Repricing therefore runs to `ready_for_pickup` and stops at
+  `completed`, which is a credit note rather than a revision.
+- **A draft invoice is rewritten in place, keeping its number**, its
+  `invoice_jobs` row and its deposit. Anything already sent is refused: rewriting
+  a document the customer has been emailed is not something to do quietly.
+- **The deposit is never re-based, and the overhang is not silently swallowed.**
+  A downgrade can leave the deposit larger than the new total;
+  `createInvoiceFromJobAction` caps what it applies, so without surfacing it the
+  difference would vanish from every screen. It is derived, shown on the
+  appointment and the invoice, and joins the needs-attention queue.
+- **The deposit refund goes against the APPOINTMENT, not the invoice.** A
+  deposit payment row carries `appointment_id` with a null `invoice_id` and
+  reaches the invoice only through `depositAppliedCents` inside
+  `summarizePayments`. A refund row written against the invoice would push
+  `netPaidCents` below the total and flip a fully-settled invoice back to
+  `partially_paid`, chasing the customer for money they do not owe.
+- **Nothing here touches the payment-method tax path** (#18). Revision and
+  payment-method settlement stay independent: the invoice is still raised with
+  tax and the first payment still settles it. The order at the counter is
+  revise, then take payment — once a payment lands the invoice is no longer a
+  draft and the packages can no longer be changed.
+
+**Revisit when:** the shop wants to re-price a `completed` job. That needs a
+real credit note — a negative invoice against the original number — rather than
+widening this path.

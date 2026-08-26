@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { StatusBadge } from "@/components/admin";
 import { formatCents } from "@/lib/money";
@@ -10,6 +10,8 @@ import { TransitionButtons } from "./transition-buttons";
 import { CheckInButton } from "./check-in-button";
 import { requirePageStaff } from "@/lib/auth/page";
 import { ReschedulePanel } from "./reschedule-panel";
+import { RevisePanel } from "./revise-panel";
+import { DepositRefundPanel } from "./deposit-refund-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +40,36 @@ export default async function AppointmentDetailPage({
     : null;
 
   const attr = appt.attribution as Record<string, unknown> | null;
+
+  // Catalog for the "Change packages" panel — the same filter the manual
+  // booking builder uses, so staff see one consistent list of what is bookable.
+  const [services, categories, addonLinks, addons] = await Promise.all([
+    db().select().from(schema.services).where(and(
+      eq(schema.services.active, true),
+      eq(schema.services.bookingMode, "bookable"),
+      isNotNull(schema.services.basePriceCents),
+    )).orderBy(asc(schema.services.sort)),
+    db().select().from(schema.serviceCategories).orderBy(asc(schema.serviceCategories.sort)),
+    db().select().from(schema.serviceAddons),
+    db().select().from(schema.addons).where(eq(schema.addons.active, true)).orderBy(asc(schema.addons.sort)),
+  ]);
+  const categoryNames = new Map(categories.map((category) => [category.id, category.name]));
+
+  // Only appointments still in flight can be re-priced; the action re-checks
+  // this under a row lock, so this is presentation, not enforcement.
+  const canRevise = ["pending", "deposit_required", "confirmed", "arrived"].includes(appt.status);
+  // Derived, never stored: the deposit held that the current total cannot
+  // absorb. See refundAppointmentDepositAction.
+  const depositRefundableCents = Math.max(0, appt.depositPaidCents - appt.totalCents);
+  const depositPayments = depositRefundableCents > 0
+    ? await db().select({ provider: schema.payments.provider })
+        .from(schema.payments)
+        .where(and(
+          eq(schema.payments.appointmentId, appt.id),
+          eq(schema.payments.kind, "deposit"),
+          eq(schema.payments.status, "succeeded"),
+        ))
+    : [];
 
   return (
     <div className="max-w-3xl">
@@ -155,7 +187,52 @@ export default async function AppointmentDetailPage({
             {formatCents(appt.depositPaidCents)})
           </p>
         )}
+        {appt.revisedAt && (
+          <p className="mt-2 text-xs text-ink-500">
+            Packages changed at the counter on{" "}
+            {formatInZone(appt.revisedAt, settings.timezone, { month: "short", day: "numeric" })}
+            {appt.originalSubtotalCents !== null
+              ? ` · originally booked at ${formatCents(appt.originalSubtotalCents)}`
+              : ""}
+          </p>
+        )}
       </section>
+
+      {canRevise && (
+        <RevisePanel
+          appointmentId={appt.id}
+          services={services.map((service) => ({
+            id: service.id,
+            name: service.name,
+            categoryName: categoryNames.get(service.categoryId) ?? "Services",
+            basePriceCents: service.basePriceCents!,
+            addonIds: addonLinks.filter((link) => link.serviceId === service.id).map((link) => link.addonId),
+          }))}
+          addons={addons.map((addon) => ({ id: addon.id, name: addon.name, priceCents: addon.priceCents }))}
+          initialServiceIds={lines.flatMap((line) => (line.serviceId ? [line.serviceId] : []))}
+          initialAddonIds={lines.flatMap((line) => (line.addonId ? [line.addonId] : []))}
+          initialCustomLines={lines
+            .filter((line) => !line.serviceId && !line.addonId)
+            .map((line) => ({
+              description: line.description,
+              priceCents: line.priceCents,
+              durationMin: line.durationMin,
+            }))}
+          currentDiscountCents={appt.discountCents}
+          promoLabel={appt.promoLabel}
+          currency={settings.currency}
+        />
+      )}
+
+      {depositRefundableCents > 0 && (
+        <DepositRefundPanel
+          appointmentId={appt.id}
+          refundableCents={depositRefundableCents}
+          depositPaidCents={appt.depositPaidCents}
+          currency={settings.currency}
+          originalMethodWasCard={depositPayments.some((p) => p.provider === "stripe")}
+        />
+      )}
 
       {appt.customerNotes && (
         <section className="mt-6 rounded-xl border border-ink-800 p-5">

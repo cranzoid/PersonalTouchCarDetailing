@@ -445,6 +445,22 @@ export const appointments = pgTable(
     estimateId: text("estimate_id"),
     /** Stamped once the pre-appointment SMS reminder goes out — prevents duplicate sends. */
     reminderSentAt: timestamp("reminder_sent_at", { withTimezone: true }),
+    /**
+     * Stamped when staff re-priced the booking at the counter — the customer
+     * moved up or down a package after arriving. NULL means the appointment is
+     * still exactly what was booked online.
+     */
+    revisedAt: timestamp("revised_at", { withTimezone: true }),
+    /**
+     * `subtotal_cents` as first booked, kept only when a revision overwrites it.
+     *
+     * A revision rewrites `appointment_services` in place, so without this the
+     * question "the ad sold a $175 package — what did the counter actually
+     * sell?" would only be answerable from the audit log, which reporting
+     * cannot practically join. NULL on every unrevised row, which is also
+     * exactly what every row predating this column is.
+     */
+    originalSubtotalCents: integer("original_subtotal_cents"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

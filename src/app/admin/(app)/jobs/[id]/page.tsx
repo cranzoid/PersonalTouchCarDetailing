@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { StatusBadge } from "@/components/admin";
 import { formatCents } from "@/lib/money";
 import { formatInZone } from "@/lib/tz";
 import { getSettings } from "@/lib/settings";
-import { isJobOpenForSideWork, normalizeJobStatus } from "@/lib/job-status";
+import { isJobOpenForRepricing, isJobOpenForSideWork, normalizeJobStatus } from "@/lib/job-status";
 import { JobTransitionButtons } from "./job-transition-buttons";
 import { AdditionalWorkPanel } from "./additional-work";
 import { QcChecklistForm } from "./qc-checklist";
@@ -14,14 +14,21 @@ import { PhotoUpload } from "./photo-upload";
 import { NotesForm } from "./notes-form";
 import { CreateInvoiceButton } from "./create-invoice-button";
 import { requirePageStaff } from "@/lib/auth/page";
+import { roleHas } from "@/lib/auth/permissions";
+import type { StaffRole } from "@/lib/types";
 import { PhotoConsentButton } from "./photo-consent-button";
+import { RevisePanel } from "../../appointments/[id]/revise-panel";
 
 export const dynamic = "force-dynamic";
 
 export default async function JobDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePageStaff("work_jobs");
+  const staff = await requirePageStaff("work_jobs");
   const { id } = await params;
   const settings = await getSettings();
+  // The job screen is open to technicians, but re-pricing a booking is a
+  // manage_bookings action. Hide the panel rather than let a tech press a
+  // button that will only ever fail the permission check in the action.
+  const canRevise = roleHas(staff.role as StaffRole, "manage_bookings");
 
   const [job] = await db().select().from(schema.jobs).where(eq(schema.jobs.id, id)).limit(1);
   if (!job) notFound();
@@ -41,6 +48,22 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
   const resource = job.resourceId
     ? (await db().select().from(schema.resources).where(eq(schema.resources.id, job.resourceId)).limit(1))[0]
     : null;
+
+  // Catalog for the "Change packages" panel, loaded only when it will render.
+  const showRevisePanel = canRevise && appointment !== null && isJobOpenForRepricing(job.status);
+  const [reviseServices, reviseCategories, reviseAddonLinks, reviseAddons] = showRevisePanel
+    ? await Promise.all([
+        db().select().from(schema.services).where(and(
+          eq(schema.services.active, true),
+          eq(schema.services.bookingMode, "bookable"),
+          isNotNull(schema.services.basePriceCents),
+        )).orderBy(asc(schema.services.sort)),
+        db().select().from(schema.serviceCategories).orderBy(asc(schema.serviceCategories.sort)),
+        db().select().from(schema.serviceAddons),
+        db().select().from(schema.addons).where(eq(schema.addons.active, true)).orderBy(asc(schema.addons.sort)),
+      ])
+    : [[], [], [], []];
+  const reviseCategoryNames = new Map(reviseCategories.map((category) => [category.id, category.name]));
 
   const [inspection] = await db()
     .select()
@@ -128,6 +151,14 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
                 <span className="text-ink-400">Booked total (incl. tax)</span>
                 <span className="font-medium text-ink-200">{formatCents(appointment.totalCents)}</span>
               </div>
+              {appointment.revisedAt && (
+                <p className="mt-2 text-xs text-ink-500">
+                  Changed at the counter
+                  {appointment.originalSubtotalCents !== null
+                    ? ` · originally booked at ${formatCents(appointment.originalSubtotalCents)}`
+                    : ""}
+                </p>
+              )}
               <Link href={`/admin/appointments/${appointment.id}`} className="mt-2 inline-block text-accent-300 hover:underline">
                 View appointment →
               </Link>
@@ -137,6 +168,38 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           )}
         </section>
       </div>
+
+      {showRevisePanel && appointment && (
+        <RevisePanel
+          appointmentId={appointment.id}
+          services={reviseServices.map((service) => ({
+            id: service.id,
+            name: service.name,
+            categoryName: reviseCategoryNames.get(service.categoryId) ?? "Services",
+            basePriceCents: service.basePriceCents!,
+            addonIds: reviseAddonLinks
+              .filter((link) => link.serviceId === service.id)
+              .map((link) => link.addonId),
+          }))}
+          addons={reviseAddons.map((addon) => ({
+            id: addon.id,
+            name: addon.name,
+            priceCents: addon.priceCents,
+          }))}
+          initialServiceIds={appointmentLines.flatMap((line) => (line.serviceId ? [line.serviceId] : []))}
+          initialAddonIds={appointmentLines.flatMap((line) => (line.addonId ? [line.addonId] : []))}
+          initialCustomLines={appointmentLines
+            .filter((line) => !line.serviceId && !line.addonId)
+            .map((line) => ({
+              description: line.description,
+              priceCents: line.priceCents,
+              durationMin: line.durationMin,
+            }))}
+          currentDiscountCents={appointment.discountCents}
+          promoLabel={appointment.promoLabel}
+          currency={settings.currency}
+        />
+      )}
 
       <section className="mt-6 rounded-xl border border-ink-800 p-5">
         <div className="flex items-center justify-between">

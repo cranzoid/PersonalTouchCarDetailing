@@ -89,6 +89,7 @@ export default async function AdminDashboard() {
     ? await getAttentionQueue({
         since: new Date(now.getTime() - 90 * 86_400_000),
         formatDate: (date) => formatInZone(date, tz, { month: "short", day: "numeric" }),
+        currency: settings.currency,
       })
     : null;
 

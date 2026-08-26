@@ -92,6 +92,13 @@
       "when": 1787514025608,
       "tag": "0012_silent_stepford_cuckoos",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1787773663093,
+      "tag": "0013_counter_package_revision",
+      "breakpoints": true
     }
   ]
 }

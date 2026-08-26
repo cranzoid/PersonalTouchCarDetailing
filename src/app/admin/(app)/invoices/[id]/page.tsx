@@ -60,6 +60,27 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
     : summarizePayments(invoice.totalCents - invoice.taxCents, invoice.depositAppliedCents, payments);
   const refundAvailability = getRefundAvailability(payments, invoice.depositAppliedCents);
 
+  // Deposit taken against the originating appointment that this invoice's total
+  // cannot absorb — the signature of a downgrade at the counter. Derived here
+  // rather than stored so it can never drift from the two figures it sits
+  // between. The refund itself is issued from the appointment, not here: a
+  // refund row against the invoice would push netPaidCents below the total and
+  // reopen a settled invoice.
+  const [depositSourceAppointment] = linkedJobs.length > 0
+    ? await db()
+        .select({
+          id: schema.appointments.id,
+          depositPaidCents: schema.appointments.depositPaidCents,
+        })
+        .from(schema.appointments)
+        .innerJoin(schema.jobs, eq(schema.jobs.appointmentId, schema.appointments.id))
+        .where(eq(schema.jobs.id, linkedJobs[0].jobId))
+        .limit(1)
+    : [];
+  const depositRefundableCents = depositSourceAppointment
+    ? Math.max(0, depositSourceAppointment.depositPaidCents - invoice.depositAppliedCents)
+    : 0;
+
   return (
     <div className="max-w-3xl">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -164,6 +185,15 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
             {invoice.depositAppliedCents > 0 && (
               <tr><td colSpan={3} className="px-4 py-2 text-right text-ink-400">Deposit applied</td>
                 <td className="px-4 py-2 text-ink-200">−{formatCents(invoice.depositAppliedCents, settings.currency)}</td></tr>
+            )}
+            {depositRefundableCents > 0 && depositSourceAppointment && (
+              <tr><td colSpan={4} className="px-4 py-2 text-xs text-amber-300">
+                  {`${formatCents(depositRefundableCents, settings.currency)} of the deposit taken is more than this invoice can absorb and is owed back. `}
+                  <Link href={`/admin/appointments/${depositSourceAppointment.id}`} className="underline">
+                    Refund it on the appointment
+                  </Link>
+                  {" — refunding it here would reopen this invoice."}
+                </td></tr>
             )}
             {summary.paidCents > 0 && (
               <tr><td colSpan={3} className="px-4 py-2 text-right text-ink-400">Paid</td>

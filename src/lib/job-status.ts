@@ -53,6 +53,25 @@ export function isJobOpenForSideWork(storedStatus: string): boolean {
   return status !== null && OPEN_JOB_STATUSES.includes(status);
 }
 
+/**
+ * Stages at which the booked packages may still be re-priced.
+ *
+ * Deliberately wider than OPEN_JOB_STATUSES, and the difference matters: an
+ * invoice is only raised from `ready_for_pickup` onwards, so gating a revision
+ * on side-work openness would mean a booking could never be re-priced at the
+ * exact moment an invoice exists to correct. The counter conversation — "make
+ * it the full package" — usually happens over the finished car.
+ *
+ * `completed` is excluded: the vehicle has been handed back and the money
+ * settled, which is a credit note, not a revision.
+ */
+const REPRICEABLE_JOB_STATUSES: JobStatus[] = ["checked_in", "in_progress", "ready_for_pickup"];
+
+export function isJobOpenForRepricing(storedStatus: string): boolean {
+  const status = normalizeJobStatus(storedStatus);
+  return status !== null && REPRICEABLE_JOB_STATUSES.includes(status);
+}
+
 /** True when every QC checklist item has been ticked. */
 export function isQcComplete(items: Record<string, boolean>): boolean {
   return QC_CHECKLIST_ITEMS.every((item) => items[item.key] === true);
