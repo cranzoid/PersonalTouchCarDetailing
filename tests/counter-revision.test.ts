@@ -23,6 +23,7 @@ import {
   reviseAppointmentLinesAction,
 } from "../src/app/admin/(app)/appointments/actions";
 import { createInvoiceFromJobAction } from "../src/app/admin/(app)/invoices/actions";
+import { checkInAppointmentAction } from "../src/app/admin/(app)/jobs/actions";
 import { SETTINGS_DEFAULTS } from "../src/lib/settings";
 
 /**
@@ -200,6 +201,29 @@ describe("buildAttentionQueue", () => {
 });
 
 describe("reviseAppointmentLinesAction", () => {
+  it("re-prices a car that was checked in through the real flow", async () => {
+    // The counter case, reached the way the shop actually reaches it. Every
+    // other test here sets the appointment status by hand, which hid that
+    // check-in stamps `converted` rather than `arrived`.
+    const appointmentId = await bookedAppointment({
+      serviceId: PKG1, priceCents: 9000, discountCents: 900, status: "confirmed",
+    });
+    const checkIn = await checkInAppointmentAction({ appointmentId });
+    expect(checkIn.ok).toBe(true);
+
+    const res = await reviseAppointmentLinesAction({
+      appointmentId, serviceIds: [PKG2], addonIds: [], customLines: [],
+      discountMode: "reapply", reason: "upgraded at the counter",
+    });
+    expect(res.ok).toBe(true);
+
+    const [appt] = await db().select().from(schema.appointments)
+      .where(eq(schema.appointments.id, appointmentId));
+    expect(appt.status).toBe("converted");
+    expect(appt.subtotalCents).toBe(17500);
+    expect(appt.discountCents).toBe(1750);
+  });
+
   it("upgrades the package and re-prices the offer against the new price", async () => {
     const appointmentId = await bookedAppointment({ serviceId: PKG1, priceCents: 9000, discountCents: 900 });
     await jobFor(appointmentId);

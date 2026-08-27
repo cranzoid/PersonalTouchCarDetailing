@@ -57,7 +57,9 @@ export default async function AppointmentDetailPage({
 
   // Only appointments still in flight can be re-priced; the action re-checks
   // this under a row lock, so this is presentation, not enforcement.
-  const canRevise = ["pending", "deposit_required", "confirmed", "arrived"].includes(appt.status);
+  const canRevise = ["pending", "deposit_required", "confirmed", "arrived", "converted"].includes(
+    appt.status,
+  );
   // Derived, never stored: the deposit held that the current total cannot
   // absorb. See refundAppointmentDepositAction.
   const depositRefundableCents = Math.max(0, appt.depositPaidCents - appt.totalCents);

@@ -54,13 +54,24 @@ export type ReviseOutcome =
 /**
  * Which appointment statuses may be re-priced.
  *
- * `arrived` is the ordinary case — the customer is at the counter. `confirmed`
- * and `pending` cover a change phoned in beforehand. A `deposit_required`
- * booking is deliberately included: the deposit is a no-show hold and the
- * revision does not re-base it, so there is nothing inconsistent about
- * changing the package while one is outstanding.
+ * `converted` is THE ordinary case and the one that matters: checking a car in
+ * stamps the appointment `converted` (see checkInAppointmentAction), so every
+ * customer standing at the counter with their car in the bay is in this state.
+ * Leaving it out shipped a feature that refused the exact case it was built
+ * for — the first cut of this set was written from the status list rather than
+ * from the check-in path, and every test set the status by hand, so nothing
+ * caught it.
+ *
+ * `arrived` is the staff-transition variant of the same moment. `confirmed` and
+ * `pending` cover a change phoned in beforehand. A `deposit_required` booking
+ * is deliberately included: the deposit is a no-show hold and the revision does
+ * not re-base it, so there is nothing inconsistent about changing the package
+ * while one is outstanding.
+ *
+ * `completed` is deliberately absent: a finished visit is a credit-note
+ * problem, not a revision. See DECISIONS.md §21.
  */
-const REVISABLE = new Set(["pending", "deposit_required", "confirmed", "arrived"]);
+const REVISABLE = new Set(["pending", "deposit_required", "confirmed", "arrived", "converted"]);
 
 /**
  * Applies the staff's choice about a promotional discount to the new cart.
