@@ -479,8 +479,33 @@ job link, the deposit and the promo provenance.
 - **`isJobOpenForRepricing`, not `isJobOpenForSideWork`.** Side work closes at
   `in_progress`, but an invoice only exists from `ready_for_pickup`. Reusing the
   side-work gate made the draft-invoice rebuild unreachable — caught by a test,
-  not by review. Repricing therefore runs to `ready_for_pickup` and stops at
-  `completed`, which is a credit note rather than a revision.
+  not by review.
+- **The appointment gate is `converted`, and that is the whole point.** Checking
+  a car in stamps the appointment `converted`, so every customer at the counter
+  is in that state. The first cut of the set was written from the status list
+  rather than from `checkInAppointmentAction` and left it out, which shipped a
+  feature that refused the exact case it existed for. Every test set the status
+  by hand, so nothing caught it; there is now one that goes through check-in.
+- **A visit that is over can still be corrected until the money settles.** The
+  stage is not the guard — the invoice is. Repricing only ever rewrites a DRAFT
+  invoice, and any payment moves an invoice off draft, so a settled sale is
+  refused on those grounds. This matters because the most common correction of
+  all is a car handed back, invoiced at end of day from stale booked lines, and
+  only then noticed. Gating that on job stage left no way to fix an invoice
+  nobody had paid. Bay-overlap checking is skipped once the job is complete:
+  the car has left, so the bay time is history.
+- **Cancelling an invoice releases its jobs.** `cancelInvoiceAction` used to
+  update only the invoice row, leaving `jobs.invoice_id` set and the
+  `invoice_jobs` row in place — and since `invoice_jobs_job_uq` is unique on
+  `job_id` and `createInvoiceFromJobAction` refuses a job that already has an
+  invoice, a cancelled job-derived invoice could never be replaced. "Cancel and
+  re-issue" was a dead end that pushed staff into a manual invoice, dropping the
+  job link, the deposit application and the promo provenance. Cancelling now
+  clears both. The cancelled document keeps its number and its line items: it
+  stays readable history, and only its CLAIM on the job is released.
+- **A paid invoice is still refused, with different advice.** Cancelling is
+  refused there too, so the message says to refund it or bill the difference
+  separately rather than pointing at a cancel that will not work.
 - **A draft invoice is rewritten in place, keeping its number**, its
   `invoice_jobs` row and its deposit. Anything already sent is refused: rewriting
   a document the customer has been emailed is not something to do quietly.
@@ -501,6 +526,8 @@ job link, the deposit and the promo provenance.
   revise, then take payment — once a payment lands the invoice is no longer a
   draft and the packages can no longer be changed.
 
-**Revisit when:** the shop wants to re-price a `completed` job. That needs a
-real credit note — a negative invoice against the original number — rather than
-widening this path.
+**Revisit when:** the shop needs to correct an invoice that has already been
+PAID. That needs a real credit note — a negative document referencing the
+original number, so HST already reported is reversed on the record rather than
+by editing history — and, given the payment-method rule above, the accountant's
+view on how that reversal is reported. Deliberately not improvised here.

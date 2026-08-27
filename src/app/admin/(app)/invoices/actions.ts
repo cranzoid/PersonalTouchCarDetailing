@@ -894,6 +894,40 @@ export async function cancelInvoiceAction(raw: unknown): Promise<ActionResult> {
         })
         .where(eq(schema.invoices.id, input.invoiceId));
 
+      // Release the jobs this invoice held, so cancelling is genuinely
+      // "cancel and re-issue" rather than a dead end.
+      //
+      // Until this existed, cancelling left `jobs.invoice_id` set and the
+      // `invoice_jobs` row in place. `invoice_jobs_job_uq` is unique on job_id
+      // and createInvoiceFromJobAction refuses a job that already has an
+      // invoice, so a cancelled job-derived invoice could never be replaced —
+      // staff were pushed into a manual invoice that dropped the job link, the
+      // deposit application and the promo provenance.
+      //
+      // The cancelled invoice keeps its number and its line items: it stays a
+      // readable historical document. Only the CLAIM on the job is released.
+      const releasedJobs = await tx
+        .select({ jobId: schema.invoiceJobs.jobId })
+        .from(schema.invoiceJobs)
+        .where(eq(schema.invoiceJobs.invoiceId, input.invoiceId));
+      const releasedJobIds = releasedJobs.map((row) => row.jobId);
+      if (releasedJobIds.length > 0) {
+        await tx.delete(schema.invoiceJobs).where(eq(schema.invoiceJobs.invoiceId, input.invoiceId));
+        await tx
+          .update(schema.jobs)
+          .set({ invoiceId: null, updatedAt: new Date() })
+          .where(inArray(schema.jobs.id, releasedJobIds));
+      }
+      // The legacy single-job pointer predates invoice_jobs and is not always
+      // mirrored there, so clear it on its own terms too.
+      if (invoice.jobId && !releasedJobIds.includes(invoice.jobId)) {
+        await tx
+          .update(schema.jobs)
+          .set({ invoiceId: null, updatedAt: new Date() })
+          .where(eq(schema.jobs.id, invoice.jobId));
+        releasedJobIds.push(invoice.jobId);
+      }
+
       await audit(tx, {
         actorType: "staff",
         actorId: staff.id,
@@ -901,7 +935,7 @@ export async function cancelInvoiceAction(raw: unknown): Promise<ActionResult> {
         entityType: "invoice",
         entityId: input.invoiceId,
         before: { status: invoice.status },
-        after: { status: "cancelled" },
+        after: { status: "cancelled", releasedJobIds },
         reason: input.reason,
       });
       return { ok: true };
@@ -910,6 +944,8 @@ export async function cancelInvoiceAction(raw: unknown): Promise<ActionResult> {
     if (result.ok) {
       revalidatePath(`/admin/invoices/${input.invoiceId}`);
       revalidatePath("/admin/invoices");
+      // The released jobs are invoiceable again, so their screens are stale.
+      revalidatePath("/admin/jobs");
     }
     return result;
   } catch (err) {

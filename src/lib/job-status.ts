@@ -62,10 +62,19 @@ export function isJobOpenForSideWork(storedStatus: string): boolean {
  * exact moment an invoice exists to correct. The counter conversation — "make
  * it the full package" — usually happens over the finished car.
  *
- * `completed` is excluded: the vehicle has been handed back and the money
- * settled, which is a credit note, not a revision.
+ * `completed` is included, but it is the invoice that actually guards the case:
+ * repricing only ever rewrites a DRAFT invoice, and any payment moves an
+ * invoice off draft, so a settled sale is refused on those grounds rather than
+ * on the job's stage. The common correction is a car handed back and invoiced
+ * later from stale booked lines — refusing that on stage alone left no way to
+ * fix an invoice that had not been paid.
  */
-const REPRICEABLE_JOB_STATUSES: JobStatus[] = ["checked_in", "in_progress", "ready_for_pickup"];
+const REPRICEABLE_JOB_STATUSES: JobStatus[] = [
+  "checked_in",
+  "in_progress",
+  "ready_for_pickup",
+  "completed",
+];
 
 export function isJobOpenForRepricing(storedStatus: string): boolean {
   const status = normalizeJobStatus(storedStatus);

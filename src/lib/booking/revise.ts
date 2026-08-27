@@ -68,10 +68,18 @@ export type ReviseOutcome =
  * not re-base it, so there is nothing inconsistent about changing the package
  * while one is outstanding.
  *
- * `completed` is deliberately absent: a finished visit is a credit-note
- * problem, not a revision. See DECISIONS.md §21.
+ * `completed` is included so a visit that is over can still be corrected before
+ * the money settles; what actually stops a settled sale is the draft-invoice
+ * gate below, not the stage. See DECISIONS.md §21.
  */
-const REVISABLE = new Set(["pending", "deposit_required", "confirmed", "arrived", "converted"]);
+const REVISABLE = new Set([
+  "pending",
+  "deposit_required",
+  "confirmed",
+  "arrived",
+  "converted",
+  "completed",
+]);
 
 /**
  * Applies the staff's choice about a promotional discount to the new cart.
@@ -175,8 +183,14 @@ export async function reviseAppointmentLines(input: {
       ? await tx.select().from(schema.invoices).where(eq(schema.invoices.id, invoiceId)).for("update")
       : [];
     if (invoice && invoice.status !== "draft") {
+      // A paid or part-paid invoice is a different problem: money has moved and
+      // correcting it means reversing it, not rewriting it. Cancelling is
+      // refused there too (cancelInvoiceAction), so the advice has to differ.
+      const settled = ["partially_paid", "paid", "refunded"].includes(invoice.status);
       throw new BookingError(
-        `Invoice #${invoice.number} has already been ${invoice.status.replaceAll("_", " ")} — cancel it before changing the packages`,
+        settled
+          ? `Invoice #${invoice.number} has already been paid against — refund it before changing the packages, or bill the difference separately.`
+          : `Invoice #${invoice.number} has already been ${invoice.status.replaceAll("_", " ")} — cancel it first, which releases the job so it can be re-priced and re-issued.`,
       );
     }
 
@@ -206,7 +220,13 @@ export async function reviseAppointmentLines(input: {
     const warnings: string[] = [];
     // Only a LENGTHENING run can newly collide. A downgrade shortens the job
     // and is always safe, so it is applied without ceremony.
-    if (endsAt.getTime() > appointment.endsAt.getTime() && appointment.resourceId) {
+    //
+    // Skipped entirely once the job is complete: the car has left, so the bay
+    // time is history. Without this, correcting a finished job would compare a
+    // notional new end time against cars that have long since come and gone and
+    // warn about a clash that cannot happen.
+    const jobFinished = job?.status === "completed";
+    if (!jobFinished && endsAt.getTime() > appointment.endsAt.getTime() && appointment.resourceId) {
       const clashes = await tx
         .select({ id: schema.appointments.id, startsAt: schema.appointments.startsAt })
         .from(schema.appointments)

@@ -22,7 +22,11 @@ import {
   refundAppointmentDepositAction,
   reviseAppointmentLinesAction,
 } from "../src/app/admin/(app)/appointments/actions";
-import { createInvoiceFromJobAction } from "../src/app/admin/(app)/invoices/actions";
+import {
+  cancelInvoiceAction,
+  createInvoiceFromJobAction,
+  recordPaymentAction,
+} from "../src/app/admin/(app)/invoices/actions";
 import { checkInAppointmentAction } from "../src/app/admin/(app)/jobs/actions";
 import { SETTINGS_DEFAULTS } from "../src/lib/settings";
 
@@ -330,7 +334,7 @@ describe("reviseAppointmentLinesAction", () => {
     });
     expect(res.ok).toBe(false);
     if (res.ok || "needsOverlapConfirm" in res) return;
-    expect(res.error).toContain("cancel it before changing the packages");
+    expect(res.error).toContain("cancel it first, which releases the job");
   });
 
   it("reports the deposit a downgrade leaves stranded", async () => {
@@ -418,6 +422,130 @@ describe("reviseAppointmentLinesAction", () => {
       .where(eq(schema.appointments.id, appointmentId));
     expect(appt.subtotalCents).toBe(21500);
     expect(appt.discountCents).toBe(1750);
+  });
+});
+
+describe("a visit that is already over", () => {
+  it("re-prices a completed job that has not been invoiced yet", async () => {
+    // The common correction: car handed back, invoiced at end of day, and only
+    // then does anyone notice the invoice says the wrong package.
+    const appointmentId = await bookedAppointment({ serviceId: PKG1, priceCents: 9000, discountCents: 900 });
+    const jobId = await jobFor(appointmentId, "completed");
+
+    const res = await reviseAppointmentLinesAction({
+      appointmentId, serviceIds: [PKG2], addonIds: [], customLines: [],
+      discountMode: "reapply", reason: "they actually took package 2",
+    });
+    expect(res.ok).toBe(true);
+
+    const invoiceRes = await createInvoiceFromJobAction({ jobId });
+    expect(invoiceRes.ok).toBe(true);
+    if (!invoiceRes.ok) return;
+    const [invoice] = await db().select().from(schema.invoices)
+      .where(eq(schema.invoices.id, invoiceRes.invoiceId));
+    expect(invoice.subtotalCents).toBe(17500);
+    expect(invoice.discountCents).toBe(1750);
+  });
+
+  it("re-prices a completed job whose draft invoice is still unpaid", async () => {
+    const appointmentId = await bookedAppointment({ serviceId: PKG2, priceCents: 17500 });
+    const jobId = await jobFor(appointmentId, "completed");
+    const invoiceRes = await createInvoiceFromJobAction({ jobId });
+    if (!invoiceRes.ok) return;
+
+    const res = await reviseAppointmentLinesAction({
+      appointmentId, serviceIds: [PKG1], addonIds: [], customLines: [],
+      discountMode: "remove", reason: "downgrade noticed after handover",
+    });
+    expect(res.ok).toBe(true);
+
+    const [invoice] = await db().select().from(schema.invoices)
+      .where(eq(schema.invoices.id, invoiceRes.invoiceId));
+    expect(invoice.subtotalCents).toBe(9000);
+    expect(invoice.totalCents).toBe(10170);
+  });
+
+  it("refuses once the invoice has been paid, and says what to do instead", async () => {
+    const appointmentId = await bookedAppointment({ serviceId: PKG2, priceCents: 17500 });
+    const jobId = await jobFor(appointmentId, "completed");
+    const invoiceRes = await createInvoiceFromJobAction({ jobId });
+    if (!invoiceRes.ok) return;
+    // Cash strips the HST, so the balance owed is the tax-exclusive figure.
+    const paid = await recordPaymentAction({
+      invoiceId: invoiceRes.invoiceId, method: "cash", amountCents: 17500,
+      idempotencyKey: "completed-paid-test-1",
+    });
+    expect(paid.ok).toBe(true);
+
+    const res = await reviseAppointmentLinesAction({
+      appointmentId, serviceIds: [PKG1], addonIds: [], customLines: [],
+      discountMode: "remove", reason: "too late",
+    });
+    expect(res.ok).toBe(false);
+    if (res.ok || "needsOverlapConfirm" in res) throw new Error("expected a refusal");
+    expect(res.error).toContain("refund it before changing the packages");
+  });
+
+  it("frees the job when its invoice is cancelled, so it can be re-issued", async () => {
+    // Before this, cancelling left jobs.invoice_id set and the invoice_jobs row
+    // in place, and invoice_jobs_job_uq is unique on job_id — so a cancelled
+    // job-derived invoice could never be replaced.
+    const appointmentId = await bookedAppointment({ serviceId: PKG2, priceCents: 17500 });
+    const jobId = await jobFor(appointmentId, "completed");
+    const first = await createInvoiceFromJobAction({ jobId });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    await db().update(schema.invoices).set({ status: "sent" })
+      .where(eq(schema.invoices.id, first.invoiceId));
+
+    const cancelled = await cancelInvoiceAction({ invoiceId: first.invoiceId, reason: "wrong package" });
+    expect(cancelled.ok).toBe(true);
+
+    const [job] = await db().select().from(schema.jobs).where(eq(schema.jobs.id, jobId));
+    expect(job.invoiceId).toBeNull();
+    const links = await db().select().from(schema.invoiceJobs)
+      .where(eq(schema.invoiceJobs.jobId, jobId));
+    expect(links).toHaveLength(0);
+
+    // The cancelled document itself is untouched history.
+    const [old] = await db().select().from(schema.invoices).where(eq(schema.invoices.id, first.invoiceId));
+    expect(old.status).toBe("cancelled");
+    const oldLines = await db().select().from(schema.invoiceLineItems)
+      .where(eq(schema.invoiceLineItems.invoiceId, first.invoiceId));
+    expect(oldLines.length).toBeGreaterThan(0);
+
+    // Re-price, then re-issue — the whole point of freeing the job.
+    const revised = await reviseAppointmentLinesAction({
+      appointmentId, serviceIds: [PKG1], addonIds: [], customLines: [],
+      discountMode: "remove", reason: "corrected after cancelling",
+    });
+    expect(revised.ok).toBe(true);
+
+    const second = await createInvoiceFromJobAction({ jobId });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    expect(second.invoiceId).not.toBe(first.invoiceId);
+    const [reissued] = await db().select().from(schema.invoices)
+      .where(eq(schema.invoices.id, second.invoiceId));
+    expect(reissued.subtotalCents).toBe(9000);
+    expect(reissued.number).toBeGreaterThan(old.number);
+  });
+
+  it("refuses to cancel an invoice that has been paid, leaving the job held", async () => {
+    const appointmentId = await bookedAppointment({ serviceId: PKG2, priceCents: 17500 });
+    const jobId = await jobFor(appointmentId, "completed");
+    const first = await createInvoiceFromJobAction({ jobId });
+    if (!first.ok) return;
+    await recordPaymentAction({
+      invoiceId: first.invoiceId, method: "cash", amountCents: 17500,
+      idempotencyKey: "completed-paid-test-2",
+    });
+
+    const cancelled = await cancelInvoiceAction({ invoiceId: first.invoiceId, reason: "oops" });
+    expect(cancelled.ok).toBe(false);
+
+    const [job] = await db().select().from(schema.jobs).where(eq(schema.jobs.id, jobId));
+    expect(job.invoiceId).toBe(first.invoiceId);
   });
 });
 
