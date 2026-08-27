@@ -531,3 +531,57 @@ PAID. That needs a real credit note — a negative document referencing the
 original number, so HST already reported is reversed on the record rather than
 by editing history — and, given the payment-method rule above, the accountant's
 view on how that reversal is reported. Deliberately not improvised here.
+
+## 22. Invoicing a visit that was never checked in: record the job, don't re-parent the invoice
+The shop finishes cars two ways. "Check In Vehicle" creates a job and stamps the
+appointment `converted`, and the job screen invoices from it. But the path
+actually used in production — "Mark Arrived", then "Mark Completed" — creates no
+job at all, and since an invoice hangs off `jobs`, that path could not bill
+anyone. Staff were pushed into `/admin/invoices/new`, a blank form that drops the
+deposit, the promo provenance and any link back to the booking: exactly the
+failure mode #21 was written to close, reached through a different door.
+
+- **The missing job is written, rather than teaching invoices about
+  appointments.** Adding `invoices.appointment_id` would have meant a second
+  parent for an invoice, a second uniqueness rule to keep "one invoice per
+  visit" true, and a second copy of the deposit/discount/promo/tax logic. The
+  car really was detailed, so the job row is not a fiction — it is the record
+  nobody wrote. `invoice_jobs_job_uq` then keeps enforcing one invoice per visit
+  for free.
+- **Everything downstream starts seeing these visits, which is the point.** The
+  needs-attention "handed back but never invoiced" card, the lead funnel's
+  completed-job count, and maintenance reminders all key off `jobs`, and all of
+  them were blind to half the shop's work.
+- **`buildInvoiceForJob` is shared, not copied.** Both entry points run the same
+  money path; the audit row records which one raised it. A second copy is
+  precisely the drift that once re-billed a discounted booking at full price.
+- **The job is dated to the visit, not to the paperwork.** `completed_at` is the
+  appointment's `ends_at`, because maintenance reminders count months from the
+  visit. Stamping it `now` would push every future reminder late by however long
+  the invoice sat unraised.
+- **Back-filling old paperwork must not send mail.** A visit older than
+  `maintenanceReminderMonths` would be due the instant its job row appears, and
+  the next cron tick would text the customer "time for your next detail?" about
+  a car they brought in months ago. Such a job is created with
+  `maintenance_reminder_sent_at` already stamped, and the audit row records the
+  suppression.
+- **The appointment stays `completed`.** It is not moved to `converted`: the
+  status describes the visit, and the visit is over. Only `jobs.id` is written
+  onto it, which is how the screen finds the invoice it produced.
+- **Nothing here asks about tax or payment method** (#18). The invoice is raised
+  with tax and the first payment settles it. A tax choice on this screen would
+  be a second way to zero HST that does not populate `quoted_payment_method`,
+  and `tax_treatment = 'none' AND quoted_payment_method IS NOT NULL` would
+  quietly stop being the complete restatement.
+- **Changing what is billed still happens on the appointment** (#21). The panel
+  has no line editor: "Change packages" rewrites the booking and its draft
+  invoice together, so the two can never disagree. An editor inside the invoice
+  flow would be a second source of truth about what the customer bought, and
+  would have to re-derive duration, bay overlap and the deposit overhang that
+  `reviseAppointmentLines` already handles. The appointment screen's revise gate
+  had also drifted out of step with the server's `REVISABLE` set, hiding the
+  panel on exactly the `completed` visits #21 widened it for; the two now match.
+
+**Revisit when:** the shop wants to invoice a walk-in that never had an
+appointment at all. That is still the manual builder, and it still drops the
+deposit and promo columns because there was never a booking to carry them from.

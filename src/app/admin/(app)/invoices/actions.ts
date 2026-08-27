@@ -3,11 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { and, eq, inArray } from "drizzle-orm";
-import { db, schema } from "@/db";
+import { db, schema, type Db } from "@/db";
 import { newId } from "@/lib/id";
 import { requireStaff, AuthError } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { getSettings } from "@/lib/settings";
+import { isMaintenanceReminderDue } from "@/lib/scheduling";
 import { sendMessageTemplate } from "@/lib/messaging";
 import { parseCcList } from "@/lib/email";
 import { formatCents, percentCents } from "@/lib/money";
@@ -41,6 +42,142 @@ export type ActionResult<T = object> =
 /* Create invoice from a job                                           */
 /* ------------------------------------------------------------------ */
 
+/** Transaction handle, as handed to the callback by `db().transaction`. */
+type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
+/**
+ * Builds the invoice for an already-locked job: the booked appointment lines
+ * plus any approved additional work, carrying the booking's discount, promo
+ * provenance, tax rate and deposit.
+ *
+ * Shared by the two ways a visit reaches an invoice — the job screen, and a
+ * completed appointment that was never checked in. Extracted so the money
+ * logic has exactly one home: a second copy is precisely the kind of drift
+ * that silently re-bills a discounted booking at full price.
+ *
+ * The caller owns the transaction and must already hold `job` FOR UPDATE.
+ */
+async function buildInvoiceForJob(
+  tx: Tx,
+  input: {
+    job: typeof schema.jobs.$inferSelect;
+    staffId: string;
+    settings: Awaited<ReturnType<typeof getSettings>>;
+    /** Which entry point raised this, so the audit row stays legible. */
+    source: "job" | "appointment";
+  },
+): Promise<ActionResult<{ invoiceId: string }>> {
+  const { job, settings } = input;
+
+  const appointment = job.appointmentId
+    ? (await tx.select().from(schema.appointments).where(eq(schema.appointments.id, job.appointmentId)).limit(1))[0]
+    : undefined;
+  const appointmentLines = appointment
+    ? await tx
+        .select()
+        .from(schema.appointmentServices)
+        .where(eq(schema.appointmentServices.appointmentId, appointment.id))
+    : [];
+  const approvedWork = await tx
+    .select()
+    .from(schema.additionalWorkRequests)
+    .where(eq(schema.additionalWorkRequests.jobId, job.id));
+  const billableWork = approvedWork.filter((r) => r.status === "approved" || r.status === "override_approved");
+
+  const lines = [
+    ...appointmentLines.map((l) => ({
+      serviceId: l.serviceId,
+      description: l.description,
+      quantity: 1,
+      unitPriceCents: l.priceCents,
+    })),
+    ...billableWork.map((r) => ({
+      serviceId: null as string | null,
+      description: r.description,
+      quantity: 1,
+      unitPriceCents: r.priceCents,
+    })),
+  ];
+  if (lines.length === 0) {
+    return { ok: false, error: "Nothing to invoice — no booked services or approved additional work" };
+  }
+
+  // `??` not `||`: a legitimately zero-rated appointment (0) must stay zero.
+  // With `||` it silently fell back to the 13% settings rate, which made
+  // tax exemption impossible on job-derived invoices.
+  // The invoice is raised WITH tax, because the shop does not yet know how
+  // the customer will pay. Cash or e-transfer strips it when the payment is
+  // recorded — see resolvePaymentTax and DECISIONS.md #18.
+  const taxRateBp = appointment?.taxRateBp ?? settings.taxRateBp;
+  // The promotional discount locked when the customer booked. Carried
+  // across as a fixed amount, never recalculated: additional work approved
+  // at the shop is billed at full price, and computeInvoiceTotals clamps it
+  // to the subtotal.
+  const discountCents = appointment?.discountCents ?? 0;
+  const totals = computeInvoiceTotals(lines, discountCents, taxRateBp);
+  const depositAppliedCents = Math.min(appointment?.depositPaidCents ?? 0, totals.totalCents);
+
+  const number = await nextInvoiceNumber(tx);
+  const invoiceId = newId("inv");
+  await tx.insert(schema.invoices).values({
+    id: invoiceId,
+    number,
+    customerId: job.customerId,
+    vehicleId: job.vehicleId,
+    jobId: job.id,
+    status: "draft",
+    subtotalCents: totals.subtotalCents,
+    discountCents: totals.discountCents,
+    taxRateBp,
+    taxLabel: settings.taxLabel,
+    taxRegistrationNumber: settings.taxRegistrationNumber || null,
+    taxCents: totals.taxCents,
+    // The discount rode across from the booking, so its reason is the promo
+    // that produced it rather than something staff type here.
+    discountReason:
+      totals.discountCents > 0
+        ? (appointment?.promoLabel ?? "Discount locked at booking")
+        : null,
+    totalCents: totals.totalCents,
+    depositAppliedCents,
+    notes: appointment?.promoLabel
+      ? `${appointment.promoLabel}${appointment.promoCode ? ` (${appointment.promoCode})` : ""} applied at booking.`
+      : null,
+  });
+  await tx.insert(schema.invoiceLineItems).values(
+    lines.map((line, i) => ({
+      id: newId("ili"),
+      invoiceId,
+      serviceId: line.serviceId,
+      description: line.description,
+      quantity: line.quantity,
+      unitPriceCents: line.unitPriceCents,
+      sort: i,
+    })),
+  );
+  await tx.insert(schema.invoiceJobs).values({ id: newId("ij"), invoiceId, jobId: job.id });
+  await tx.update(schema.jobs).set({ invoiceId, updatedAt: new Date() }).where(eq(schema.jobs.id, job.id));
+
+  await audit(tx, {
+    actorType: "staff",
+    actorId: input.staffId,
+    action: "invoice.created",
+    entityType: "invoice",
+    entityId: invoiceId,
+    after: {
+      number,
+      jobId: job.id,
+      appointmentId: job.appointmentId,
+      source: input.source,
+      totalCents: totals.totalCents,
+      discountCents: totals.discountCents,
+      promoCode: appointment?.promoCode ?? null,
+      lines: lines.length,
+    },
+  });
+  return { ok: true, invoiceId };
+}
+
 export async function createInvoiceFromJobAction(
   raw: unknown,
 ): Promise<ActionResult<{ invoiceId: string }>> {
@@ -59,112 +196,7 @@ export async function createInvoiceFromJobAction(
       if (!["ready_for_pickup", "completed"].includes(job.status)) {
         return { ok: false, error: "The job must be ready for pickup or completed before invoicing" };
       }
-
-      const appointment = job.appointmentId
-        ? (await tx.select().from(schema.appointments).where(eq(schema.appointments.id, job.appointmentId)).limit(1))[0]
-        : undefined;
-      const appointmentLines = appointment
-        ? await tx
-            .select()
-            .from(schema.appointmentServices)
-            .where(eq(schema.appointmentServices.appointmentId, appointment.id))
-        : [];
-      const approvedWork = await tx
-        .select()
-        .from(schema.additionalWorkRequests)
-        .where(eq(schema.additionalWorkRequests.jobId, jobId));
-      const billableWork = approvedWork.filter((r) => r.status === "approved" || r.status === "override_approved");
-
-      const lines = [
-        ...appointmentLines.map((l) => ({
-          serviceId: l.serviceId,
-          description: l.description,
-          quantity: 1,
-          unitPriceCents: l.priceCents,
-        })),
-        ...billableWork.map((r) => ({
-          serviceId: null as string | null,
-          description: r.description,
-          quantity: 1,
-          unitPriceCents: r.priceCents,
-        })),
-      ];
-      if (lines.length === 0) {
-        return { ok: false, error: "Nothing to invoice — no booked services or approved additional work" };
-      }
-
-      // `??` not `||`: a legitimately zero-rated appointment (0) must stay zero.
-      // With `||` it silently fell back to the 13% settings rate, which made
-      // tax exemption impossible on job-derived invoices.
-      // The invoice is raised WITH tax, because the shop does not yet know how
-      // the customer will pay. Cash or e-transfer strips it when the payment is
-      // recorded — see resolvePaymentTax and DECISIONS.md #18.
-      const taxRateBp = appointment?.taxRateBp ?? settings.taxRateBp;
-      // The promotional discount locked when the customer booked. Carried
-      // across as a fixed amount, never recalculated: additional work approved
-      // at the shop is billed at full price, and computeInvoiceTotals clamps it
-      // to the subtotal.
-      const discountCents = appointment?.discountCents ?? 0;
-      const totals = computeInvoiceTotals(lines, discountCents, taxRateBp);
-      const depositAppliedCents = Math.min(appointment?.depositPaidCents ?? 0, totals.totalCents);
-
-      const number = await nextInvoiceNumber(tx);
-      const invoiceId = newId("inv");
-      await tx.insert(schema.invoices).values({
-        id: invoiceId,
-        number,
-        customerId: job.customerId,
-        vehicleId: job.vehicleId,
-        jobId: job.id,
-        status: "draft",
-        subtotalCents: totals.subtotalCents,
-        discountCents: totals.discountCents,
-        taxRateBp,
-        taxLabel: settings.taxLabel,
-        taxRegistrationNumber: settings.taxRegistrationNumber || null,
-        taxCents: totals.taxCents,
-        // The discount rode across from the booking, so its reason is the promo
-        // that produced it rather than something staff type here.
-        discountReason:
-          totals.discountCents > 0
-            ? (appointment?.promoLabel ?? "Discount locked at booking")
-            : null,
-        totalCents: totals.totalCents,
-        depositAppliedCents,
-        notes: appointment?.promoLabel
-          ? `${appointment.promoLabel}${appointment.promoCode ? ` (${appointment.promoCode})` : ""} applied at booking.`
-          : null,
-      });
-      await tx.insert(schema.invoiceLineItems).values(
-        lines.map((line, i) => ({
-          id: newId("ili"),
-          invoiceId,
-          serviceId: line.serviceId,
-          description: line.description,
-          quantity: line.quantity,
-          unitPriceCents: line.unitPriceCents,
-          sort: i,
-        })),
-      );
-      await tx.insert(schema.invoiceJobs).values({ id: newId("ij"), invoiceId, jobId: job.id });
-      await tx.update(schema.jobs).set({ invoiceId, updatedAt: new Date() }).where(eq(schema.jobs.id, jobId));
-
-      await audit(tx, {
-        actorType: "staff",
-        actorId: staff.id,
-        action: "invoice.created",
-        entityType: "invoice",
-        entityId: invoiceId,
-        after: {
-          number,
-          jobId,
-          totalCents: totals.totalCents,
-          discountCents: totals.discountCents,
-          promoCode: appointment?.promoCode ?? null,
-          lines: lines.length,
-        },
-      });
-      return { ok: true, invoiceId };
+      return buildInvoiceForJob(tx, { job, staffId: staff.id, settings, source: "job" });
     });
 
     if (result.ok) {
@@ -176,6 +208,137 @@ export async function createInvoiceFromJobAction(
     if (err instanceof AuthError) return { ok: false, error: err.message };
     console.error("createInvoiceFromJobAction failed", err);
     return { ok: false, error: "Something went wrong" };
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Create invoice from a completed appointment                         */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Raises the invoice for a visit that ended without ever being checked in.
+ *
+ * The shop has two ways to finish a car. Checking it in creates a job, and the
+ * job screen invoices from it. But "Mark Arrived" then "Mark Completed" creates
+ * no job at all — and since an invoice hangs off `jobs`, that path had no way
+ * to bill anyone. Staff were pushed into `/admin/invoices/new`, a blank form
+ * that drops the deposit, the promo provenance and any link back to the
+ * booking.
+ *
+ * Rather than teach invoices about appointments (a second parent, a second
+ * uniqueness rule, and a second copy of the money logic), this materialises the
+ * job the visit should have had and then runs the ordinary job path. The car
+ * really was detailed, so the job row is not a fiction — it is the record that
+ * was never written. Everything downstream that reasons about completed work —
+ * the needs-attention queue, the lead funnel, maintenance reminders — starts
+ * seeing these visits, which is the point.
+ *
+ * Deliberately does NOT move the appointment off `completed`, and deliberately
+ * asks nothing about tax or payment method: the invoice is raised with tax and
+ * the first payment settles it (DECISIONS.md #18). To change what is being
+ * billed, re-price the appointment first — see reviseAppointmentLinesAction.
+ */
+export async function createInvoiceFromAppointmentAction(
+  raw: unknown,
+): Promise<ActionResult<{ invoiceId: string; jobId: string }>> {
+  try {
+    const staff = await requireStaff("manage_invoices");
+    const parsed = z.object({ appointmentId: z.string().min(1) }).safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Invalid request" };
+    const { appointmentId } = parsed.data;
+    const settings = await getSettings();
+
+    const result = await db().transaction(
+      async (tx): Promise<ActionResult<{ invoiceId: string; jobId: string }>> => {
+        const [appointment] = await tx
+          .select()
+          .from(schema.appointments)
+          .where(eq(schema.appointments.id, appointmentId))
+          .for("update");
+        if (!appointment) return { ok: false, error: "Appointment not found" };
+        // Only a finished visit. A checked-in one is `converted` and already
+        // has a job screen to invoice from; anything earlier has not happened.
+        if (appointment.status !== "completed") {
+          return {
+            ok: false,
+            error: `A ${appointment.status.replaceAll("_", " ")} appointment cannot be invoiced — mark it completed first`,
+          };
+        }
+
+        // Reuse a job if one somehow exists; only a visit that never went
+        // through check-in needs one materialised here.
+        let job = appointment.jobId
+          ? (await tx.select().from(schema.jobs).where(eq(schema.jobs.id, appointment.jobId)).for("update"))[0]
+          : undefined;
+        if (job?.invoiceId) return { ok: false, error: "This appointment already has an invoice" };
+
+        if (!job) {
+          const jobId = newId("job");
+          // The appointment's end, not `now`: maintenance reminders count
+          // months from the visit, so stamping this with the moment staff got
+          // round to invoicing would push every future reminder late.
+          const completedAt = appointment.endsAt;
+          // A visit older than the reminder window would otherwise be due the
+          // instant this row appears, and the next cron tick would text the
+          // customer "time for your next detail?" about a car they brought in
+          // months ago. Back-filling old paperwork must not send mail.
+          const alreadyPastDue = isMaintenanceReminderDue(
+            { status: "completed", completedAt, maintenanceReminderSentAt: null },
+            new Date(),
+            settings.maintenanceReminderMonths,
+          );
+          await tx.insert(schema.jobs).values({
+            id: jobId,
+            appointmentId: appointment.id,
+            customerId: appointment.customerId,
+            vehicleId: appointment.vehicleId,
+            status: "completed",
+            assignedStaffId: appointment.assignedStaffId ?? staff.id,
+            resourceId: appointment.resourceId,
+            completedAt,
+            maintenanceReminderSentAt: alreadyPastDue ? new Date() : null,
+          });
+          await tx
+            .update(schema.appointments)
+            .set({ jobId, updatedAt: new Date() })
+            .where(eq(schema.appointments.id, appointment.id));
+          await audit(tx, {
+            actorType: "staff",
+            actorId: staff.id,
+            action: "job.recorded_from_appointment",
+            entityType: "job",
+            entityId: jobId,
+            after: {
+              appointmentId: appointment.id,
+              completedAt: completedAt.toISOString(),
+              maintenanceReminderSuppressed: alreadyPastDue,
+            },
+          });
+          job = (await tx.select().from(schema.jobs).where(eq(schema.jobs.id, jobId)).for("update"))[0];
+        }
+        if (!job) return { ok: false, error: "Could not record the work for this appointment" };
+
+        const built = await buildInvoiceForJob(tx, {
+          job,
+          staffId: staff.id,
+          settings,
+          source: "appointment",
+        });
+        return built.ok ? { ok: true, invoiceId: built.invoiceId, jobId: job.id } : built;
+      },
+    );
+
+    if (result.ok) {
+      revalidatePath("/admin/invoices");
+      revalidatePath("/admin/appointments");
+      revalidatePath(`/admin/appointments/${appointmentId}`);
+      revalidatePath("/admin/jobs");
+    }
+    return result;
+  } catch (err) {
+    if (err instanceof AuthError) return { ok: false, error: err.message };
+    console.error("createInvoiceFromAppointmentAction failed", err);
+    return { ok: false, error: "Something went wrong creating the invoice" };
   }
 }
 

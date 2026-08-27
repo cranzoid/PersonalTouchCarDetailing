@@ -12,6 +12,7 @@ import { requirePageStaff } from "@/lib/auth/page";
 import { ReschedulePanel } from "./reschedule-panel";
 import { RevisePanel } from "./revise-panel";
 import { DepositRefundPanel } from "./deposit-refund-panel";
+import { CreateInvoicePanel } from "./create-invoice-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -55,11 +56,35 @@ export default async function AppointmentDetailPage({
   ]);
   const categoryNames = new Map(categories.map((category) => [category.id, category.name]));
 
-  // Only appointments still in flight can be re-priced; the action re-checks
-  // this under a row lock, so this is presentation, not enforcement.
-  const canRevise = ["pending", "deposit_required", "confirmed", "arrived", "converted"].includes(
-    appt.status,
-  );
+  // Mirrors REVISABLE in lib/booking/revise.ts, `completed` included: a visit
+  // that is over can still be corrected until the money settles, and the guard
+  // that actually stops a settled sale is the draft-invoice check inside the
+  // action, not the stage (DECISIONS.md §21). This list omitted `completed`
+  // while the server allowed it, so the panel was unreachable for the exact
+  // case it was widened for. The action re-checks under a row lock, so this is
+  // presentation, not enforcement.
+  const canRevise = [
+    "pending",
+    "deposit_required",
+    "confirmed",
+    "arrived",
+    "converted",
+    "completed",
+  ].includes(appt.status);
+  // The invoice a finished visit produced, reached through its job — invoices
+  // hang off `jobs`, and an appointment invoiced from this screen has the job
+  // materialised for it by createInvoiceFromAppointmentAction.
+  const job = appt.jobId
+    ? (await db().select().from(schema.jobs).where(eq(schema.jobs.id, appt.jobId)).limit(1))[0]
+    : undefined;
+  const [invoice] = job?.invoiceId
+    ? await db()
+        .select({ id: schema.invoices.id, number: schema.invoices.number, status: schema.invoices.status })
+        .from(schema.invoices)
+        .where(eq(schema.invoices.id, job.invoiceId))
+        .limit(1)
+    : [];
+
   // Derived, never stored: the deposit held that the current total cannot
   // absorb. See refundAppointmentDepositAction.
   const depositRefundableCents = Math.max(0, appt.depositPaidCents - appt.totalCents);
@@ -224,6 +249,29 @@ export default async function AppointmentDetailPage({
           promoLabel={appt.promoLabel}
           currency={settings.currency}
         />
+      )}
+
+      {invoice ? (
+        <section className="mt-6 rounded-xl border border-ink-800 p-5">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-400">Invoice</h2>
+          <Link
+            href={`/admin/invoices/${invoice.id}`}
+            className="mt-2 inline-block text-accent-300 hover:underline"
+          >
+            Invoice #{invoice.number} ({invoice.status.replaceAll("_", " ")}) →
+          </Link>
+        </section>
+      ) : (
+        appt.status === "completed" &&
+        lines.length > 0 && (
+          <CreateInvoicePanel
+            appointmentId={appt.id}
+            lineCount={lines.length}
+            totalCents={appt.totalCents}
+            depositPaidCents={appt.depositPaidCents}
+            currency={settings.currency}
+          />
+        )
       )}
 
       {depositRefundableCents > 0 && (
