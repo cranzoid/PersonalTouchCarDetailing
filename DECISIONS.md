@@ -585,3 +585,36 @@ failure mode #21 was written to close, reached through a different door.
 **Revisit when:** the shop wants to invoice a walk-in that never had an
 appointment at all. That is still the manual builder, and it still drops the
 deposit and promo columns because there was never a booking to carry them from.
+
+## 23. Expense receipts reuse `files`, but not `/api/files/[id]`
+An expense had a number and no paper. Receipts now hang off the existing `files`
+table with `entity_type = 'expense'` — that column is free text by design (see
+the table's own note), so a new kind of attachment needs no migration, which
+matters because staging shares the production database and only additive
+changes are safe there.
+
+- **A separate serving route, gated on `manage_expenses`.** Reusing
+  `/api/files/[id]` was the obvious move and the wrong one: it gates on
+  `view_private_files`, which is held by reception and technicians — the two
+  roles deliberately excluded from `manage_expenses` so they cannot see what the
+  business pays — and is NOT held by the accountant, who enters expenses for a
+  living. The same route would have leaked cost data downward and locked out the
+  one person who needs it. `/api/expense-receipts/[id]` also filters on
+  `entity_type`, so it can only ever return a receipt, never a customer's
+  before-and-after photos.
+- **PDFs are receipts too.** A hydro bill or supplier invoice arrives as a PDF
+  far more often than as a photo. An images-only feature would have sent the
+  owner back to a folder on the desktop, which is the failure this replaces.
+- **Deleting an expense takes its receipts with it,** storage keys recorded in
+  `audit_log.before` first. An expense is a real DELETE (#15); leaving the
+  paperwork orphaned would have made that deletion only half true. `files` rows
+  are always deleted through an `entity_type = 'expense'` filter, and
+  `deletePrivateFile` only ever receives keys read out of those rows, so this
+  path structurally cannot reach a customer's job photos.
+- **A failed upload never rolls back the expense.** The row saves first and the
+  files attach after, so a flaky connection loses an attachment, not the entry.
+  The form keeps the staged files so the owner can simply press save again.
+
+**Revisit when:** a receipt needs to be readable by the customer, or expenses
+need to be entered from a phone camera in one tap. Both mean a real upload
+pipeline (thumbnails, OCR, direct-to-storage) rather than a form post.

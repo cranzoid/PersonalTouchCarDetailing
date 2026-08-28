@@ -3,7 +3,7 @@ import "server-only";
 import { DefaultAzureCredential } from "@azure/identity";
 import { BlobServiceClient, ContainerClient } from "@azure/storage-blob";
 import { createHash, createHmac } from "crypto";
-import { mkdir, readFile, writeFile } from "fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "fs/promises";
 import { dirname, relative, resolve } from "path";
 
 type S3StorageConfig = {
@@ -182,4 +182,35 @@ export async function getPrivateFile(key: string): Promise<Buffer> {
     throw new Error("Private file storage is not configured for production");
   }
   return readFile(localPath(key));
+}
+
+/**
+ * Removes a stored object. Used when a staff member detaches a file they
+ * attached by mistake — an expense receipt on the wrong row. Missing objects
+ * are not an error: the caller has already dropped the database row that
+ * pointed here, and a blob that is already gone is the state it wanted.
+ */
+export async function deletePrivateFile(key: string): Promise<void> {
+  const azureConfig = azureStorageConfig();
+  if (azureConfig) {
+    const container = await azureContainer(azureConfig);
+    await container.getBlockBlobClient(safeKey(key)).deleteIfExists();
+    return;
+  }
+  const s3Config = s3StorageConfig();
+  if (s3Config) {
+    const response = await signedObjectRequest("DELETE", key);
+    if (!response.ok && response.status !== 404) {
+      throw new Error(`Object storage delete failed (${response.status})`);
+    }
+    return;
+  }
+  if (process.env.NODE_ENV === "production") {
+    throw new Error("Private file storage is not configured for production");
+  }
+  try {
+    await unlink(localPath(key));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
 }

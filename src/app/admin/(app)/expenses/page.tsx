@@ -1,4 +1,4 @@
-import { asc, desc } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requirePageStaff } from "@/lib/auth/page";
 import {
@@ -10,6 +10,7 @@ import {
 import { getSettings } from "@/lib/settings";
 import { localDateISO } from "@/lib/tz";
 import { ExpenseManager } from "./expense-manager";
+import { RECEIPT_ENTITY_TYPE } from "./receipts";
 
 export const dynamic = "force-dynamic";
 
@@ -75,6 +76,28 @@ export default async function ExpensesPage({
 
   const summary = summarizeExpenses(rows, categories);
 
+  // One query for the whole page rather than one per row. Receipts are the
+  // paperwork behind a number, so they are loaded with the ledger and not
+  // fetched lazily when a row is opened.
+  const receiptRows = rows.length > 0
+    ? await db()
+        .select({
+          id: schema.files.id,
+          entityId: schema.files.entityId,
+          contentType: schema.files.contentType,
+          sizeBytes: schema.files.sizeBytes,
+          createdAt: schema.files.createdAt,
+        })
+        .from(schema.files)
+        .where(
+          and(
+            eq(schema.files.entityType, RECEIPT_ENTITY_TYPE),
+            inArray(schema.files.entityId, rows.map((row) => row.id)),
+          ),
+        )
+        .orderBy(asc(schema.files.createdAt))
+    : [];
+
   return (
     <ExpenseManager
       period={{
@@ -100,6 +123,14 @@ export default async function ExpensesPage({
         ...row,
         expenseDate: row.expenseDate.toISOString(),
         confirmedAt: row.confirmedAt?.toISOString() ?? null,
+        receipts: receiptRows
+          .filter((file) => file.entityId === row.id)
+          .map((file) => ({
+            id: file.id,
+            contentType: file.contentType,
+            sizeBytes: file.sizeBytes,
+            createdAt: file.createdAt.toISOString(),
+          })),
       }))}
     />
   );
