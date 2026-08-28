@@ -10,10 +10,10 @@ export const dynamic = "force-dynamic";
 export default async function CustomersPage({
   searchParams,
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; new?: string; next?: string }>;
 }) {
   await requirePageStaff("manage_customers");
-  const { q } = await searchParams;
+  const { q, new: openNew, next } = await searchParams;
   const query = q?.trim();
 
   // "(905) 555-1234", "905-555-1234" and "9055551234" are one number, and the
@@ -56,9 +56,11 @@ export default async function CustomersPage({
         <h1 className="text-2xl font-bold text-white">Customers</h1>
         <Link href="/admin/fleet" className="text-sm font-medium text-accent-300 hover:underline">Fleet accounts →</Link>
       </div>
-      {/* Collapsed this renders just a button; expanded it becomes the form. */}
+      {/* Collapsed this renders just a button; expanded it becomes the form.
+          `?new=1` opens it straight away for the screens that link here
+          mid-task, and `?next=` walks the staff member back afterwards. */}
       <div className="mt-4">
-        <NewCustomerForm />
+        <NewCustomerForm defaultOpen={openNew === "1"} next={next} />
       </div>
       <form className="mt-4 max-w-sm">
         <input

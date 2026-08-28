@@ -2,22 +2,29 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireStaff, AuthError } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { newId } from "@/lib/id";
 import type { AppointmentStatus } from "@/lib/types";
-import { MANUAL_PAYMENT_METHODS, VEHICLE_CATEGORIES, type VehicleCategory } from "@/lib/types";
+import {
+  MANUAL_PAYMENT_METHODS,
+  VEHICLE_CATEGORIES,
+  VEHICLE_CATEGORY_LABELS,
+  type VehicleCategory,
+} from "@/lib/types";
 import { getSettings } from "@/lib/settings";
 import { getAvailableSlots } from "@/lib/booking/availability";
 import { BookingError, createStaffAppointment } from "@/lib/booking/create";
 import { rescheduleAppointment } from "@/lib/booking/reschedule";
 import {
+  isRevisableAppointmentStatus,
   reviseAppointmentLines,
   type ReviseDiscountMode,
   type ReviseOutcome,
 } from "@/lib/booking/revise";
+import { isJobOpenForRepricing } from "@/lib/job-status";
 import { notifyStaffOfNewAppointment } from "@/lib/staff-notifications";
 import { priceBooking, PricingError } from "@/lib/pricing";
 import { resolveActivePromotion } from "@/lib/promotions";
@@ -527,6 +534,289 @@ export async function reviseAppointmentLinesAction(raw: unknown): Promise<Revise
     }
     console.error("reviseAppointmentLinesAction failed", err);
     return { ok: false, error: "Something went wrong re-pricing the appointment" };
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Vehicle on a booking                                                 */
+/* ------------------------------------------------------------------ */
+
+const optionalVehicleText = (max: number) =>
+  z.string().trim().max(max).optional().or(z.literal("").transform(() => undefined));
+
+const vehicleDetailsSchema = z.object({
+  year: z.number().int().min(1900).max(new Date().getFullYear() + 2).optional(),
+  make: z.string().trim().min(1).max(60),
+  model: z.string().trim().min(1).max(60),
+  trim: optionalVehicleText(60),
+  category: z.enum(VEHICLE_CATEGORIES),
+  colour: optionalVehicleText(60),
+  licencePlate: optionalVehicleText(30),
+});
+
+const updateVehicleSchema = z.object({
+  appointmentId: z.string().min(1),
+  /** The vehicle this booking should point at. Same id = a details-only fix. */
+  vehicleId: z.string().min(1),
+  /** Corrections to apply to that vehicle before the booking is re-priced. */
+  details: vehicleDetailsSchema.optional(),
+  confirmOverlap: z.boolean().optional(),
+});
+
+export type UpdateAppointmentVehicleResult =
+  | { ok: true; repriced: boolean; totalCents: number | null; warnings: string[] }
+  | { ok: false; error: string }
+  | { ok: false; needsOverlapConfirm: true; warnings: string[] };
+
+/**
+ * Why the booking cannot be re-priced right now, phrased for the owner, or null
+ * when it can.
+ *
+ * This mirrors the gate inside reviseAppointmentLines rather than replacing it
+ * — the server still re-checks under a row lock. It exists so a vehicle
+ * correction on a settled sale is a saved correction plus an explanation,
+ * instead of a refusal that leaves "Sedan" on an SUV forever.
+ */
+async function repricingBlock(appointment: typeof schema.appointments.$inferSelect): Promise<string | null> {
+  if (!isRevisableAppointmentStatus(appointment.status)) {
+    return `This booking is ${appointment.status.replaceAll("_", " ")}, so its prices cannot be re-calculated.`;
+  }
+  const [job] = await db()
+    .select()
+    .from(schema.jobs)
+    .where(eq(schema.jobs.appointmentId, appointment.id))
+    .limit(1);
+  if (job && !isJobOpenForRepricing(job.status)) {
+    return "This job is too far along for its prices to be re-calculated.";
+  }
+  if (!job?.invoiceId) return null;
+  const [invoice] = await db()
+    .select({ number: schema.invoices.number, status: schema.invoices.status })
+    .from(schema.invoices)
+    .where(eq(schema.invoices.id, job.invoiceId))
+    .limit(1);
+  if (invoice && invoice.status !== "draft") {
+    return `Invoice #${invoice.number} has already been ${invoice.status.replaceAll("_", " ")}.`;
+  }
+  return null;
+}
+
+/** The booking's current cart, in the shape priceBooking takes. */
+async function loadAppointmentSelection(appointmentId: string) {
+  const lines = await db()
+    .select()
+    .from(schema.appointmentServices)
+    .where(eq(schema.appointmentServices.appointmentId, appointmentId))
+    .orderBy(schema.appointmentServices.sort);
+  return {
+    serviceIds: lines.flatMap((line) => (line.serviceId ? [line.serviceId] : [])),
+    addonIds: lines.flatMap((line) => (line.addonId ? [line.addonId] : [])),
+    // Hand-priced work carries forward untouched: a coating quoted at the
+    // counter does not cost more because the car turned out to be an SUV.
+    customLines: lines
+      .filter((line) => !line.serviceId && !line.addonId)
+      .map((line) => ({
+        description: line.description,
+        priceCents: line.priceCents,
+        durationMin: line.durationMin,
+      })),
+  };
+}
+
+function categoryLabel(category: string): string {
+  return VEHICLE_CATEGORY_LABELS[category as VehicleCategory] ?? category;
+}
+
+/**
+ * Corrects the vehicle on a booking, and re-prices the packages for its size.
+ *
+ * The online booking form asks the customer to pick their own vehicle size, and
+ * customers get it wrong — a large SUV booked as a sedan is priced as a sedan,
+ * because package prices come from `service_vehicle_adjustments` keyed on that
+ * category. Until now the only fix was to edit the vehicle on the customer
+ * record, which corrected the CRM and left the booking priced at the old size.
+ *
+ * So this does both halves: the vehicle row is corrected (or the booking is
+ * pointed at a different one of the customer's cars), and if that changes the
+ * PRICING SIZE the same package selection is re-priced through the counter
+ * revision path. What the customer chose is not touched — only what it costs.
+ * Changing WHICH packages are on the booking is still "Change packages".
+ *
+ * Ordering matters: the re-price runs BEFORE the vehicle row is written. The
+ * bay-overlap warning is a two-press flow, and if the vehicle were saved on the
+ * first press the second press would compare the new size against itself, find
+ * nothing changed, and skip the re-pricing the owner was confirming.
+ */
+export async function updateAppointmentVehicleAction(
+  raw: unknown,
+): Promise<UpdateAppointmentVehicleResult> {
+  try {
+    const staff = await requireStaff("manage_bookings");
+    const parsed = updateVehicleSchema.safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Please check the vehicle details" };
+    const input = parsed.data;
+
+    const [appointment] = await db()
+      .select()
+      .from(schema.appointments)
+      .where(eq(schema.appointments.id, input.appointmentId))
+      .limit(1);
+    if (!appointment) return { ok: false, error: "Appointment not found" };
+
+    const currentVehicle = await loadOwnedVehicle(appointment.customerId, appointment.vehicleId);
+    // Ownership is re-checked for the target too: a vehicle id from the form
+    // must belong to this booking's customer, never to somebody else's.
+    const targetVehicle =
+      input.vehicleId === appointment.vehicleId
+        ? currentVehicle
+        : await loadOwnedVehicle(appointment.customerId, input.vehicleId);
+
+    const newCategory = (input.details?.category ?? targetVehicle.category) as VehicleCategory;
+    const oldCategory = currentVehicle.category;
+    const warnings: string[] = [];
+    let repriced = false;
+    let totalCents: number | null = null;
+
+    if (newCategory !== oldCategory) {
+      const block = await repricingBlock(appointment);
+      if (block) {
+        warnings.push(
+          `${block} The vehicle is saved, but the prices on this booking were left as they are.`,
+        );
+      } else {
+        const settings = await getSettings();
+        const selection = await loadAppointmentSelection(input.appointmentId);
+        const reason = `Vehicle size corrected from ${categoryLabel(oldCategory)} to ${categoryLabel(newCategory)}`;
+        try {
+          // Eligibility is deliberately not re-checked, for the same reason
+          // reviseAppointmentLinesAction does not: see its note.
+          const promo = resolveActivePromotion(settings, appointment.promoCode);
+          const pricing = await priceBooking({
+            ...selection,
+            vehicleCategory: newCategory,
+            settings,
+            promo,
+          });
+          const outcome: ReviseOutcome = await reviseAppointmentLines({
+            appointmentId: input.appointmentId,
+            lines: pricing.lines,
+            reappliedDiscountCents: pricing.discountCents,
+            // "reapply" is the honest reading of an offer against a corrected
+            // price — the same default the revise panel documents. Keeping the
+            // original cents on a size correction would be a goodwill decision,
+            // and that belongs on "Change packages" where it is spelled out.
+            discountMode: "reapply",
+            reason,
+            staffId: staff.id,
+            settings,
+            confirmOverlap: input.confirmOverlap,
+          });
+          if (!outcome.ok) {
+            // Nothing has been written yet, so the owner can still back out.
+            return { ok: false, needsOverlapConfirm: true, warnings: outcome.warnings };
+          }
+          repriced = true;
+          totalCents = outcome.totalCents;
+          warnings.push(...outcome.warnings);
+        } catch (err) {
+          // A retired package or an unavailable add-on cannot be re-priced.
+          // That must not block the correction: the vehicle really is an SUV
+          // whether or not the catalog can still quote what was sold.
+          if (err instanceof BookingError || err instanceof PricingError) {
+            warnings.push(
+              `${err.message} The vehicle is saved, but the prices on this booking were left as they are.`,
+            );
+          } else {
+            throw err;
+          }
+        }
+      }
+    }
+
+    const movedVehicle = targetVehicle.id !== appointment.vehicleId;
+    await db().transaction(async (tx) => {
+      if (input.details) {
+        await tx
+          .update(schema.vehicles)
+          .set({
+            year: input.details.year ?? null,
+            make: input.details.make,
+            model: input.details.model,
+            trim: input.details.trim ?? null,
+            category: input.details.category,
+            colour: input.details.colour ?? null,
+            licencePlate: input.details.licencePlate ?? null,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.vehicles.id, targetVehicle.id));
+      }
+
+      if (movedVehicle) {
+        await tx
+          .update(schema.appointments)
+          .set({ vehicleId: targetVehicle.id, updatedAt: new Date() })
+          .where(eq(schema.appointments.id, appointment.id));
+        // The job and its draft invoice name the same car. Left behind they
+        // would keep pointing at the vehicle the booking no longer uses, and
+        // the invoice would go out describing a car that was never here.
+        await tx
+          .update(schema.jobs)
+          .set({ vehicleId: targetVehicle.id, updatedAt: new Date() })
+          .where(eq(schema.jobs.appointmentId, appointment.id));
+        const [job] = await tx
+          .select({ invoiceId: schema.jobs.invoiceId })
+          .from(schema.jobs)
+          .where(eq(schema.jobs.appointmentId, appointment.id))
+          .limit(1);
+        if (job?.invoiceId) {
+          // Draft only. A sent or paid invoice is a document the customer has
+          // seen; correcting it is a credit note, not an edit (DECISIONS.md §21).
+          await tx
+            .update(schema.invoices)
+            .set({ vehicleId: targetVehicle.id, updatedAt: new Date() })
+            .where(and(eq(schema.invoices.id, job.invoiceId), eq(schema.invoices.status, "draft")));
+        }
+      }
+
+      await audit(tx, {
+        actorType: "staff",
+        actorId: staff.id,
+        action: "appointment.vehicle_updated",
+        entityType: "appointment",
+        entityId: appointment.id,
+        before: {
+          vehicleId: appointment.vehicleId,
+          category: oldCategory,
+          make: currentVehicle.make,
+          model: currentVehicle.model,
+          year: currentVehicle.year,
+        },
+        after: {
+          vehicleId: targetVehicle.id,
+          category: newCategory,
+          make: input.details?.make ?? targetVehicle.make,
+          model: input.details?.model ?? targetVehicle.model,
+          year: input.details?.year ?? targetVehicle.year,
+          repriced,
+          totalCents,
+        },
+      });
+    });
+
+    revalidatePath("/admin/appointments");
+    revalidatePath(`/admin/appointments/${input.appointmentId}`);
+    revalidatePath(`/admin/customers/${appointment.customerId}`);
+    if (repriced || movedVehicle) {
+      revalidatePath("/admin/jobs");
+      revalidatePath("/admin/invoices");
+    }
+    return { ok: true, repriced, totalCents, warnings };
+  } catch (err) {
+    if (err instanceof AuthError || err instanceof BookingError || err instanceof PricingError) {
+      return { ok: false, error: err.message };
+    }
+    console.error("updateAppointmentVehicleAction failed", err);
+    return { ok: false, error: "Something went wrong updating the vehicle" };
   }
 }
 

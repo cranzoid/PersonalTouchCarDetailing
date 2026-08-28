@@ -13,8 +13,24 @@ import { ReschedulePanel } from "./reschedule-panel";
 import { RevisePanel } from "./revise-panel";
 import { DepositRefundPanel } from "./deposit-refund-panel";
 import { CreateInvoicePanel } from "./create-invoice-panel";
+import { VehiclePanel, type AppointmentVehicle } from "./vehicle-panel";
+import { isRevisableAppointmentStatus } from "@/lib/booking/revise";
 
 export const dynamic = "force-dynamic";
+
+/** Trims a vehicle row to what the client panel needs. */
+function toPanelVehicle(vehicle: typeof schema.vehicles.$inferSelect): AppointmentVehicle {
+  return {
+    id: vehicle.id,
+    year: vehicle.year,
+    make: vehicle.make,
+    model: vehicle.model,
+    trim: vehicle.trim,
+    category: vehicle.category,
+    colour: vehicle.colour,
+    licencePlate: vehicle.licencePlate,
+  };
+}
 
 export default async function AppointmentDetailPage({
   params,
@@ -30,7 +46,14 @@ export default async function AppointmentDetailPage({
   if (!appt) notFound();
 
   const [customer] = await db().select().from(schema.customers).where(eq(schema.customers.id, appt.customerId)).limit(1);
-  const [vehicle] = await db().select().from(schema.vehicles).where(eq(schema.vehicles.id, appt.vehicleId)).limit(1);
+  // Every car this customer has on file: the one booked, plus the others the
+  // vehicle panel offers as a one-click swap when the wrong one was booked.
+  const customerVehicles = await db()
+    .select()
+    .from(schema.vehicles)
+    .where(eq(schema.vehicles.customerId, appt.customerId))
+    .orderBy(asc(schema.vehicles.make), asc(schema.vehicles.model));
+  const vehicle = customerVehicles.find((row) => row.id === appt.vehicleId);
   const lines = await db()
     .select()
     .from(schema.appointmentServices)
@@ -56,21 +79,11 @@ export default async function AppointmentDetailPage({
   ]);
   const categoryNames = new Map(categories.map((category) => [category.id, category.name]));
 
-  // Mirrors REVISABLE in lib/booking/revise.ts, `completed` included: a visit
-  // that is over can still be corrected until the money settles, and the guard
-  // that actually stops a settled sale is the draft-invoice check inside the
-  // action, not the stage (DECISIONS.md §21). This list omitted `completed`
-  // while the server allowed it, so the panel was unreachable for the exact
-  // case it was widened for. The action re-checks under a row lock, so this is
-  // presentation, not enforcement.
-  const canRevise = [
-    "pending",
-    "deposit_required",
-    "confirmed",
-    "arrived",
-    "converted",
-    "completed",
-  ].includes(appt.status);
+  // Read from lib/booking/revise.ts rather than copied: this list used to be
+  // duplicated here and drifted, hiding the panel on exactly the `completed`
+  // visits the server had been widened to allow (DECISIONS.md §22). The action
+  // re-checks under a row lock, so this is presentation, not enforcement.
+  const canRevise = isRevisableAppointmentStatus(appt.status);
   // The invoice a finished visit produced, reached through its job — invoices
   // hang off `jobs`, and an appointment invoiced from this screen has the job
   // materialised for it by createInvoiceFromAppointmentAction.
@@ -84,6 +97,10 @@ export default async function AppointmentDetailPage({
         .where(eq(schema.invoices.id, job.invoiceId))
         .limit(1)
     : [];
+
+  // A sent or paid invoice is the thing that actually stops a re-price, not the
+  // appointment's stage — the same rule reviseAppointmentLines enforces.
+  const invoiceBlocksRepricing = Boolean(invoice && invoice.status !== "draft");
 
   // Derived, never stored: the deposit held that the current total cannot
   // absorb. See refundAppointmentDepositAction.
@@ -142,7 +159,7 @@ export default async function AppointmentDetailPage({
         </p>
       )}
 
-      <div className="mt-8 grid gap-6 sm:grid-cols-2">
+      <div className="mt-8">
         <section className="rounded-xl border border-ink-800 p-5">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-400">Customer</h2>
           {customer ? (
@@ -157,18 +174,23 @@ export default async function AppointmentDetailPage({
             <p className="mt-2 text-sm text-ink-500">Missing customer record</p>
           )}
         </section>
-        <section className="rounded-xl border border-ink-800 p-5">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-400">Vehicle</h2>
-          {vehicle ? (
-            <p className="mt-2 text-sm text-ink-300">
-              {vehicle.year ?? ""} {vehicle.make} {vehicle.model}
-              {vehicle.colour ? ` · ${vehicle.colour}` : ""} · {vehicle.category}
-            </p>
-          ) : (
-            <p className="mt-2 text-sm text-ink-500">Missing vehicle record</p>
-          )}
-        </section>
       </div>
+
+      <section className="mt-6 rounded-xl border border-ink-800 p-5">
+        <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-400">Vehicle</h2>
+        <VehiclePanel
+          appointmentId={appt.id}
+          customerId={appt.customerId}
+          vehicle={vehicle ? toPanelVehicle(vehicle) : null}
+          otherVehicles={customerVehicles
+            .filter((row) => row.id !== appt.vehicleId)
+            .map(toPanelVehicle)}
+          currency={settings.currency}
+          // The same conditions reviseAppointmentLines enforces, so the panel
+          // promises re-pricing only where the server will actually do it.
+          canReprice={canRevise && !invoiceBlocksRepricing}
+        />
+      </section>
 
       <section className="mt-6 rounded-xl border border-ink-800 p-5">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-400">Services</h2>

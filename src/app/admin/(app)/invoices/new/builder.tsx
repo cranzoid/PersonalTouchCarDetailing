@@ -6,6 +6,13 @@ import Link from "next/link";
 import { formatCents } from "@/lib/money";
 import { localDateISO } from "@/lib/tz";
 import { VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
+import {
+  VehicleDialog,
+  vehicleLabel,
+  vehiclePayload,
+  type VehicleFormValues,
+} from "@/components/vehicle-dialog";
+import { addCustomerVehicleAction } from "../../customers/actions";
 import { createManualInvoiceAction } from "../actions";
 
 type CustomerOption = { id: string; label: string; contact: string };
@@ -42,6 +49,8 @@ export function NewInvoiceBuilder({
   taxLabel,
   currency,
   timezone,
+  initialCustomerId = "",
+  initialVehicleId = "",
 }: {
   customers: CustomerOption[];
   vehicles: VehicleOption[];
@@ -51,10 +60,19 @@ export function NewInvoiceBuilder({
   taxLabel: string;
   currency: string;
   timezone: string;
+  /** Preselected when staff come back from "add the customer first". */
+  initialCustomerId?: string;
+  initialVehicleId?: string;
 }) {
   const router = useRouter();
-  const [customerId, setCustomerId] = useState("");
-  const [vehicleId, setVehicleId] = useState("");
+  const [customerId, setCustomerId] = useState(initialCustomerId);
+  const [vehicleId, setVehicleId] = useState(initialVehicleId);
+  // A vehicle added from the dialog is held here as well as sent to the server,
+  // so it is selectable immediately without a page round-trip.
+  const [addedVehicles, setAddedVehicles] = useState<VehicleOption[]>([]);
+  const [vehicleDialogOpen, setVehicleDialogOpen] = useState(false);
+  const [vehicleBusy, setVehicleBusy] = useState(false);
+  const [vehicleError, setVehicleError] = useState<string | null>(null);
   const [pickedServices, setPickedServices] = useState<Record<string, Picked>>({});
   const [pickedAddons, setPickedAddons] = useState<Record<string, Picked>>({});
   const [customLines, setCustomLines] = useState<CustomLine[]>([]);
@@ -68,8 +86,9 @@ export function NewInvoiceBuilder({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const customerVehicles = vehicles.filter((v) => v.customerId === customerId);
-  const selectedVehicle = vehicles.find((v) => v.id === vehicleId);
+  const knownVehicles = [...vehicles, ...addedVehicles];
+  const customerVehicles = knownVehicles.filter((v) => v.customerId === customerId);
+  const selectedVehicle = knownVehicles.find((v) => v.id === vehicleId);
   const vehicleCategory = selectedVehicle?.category ?? null;
 
   const money = (cents: number) => formatCents(cents, currency);
@@ -148,6 +167,37 @@ export function NewInvoiceBuilder({
     });
   }
 
+  /**
+   * Adds a vehicle to the customer already selected here.
+   *
+   * Goes through addCustomerVehicleAction rather than a new write path, so the
+   * gate stays `manage_customers`: an accountant may raise invoices but not
+   * edit the CRM, and the action tells them so rather than this screen quietly
+   * widening what their role can do.
+   */
+  async function saveNewVehicle(values: VehicleFormValues) {
+    setVehicleBusy(true);
+    setVehicleError(null);
+    const payload = vehiclePayload(values);
+    const result = await addCustomerVehicleAction({ customerId, ...payload });
+    setVehicleBusy(false);
+    if (!result.ok) return setVehicleError(result.error);
+    setAddedVehicles((prev) => [
+      ...prev,
+      {
+        id: result.vehicleId,
+        customerId,
+        category: payload.category,
+        label: vehicleLabel(payload),
+      },
+    ]);
+    // Selected straight away: the whole point is that package prices re-price
+    // for this size without leaving the half-built invoice.
+    setVehicleId(result.vehicleId);
+    setVehicleDialogOpen(false);
+    router.refresh();
+  }
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
@@ -224,22 +274,35 @@ export function NewInvoiceBuilder({
                 ))}
               </select>
             </label>
-            <label className="block">
-              <span className={labelClass}>Vehicle (sets package pricing)</span>
-              <select
-                className={inputClass}
-                value={vehicleId}
-                onChange={(e) => setVehicleId(e.target.value)}
+            <div>
+              <label className="block">
+                <span className={labelClass}>Vehicle (sets package pricing)</span>
+                <select
+                  className={inputClass}
+                  value={vehicleId}
+                  onChange={(e) => setVehicleId(e.target.value)}
+                  disabled={!customerId}
+                >
+                  <option value="">No vehicle</option>
+                  {customerVehicles.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => {
+                  setVehicleError(null);
+                  setVehicleDialogOpen(true);
+                }}
                 disabled={!customerId}
+                className="mt-2 rounded-lg border border-ink-600 px-3 py-1.5 text-xs font-semibold text-ink-200 hover:border-ink-500 disabled:opacity-40"
               >
-                <option value="">No vehicle</option>
-                {customerVehicles.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+                + Add vehicle
+              </button>
+            </div>
           </div>
           {selectedVehicle && (
             <p className="mt-3 text-sm text-ink-400">
@@ -256,12 +319,27 @@ export function NewInvoiceBuilder({
             </p>
           )}
           <p className="mt-3 text-xs text-ink-500">
-            Not in the list?{" "}
-            <Link href="/admin/customers" className="text-accent-300 underline">
-              Add the customer first
+            Customer not in the list?{" "}
+            <Link
+              href={`/admin/customers?new=1&next=${encodeURIComponent("/admin/invoices/new")}`}
+              className="text-accent-300 underline"
+            >
+              Add them now
             </Link>
-            , then come back.
+            {" "}— you will come back here with them selected.
           </p>
+
+          {vehicleDialogOpen && (
+            <VehicleDialog
+              title="Add a vehicle"
+              description="Added to this customer's record and selected on this invoice."
+              submitLabel="Add vehicle"
+              busy={vehicleBusy}
+              error={vehicleError}
+              onCancel={() => setVehicleDialogOpen(false)}
+              onSubmit={(values) => void saveNewVehicle(values)}
+            />
+          )}
         </section>
 
         <section className="rounded-xl border border-ink-800 p-5">

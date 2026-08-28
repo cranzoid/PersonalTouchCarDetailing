@@ -6,8 +6,15 @@ import { NewInvoiceBuilder } from "./builder";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewInvoicePage() {
+export default async function NewInvoicePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ customerId?: string; vehicleId?: string }>;
+}) {
   await requirePageStaff("manage_invoices");
+  // Set when staff came back from adding the customer mid-invoice. Read on the
+  // server so the client never needs a Suspense boundary for useSearchParams.
+  const { customerId, vehicleId } = await searchParams;
   const settings = await getSettings();
   const [customers, vehicles, categories, services, adjustments, addonLinks, addons] = await Promise.all([
     db()
@@ -74,6 +81,8 @@ export default async function NewInvoicePage() {
         taxLabel={settings.taxLabel}
         currency={settings.currency}
         timezone={settings.timezone}
+        initialCustomerId={customers.some((c) => c.id === customerId) ? customerId : ""}
+        initialVehicleId={vehicles.some((v) => v.id === vehicleId) ? vehicleId : ""}
       />
     </div>
   );

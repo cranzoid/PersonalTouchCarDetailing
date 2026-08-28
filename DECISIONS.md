@@ -618,3 +618,50 @@ changes are safe there.
 **Revisit when:** a receipt needs to be readable by the customer, or expenses
 need to be entered from a phone camera in one tap. Both mean a real upload
 pipeline (thumbnails, OCR, direct-to-storage) rather than a form post.
+
+## 24. Correcting the vehicle a booking was priced from
+The public booking form asks the customer to pick their own vehicle size, and
+they get it wrong — a large SUV booked as a sedan is *priced* as a sedan,
+because package prices come from `service_vehicle_adjustments` keyed on that
+category. The only fix was to edit the vehicle on the customer record, which
+corrected the CRM and left the booking priced at the old size.
+
+- **One action does both halves.** `updateAppointmentVehicleAction` fixes the
+  car (or points the booking at a different one of the customer's cars) and, if
+  that changes the pricing size, re-prices the SAME selection through
+  `priceBooking` → `reviseAppointmentLines`. Which packages the customer chose
+  is untouched; changing that is still "Change packages" (#21). One re-pricing
+  path, not a second copy of the money logic.
+- **The re-price runs BEFORE the vehicle row is written.** The bay-overlap
+  warning is a two-press flow. Had the vehicle been saved on the first press,
+  the second press would have compared the new size against itself, found
+  nothing changed, and skipped the very re-pricing being confirmed.
+- **A settled sale is corrected but not re-priced.** If the invoice has been
+  sent or paid, the vehicle still saves — the car really is an SUV — and the
+  prices are left alone with a message naming the invoice. Silently rewriting a
+  document the customer has seen is the thing #21 refuses to do; the
+  alternative, refusing the correction outright, would leave "Sedan" on an SUV
+  forever. The same applies when a package has since been retired and can no
+  longer be quoted: the correction lands, the money does not move, and the
+  reason is shown rather than swallowed.
+- **A vehicle swap drags the job and the DRAFT invoice with it.** Both carry
+  their own `vehicle_id`; left behind, an invoice would go out describing a car
+  that was never here. A non-draft invoice is deliberately not touched.
+- **`REVISABLE` is exported rather than copied.** Three screens were about to
+  hold their own copy of the re-pricing gate, and the last time that happened
+  the lists drifted and hid the panel on exactly the visits the server had been
+  widened to allow (#22). `isRevisableAppointmentStatus` is the one list.
+
+### Adding a customer or a vehicle without leaving the screen
+The invoice builder's "add the customer first" was a link to a list with a
+button on it, and then a manual walk back to the half-built invoice. It now
+opens the form directly (`?new=1`) and returns with the customer selected
+(`?next=`, restricted to `/admin/` paths so it cannot become an open redirect).
+The vehicle dropdown grew an "Add vehicle" dialog that goes through the existing
+`addCustomerVehicleAction` — so the gate stays `manage_customers`, and an
+accountant raising an invoice is told they cannot edit the CRM rather than
+having this screen quietly widen what their role can do.
+
+**Revisit when:** the shop wants to correct the vehicle on a sale that has
+already been paid and have the money follow. That is a credit note (#21), not an
+edit.

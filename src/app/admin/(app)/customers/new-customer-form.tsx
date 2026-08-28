@@ -9,13 +9,38 @@ const inputClass = "w-full rounded-lg border border-ink-600 bg-ink-950 px-3 py-2
 const labelClass = "mb-1 block text-xs text-ink-400";
 
 /**
+ * Only same-origin admin paths may be returned to. `next` reaches this
+ * component from the query string, so treating it as a URL would make the
+ * "add a customer" link an open redirect.
+ */
+function safeReturnPath(next: string | undefined): string | null {
+  if (!next) return null;
+  if (!next.startsWith("/admin/")) return null;
+  if (next.startsWith("//") || next.includes("\\")) return null;
+  return next;
+}
+
+/**
  * Walk-in capture. The vehicle is optional but offered inline because an
  * appointment cannot be booked without one — collecting it here saves a trip
  * to the customer record.
+ *
+ * `defaultOpen` and `next` exist for the screens that send staff here mid-task.
+ * The invoice builder's "add the customer first" link used to land on a list
+ * with a button on it — one more click, and then a manual walk back to the
+ * half-built invoice. It now opens this form directly and returns to where it
+ * came from with the new customer already selected.
  */
-export function NewCustomerForm() {
+export function NewCustomerForm({
+  defaultOpen = false,
+  next,
+}: {
+  defaultOpen?: boolean;
+  next?: string;
+}) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const returnPath = safeReturnPath(next);
+  const [open, setOpen] = useState(defaultOpen);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [withVehicle, setWithVehicle] = useState(true);
@@ -69,6 +94,12 @@ export function NewCustomerForm() {
     });
     setBusy(false);
     if (!result.ok) return setError(result.error);
+    if (returnPath) {
+      const params = new URLSearchParams({ customerId: result.customerId });
+      if (result.vehicleId) params.set("vehicleId", result.vehicleId);
+      router.push(`${returnPath}${returnPath.includes("?") ? "&" : "?"}${params}`);
+      return;
+    }
     router.push(`/admin/customers/${result.customerId}`);
   }
 

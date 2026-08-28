@@ -82,6 +82,16 @@ const REVISABLE = new Set([
 ]);
 
 /**
+ * Exported so the screens that decide whether to OFFER re-pricing read the same
+ * set the server enforces. They used to keep their own copies, and the two
+ * drifted: the appointment page hid its revise panel on exactly the `completed`
+ * visits this set was widened for (DECISIONS.md §22). One list, one truth.
+ */
+export function isRevisableAppointmentStatus(status: string): boolean {
+  return REVISABLE.has(status);
+}
+
+/**
  * Applies the staff's choice about a promotional discount to the new cart.
  *
  * Pure, so the money rule is unit-testable without a database.
