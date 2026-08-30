@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Container, ButtonLink, SectionHeading, Card } from "@/components/ui";
 import { formatCents } from "@/lib/money";
 import { getPublicHomeCatalog } from "@/lib/public-catalog";
+import { ceramicMenuKeyFor } from "@/lib/ceramic";
 import { getPublicSettings } from "@/lib/settings";
 import { pageMetadata, SEO_PAGES } from "@/lib/seo";
 
@@ -27,10 +28,29 @@ const EXPERIENCE_POINTS = [
 ];
 
 export default async function HomePage() {
-  const [{ featured, categories }, settings] = await Promise.all([
+  const [{ featured, categories, ceramicMenu }, settings] = await Promise.all([
     getPublicHomeCatalog(),
     getPublicSettings(),
   ]);
+
+  /**
+   * A featured ceramic package is shown as its product, not as the package:
+   * the home page is a menu, and the packages belong on the coating page. The
+   * price comes from the same resolver /services uses, so the two pages cannot
+   * quote different "from" figures. Non-ceramic services are unaffected.
+   */
+  const featuredCards = featured.map((service) => {
+    const key = ceramicMenuKeyFor(service.slug);
+    const product = key ? ceramicMenu.find((entry) => entry.key === key) : undefined;
+    return {
+      id: service.id,
+      name: product?.name ?? service.name,
+      shortDescription: product?.shortDescription ?? service.shortDescription,
+      href: product?.href ?? `/services/${service.slug}`,
+      basePriceCents: product?.fromPriceCents ?? service.basePriceCents,
+      priceNote: product?.priceNote ?? null,
+    };
+  });
 
   return (
     <>
@@ -90,7 +110,7 @@ export default async function HomePage() {
               tone="light"
             />
             <div className="grid gap-5 md:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
-              {featured.map((service, index) => (
+              {featuredCards.map((service, index) => (
                 <Card key={service.id} tone="light" className="group flex min-h-64 flex-col overflow-hidden p-0 transition-transform duration-300 hover:-translate-y-1">
                   <div className="h-1 bg-ink-900 transition-colors group-hover:bg-accent-400" />
                   <div className="flex flex-1 flex-col p-6">
@@ -100,8 +120,15 @@ export default async function HomePage() {
                     <div className="mt-6 flex items-end justify-between gap-4 border-t border-slate-200 pt-4">
                       <span className="text-sm font-semibold text-ink-900">
                         {service.basePriceCents !== null ? `From ${formatCents(service.basePriceCents)}` : "By quote"}
+                        {/* A conditional price never stands alone. */}
+                        {service.priceNote && (
+                          <>
+                            <span aria-hidden="true">*</span>
+                            <span className="block text-xs font-normal text-slate-500">*{service.priceNote}</span>
+                          </>
+                        )}
                       </span>
-                      <Link href={`/services/${service.slug}`} className="rounded-md text-sm font-semibold text-ink-900 transition-colors hover:text-accent-600">
+                      <Link href={service.href} className="rounded-md text-sm font-semibold text-ink-900 transition-colors hover:text-accent-600">
                         Explore <span aria-hidden="true">↗</span>
                       </Link>
                     </div>

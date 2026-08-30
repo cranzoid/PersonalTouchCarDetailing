@@ -1,10 +1,11 @@
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { CERAMIC_MENU_SERVICE_SLUGS, resolveCeramicMenu } from "@/lib/ceramic";
 
 const PUBLIC_CATALOG_TTL_MS = 60_000;
 
 async function loadPublicHomeCatalog() {
-  const [featured, categories] = await Promise.all([
+  const [featured, categories, addons, ceramicRows] = await Promise.all([
     db()
       .select()
       .from(schema.services)
@@ -16,8 +17,24 @@ async function loadPublicHomeCatalog() {
       .from(schema.serviceCategories)
       .where(eq(schema.serviceCategories.active, true))
       .orderBy(asc(schema.serviceCategories.sort)),
+    // The ceramic menu is priced from an add-on as well as services, and its
+    // "from" is the cheapest package — which may not be the featured one. Both
+    // are loaded so the home page resolves the same figures as /services
+    // instead of quoting whichever package happens to be featured.
+    db()
+      .select()
+      .from(schema.addons)
+      .where(eq(schema.addons.active, true)),
+    db()
+      .select()
+      .from(schema.services)
+      .where(inArray(schema.services.slug, [...CERAMIC_MENU_SERVICE_SLUGS])),
   ]);
-  return { featured, categories };
+  return {
+    featured,
+    categories,
+    ceramicMenu: resolveCeramicMenu({ services: ceramicRows, addons }),
+  };
 }
 
 type PublicHomeCatalog = Awaited<ReturnType<typeof loadPublicHomeCatalog>>;

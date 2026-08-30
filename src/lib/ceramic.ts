@@ -155,3 +155,154 @@ export function coatingPackage(slug: string): CoatingPackageContent | undefined 
 export function warrantyLabel(years: number | null): string {
   return years === null ? "No warranty" : `${years}-year warranty`;
 }
+
+/* ------------------------------------------------------------------ */
+/* Public menu presentation                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * How the ceramic family appears to a customer choosing a service: TWO
+ * products, coating first, protection second.
+ *
+ * The catalogue rows behind them stay separate, and deliberately so — booking,
+ * pricing, invoices and reports all need "Crystal" and "Standalone" to be
+ * distinct, priced things. But a menu is a place to choose between products,
+ * not to read a price list, so the five rows collapse to the two decisions a
+ * customer actually makes. The packages appear once they open the coating page.
+ *
+ * This is the ONLY place the collapsing is defined; the services menu and the
+ * home page both render from `resolveCeramicMenu` so they cannot drift apart.
+ */
+type CeramicMenuDefinition = {
+  key: string;
+  /** Public-facing product name — never the row name with its suffix. */
+  name: string;
+  shortDescription: string;
+  href: string;
+  /** Where the headline "from" price comes from. */
+  priceSource:
+    | { kind: "cheapest-service"; slugs: readonly string[] }
+    | { kind: "addon"; slug: string; fallbackServiceSlug: string };
+};
+
+const CERAMIC_MENU: readonly CeramicMenuDefinition[] = [
+  {
+    key: "ceramic-coating",
+    name: "Ceramic Coating",
+    shortDescription:
+      "Our premium coating service, in three packages — Crystal, Pro and Max — with warranty options on Pro and Max.",
+    href: CERAMIC_COATING_HUB_PATH,
+    // The cheapest package is the honest "from", and it moves on its own if
+    // the owner re-prices Crystal in Admin.
+    priceSource: { kind: "cheapest-service", slugs: CERAMIC_COATING_SLUGS },
+  },
+  {
+    key: "ceramic-protection",
+    name: "Ceramic Protection",
+    shortDescription:
+      "A single layer of ceramic protection — added to an Ultimate Detail, or booked on its own.",
+    href: CERAMIC_PROTECTION_PATH,
+    // The add-on is the cheapest way to buy it, so it is the "from" price —
+    // but it is conditional, which is what the footnote below carries.
+    priceSource: {
+      kind: "addon",
+      slug: CERAMIC_PROTECTION_ADDON_SLUG,
+      fallbackServiceSlug: CERAMIC_PROTECTION_SLUG,
+    },
+  },
+];
+
+export type ResolvedCeramicMenuProduct = {
+  key: string;
+  name: string;
+  shortDescription: string;
+  href: string;
+  fromPriceCents: number;
+  /**
+   * Set when the headline price depends on something. Non-null means the
+   * price MUST be rendered with an asterisk and this note beside it — the
+   * $120 figure is never allowed to stand on its own.
+   */
+  priceNote: string | null;
+};
+
+/**
+ * Resolves the two menu products against the live catalogue. Every price is
+ * read from the rows passed in, so Admin → Services still moves the menu.
+ *
+ * A product whose price cannot be resolved — every package deactivated, say —
+ * is omitted rather than shown at $0.
+ */
+export function resolveCeramicMenu(input: {
+  services: readonly { slug: string; basePriceCents: number | null; active: boolean }[];
+  addons: readonly { slug: string | null; priceCents: number; active: boolean }[];
+}): ResolvedCeramicMenuProduct[] {
+  const out: ResolvedCeramicMenuProduct[] = [];
+
+  for (const entry of CERAMIC_MENU) {
+    let fromPriceCents: number | null = null;
+    let priceNote: string | null = null;
+
+    if (entry.priceSource.kind === "cheapest-service") {
+      const prices = input.services
+        .filter((s) => s.active && entry.priceSource.kind === "cheapest-service" &&
+          entry.priceSource.slugs.includes(s.slug) && s.basePriceCents !== null)
+        .map((s) => s.basePriceCents!);
+      if (prices.length > 0) fromPriceCents = Math.min(...prices);
+    } else {
+      const source = entry.priceSource;
+      const addon = input.addons.find((a) => a.slug === source.slug && a.active);
+      if (addon) {
+        fromPriceCents = addon.priceCents;
+        priceNote = `when added to an ${ULTIMATE_DETAIL_LABEL}`;
+      } else {
+        // The discounted route is unavailable, so the standalone price is the
+        // only true "from" — and it carries no condition.
+        const standalone = input.services.find(
+          (s) => s.slug === source.fallbackServiceSlug && s.active && s.basePriceCents !== null,
+        );
+        if (standalone) fromPriceCents = standalone.basePriceCents!;
+      }
+    }
+
+    if (fromPriceCents === null) continue;
+    out.push({
+      key: entry.key,
+      name: entry.name,
+      shortDescription: entry.shortDescription,
+      href: entry.href,
+      fromPriceCents,
+      priceNote,
+    });
+  }
+
+  return out;
+}
+
+/**
+ * The menu product key a ceramic catalogue slug belongs to, for surfaces that
+ * render individual rows (the home page's featured trio) and need to show the
+ * product rather than the package behind it.
+ */
+export function ceramicMenuKeyFor(slug: string): string | undefined {
+  if (isCeramicCoatingSlug(slug)) return CERAMIC_MENU[0].key;
+  if (slug === CERAMIC_PROTECTION_SLUG) return CERAMIC_MENU[1].key;
+  return undefined;
+}
+
+/**
+ * How a ceramic catalogue slug should be named and linked when it is
+ * referenced from another page. A "related services" chip is a menu, so it
+ * names the product and links to the product page — never "Crystal" pointing
+ * at one package as though it were the whole service.
+ */
+export function ceramicMenuLinkFor(slug: string): { name: string; href: string } | undefined {
+  const entry = CERAMIC_MENU.find((product) => product.key === ceramicMenuKeyFor(slug));
+  return entry ? { name: entry.name, href: entry.href } : undefined;
+}
+
+/** Every catalogue slug the menu resolves over — the rows a caller must load. */
+export const CERAMIC_MENU_SERVICE_SLUGS: readonly string[] = [
+  ...CERAMIC_COATING_SLUGS,
+  CERAMIC_PROTECTION_SLUG,
+];

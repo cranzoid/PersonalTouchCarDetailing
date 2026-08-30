@@ -188,7 +188,7 @@ export const SERVICE_SEO: Record<string, ServiceSeoContent> = {
       { question: "Does the price change for an SUV or truck?", answer: "Yes. Larger vehicles have more panel area, and the applicable price for your vehicle category is shown in the booking flow before you confirm." },
     ],
     relatedServices: [
-      { slug: "ceramic-coating-crystal", label: "Ceramic Coating - Crystal" },
+      { slug: "ceramic-coating", label: "Ceramic coating" },
       { slug: "complete-detail-engine", label: "Ultimate Detail" },
       { slug: "paint-protection-film", label: "Paint protection film" },
     ],

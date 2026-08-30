@@ -5,11 +5,7 @@ import { Container, SectionHeading, Card, ButtonLink } from "@/components/ui";
 import { formatCents, withTaxCents } from "@/lib/money";
 import { getSettings } from "@/lib/settings";
 import { pageMetadata, SEO_PAGES } from "@/lib/seo";
-import {
-  CERAMIC_COATING_HUB_PATH,
-  CERAMIC_PROTECTION_PATH,
-  isCeramicServiceSlug,
-} from "@/lib/ceramic";
+import { isCeramicServiceSlug, resolveCeramicMenu } from "@/lib/ceramic";
 
 export const metadata = pageMetadata(SEO_PAGES.services);
 
@@ -25,10 +21,6 @@ const CATEGORY_PAGE: Record<string, string> = {
 
 const CATEGORY_GUIDES: Record<string, { href: string; label: string }[]> = {
   "paint-correction": [{ href: "/services/paint-correction", label: "Compare correction levels" }],
-  "paint-protection": [
-    { href: CERAMIC_COATING_HUB_PATH, label: "Compare ceramic coating packages" },
-    { href: CERAMIC_PROTECTION_PATH, label: "What ceramic protection covers" },
-  ],
 };
 
 export default async function ServicesPage() {
@@ -43,6 +35,20 @@ export default async function ServicesPage() {
     .from(schema.services)
     .where(eq(schema.services.active, true))
     .orderBy(asc(schema.services.sort));
+  const addons = await db()
+    .select()
+    .from(schema.addons)
+    .where(eq(schema.addons.active, true));
+
+  /**
+   * Ceramic is five catalogue rows but two customer choices. The rows are
+   * hidden from the grid and replaced by the two products, in the category the
+   * rows actually live in — derived rather than hard-coded, so moving them in
+   * Admin moves the cards with them.
+   */
+  const ceramicMenu = resolveCeramicMenu({ services, addons });
+  const ceramicCategoryId =
+    services.find((service) => isCeramicServiceSlug(service.slug))?.categoryId ?? null;
 
   return (
     <Container className="py-20 sm:py-28">
@@ -74,12 +80,39 @@ export default async function ServicesPage() {
                 )}
               </div>
               <span className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-300">
-                {services.filter((service) => service.categoryId === cat.id).length} options
+                {services.filter(
+                  (service) => service.categoryId === cat.id && !isCeramicServiceSlug(service.slug),
+                ).length + (cat.id === ceramicCategoryId ? ceramicMenu.length : 0)}{" "}
+                options
               </span>
             </div>
             <div className="mt-7 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              {cat.id === ceramicCategoryId &&
+                ceramicMenu.map((product) => (
+                  <Card key={product.key} className="flex flex-col">
+                    <h3 className="font-display text-2xl text-white">{product.name}</h3>
+                    <p className="mt-3 flex-1 text-sm leading-6 text-ink-300">{product.shortDescription}</p>
+                    <div className="mt-6 flex items-center justify-between border-t border-white/10 pt-4 text-sm">
+                      <span className="text-accent-300">
+                        From {formatCents(product.fromPriceCents)}
+                        {/* The conditional price never stands on its own: the
+                            asterisk is answered on the service page, and in a
+                            line here so the card is honest by itself. */}
+                        {product.priceNote && (
+                          <>
+                            <span aria-hidden="true">*</span>
+                            <span className="block text-xs text-ink-500">*{product.priceNote}</span>
+                          </>
+                        )}
+                      </span>
+                      <Link href={product.href} className="font-semibold text-ink-200 hover:text-accent-300">
+                        Details →
+                      </Link>
+                    </div>
+                  </Card>
+                ))}
               {services
-                .filter((s) => s.categoryId === cat.id)
+                .filter((s) => s.categoryId === cat.id && !isCeramicServiceSlug(s.slug))
                 .map((svc) => (
                   <Card key={svc.id} className="flex flex-col">
                     <h3 className="font-display text-2xl text-white">{svc.name}</h3>
@@ -89,11 +122,7 @@ export default async function ServicesPage() {
                         {svc.basePriceCents !== null ? (
                           <>
                             From {formatCents(svc.basePriceCents)}
-                            {/* Ceramic cards quote one figure. These prices are
-                                read next to three other packages, and a second
-                                number per card turns the comparison into noise.
-                                The service page states the payment terms. */}
-                            {settings.taxRateBp > 0 && !isCeramicServiceSlug(svc.slug) && (
+                            {settings.taxRateBp > 0 && (
                               <span className="block text-xs text-ink-500">
                                 {formatCents(withTaxCents(svc.basePriceCents, settings.taxRateBp))} by
                                 card or cheque

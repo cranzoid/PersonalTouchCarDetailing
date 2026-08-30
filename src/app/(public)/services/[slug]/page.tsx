@@ -13,6 +13,7 @@ import { VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
 import {
   CERAMIC_CONDITION_DISCLAIMER,
   CERAMIC_COATING_HUB_PATH,
+  ceramicMenuLinkFor,
   coatingPackage,
   isCeramicServiceSlug,
   warrantyLabel,
@@ -345,11 +346,16 @@ export default async function ServiceDetailPage({
                 <section className="mt-14" aria-labelledby="related-services-heading">
                   <h2 id="related-services-heading" className="font-display text-3xl text-white">Related Hamilton vehicle-care services</h2>
                   <div className="mt-5 flex flex-wrap gap-3">
-                    {relatedServices.map((service) => (
-                      <Link key={service.slug} href={`/services/${service.slug}`} className="rounded-full border border-white/15 px-4 py-2 text-sm text-ink-200 transition hover:border-accent-400 hover:text-accent-300">
-                        {service.name}
-                      </Link>
-                    ))}
+                    {relatedServices.map((service) => {
+                      // A chip is a menu entry: name the product and link to
+                      // the product page, not the package behind it.
+                      const ceramic = ceramicMenuLinkFor(service.slug);
+                      return (
+                        <Link key={service.slug} href={ceramic?.href ?? `/services/${service.slug}`} className="rounded-full border border-white/15 px-4 py-2 text-sm text-ink-200 transition hover:border-accent-400 hover:text-accent-300">
+                          {ceramic?.name ?? service.name}
+                        </Link>
+                      );
+                    })}
                     <Link href="/results" className="rounded-full border border-white/15 px-4 py-2 text-sm text-ink-200 transition hover:border-accent-400 hover:text-accent-300">View real results</Link>
                   </div>
                 </section>

@@ -9,7 +9,9 @@ import {
   CERAMIC_PROTECTION_SLUG,
   COATING_PACKAGES,
   ULTIMATE_DETAIL_SLUG,
+  ceramicMenuLinkFor,
   isCeramicServiceSlug,
+  resolveCeramicMenu,
   warrantyLabel,
 } from "../src/lib/ceramic";
 
@@ -246,5 +248,59 @@ describe("ceramic catalogue definitions", () => {
     for (const brand of [/\bSystem X\b/, /\bCeramic Pro\b/, /\bGtechniq\b/, /\bCQuartz\b/, /\bOpti-Coat\b/]) {
       expect(source).not.toMatch(brand);
     }
+  });
+});
+
+describe("public menu presentation", () => {
+  const catalogue = {
+    services: [
+      { slug: "ceramic-coating-crystal", basePriceCents: 39900, active: true },
+      { slug: "ceramic-coating-pro", basePriceCents: 99900, active: true },
+      { slug: "ceramic-coating-max", basePriceCents: 139900, active: true },
+      { slug: CERAMIC_PROTECTION_SLUG, basePriceCents: 19900, active: true },
+    ],
+    addons: [{ slug: CERAMIC_PROTECTION_ADDON_SLUG, priceCents: 12000, active: true }],
+  };
+
+  it("shows two products, coating first", () => {
+    const menu = resolveCeramicMenu(catalogue);
+    expect(menu.map((p) => p.name)).toEqual(["Ceramic Coating", "Ceramic Protection"]);
+    // The suffixes that appear on bookings and invoices never reach the menu.
+    for (const product of menu) {
+      // Word-bounded: "Pro" the package, not the "Protection" product name.
+      expect(product.name).not.toMatch(/\b(Standalone|Crystal|Pro|Max|Add-On)\b/);
+    }
+  });
+
+  it("quotes the cheapest coating package and the qualified protection price", () => {
+    const [coating, protection] = resolveCeramicMenu(catalogue);
+    expect(coating.fromPriceCents).toBe(39900);
+    expect(coating.priceNote).toBeNull();
+    // $120 is the headline, and it may never appear without its condition.
+    expect(protection.fromPriceCents).toBe(12000);
+    expect(protection.priceNote).toContain("Ultimate Detail");
+  });
+
+  it("falls back to the standalone price when the add-on is unavailable", () => {
+    const [, protection] = resolveCeramicMenu({ ...catalogue, addons: [] });
+    expect(protection.fromPriceCents).toBe(19900);
+    // Nothing conditional is being advertised, so there is nothing to qualify.
+    expect(protection.priceNote).toBeNull();
+  });
+
+  it("drops a product rather than advertising it at zero", () => {
+    const menu = resolveCeramicMenu({
+      services: catalogue.services.map((s) => ({ ...s, active: false })),
+      addons: [],
+    });
+    expect(menu).toEqual([]);
+  });
+
+  it("routes a package slug to the coating product", () => {
+    for (const slug of CERAMIC_COATING_SLUGS) {
+      expect(ceramicMenuLinkFor(slug)).toEqual({ name: "Ceramic Coating", href: "/services/ceramic-coating" });
+    }
+    expect(ceramicMenuLinkFor(CERAMIC_PROTECTION_SLUG)?.name).toBe("Ceramic Protection");
+    expect(ceramicMenuLinkFor(ULTIMATE_DETAIL_SLUG)).toBeUndefined();
   });
 });
