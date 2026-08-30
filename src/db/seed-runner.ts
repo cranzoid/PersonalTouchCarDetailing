@@ -15,8 +15,10 @@ loadEnv();
  * (pictures/WhatsApp Image 2026-07-13 at 21.13.19.jpeg). Flyer prices are
  * ranges by vehicle class (Sedan vs SUV/Truck/Van); per the owner's direction,
  * we seed the upper bound for each vehicle class. Durations are the
- * owner-confirmed booking times. The non-flyer categories (paint correction,
- * protection, tint, styling) remain quote-only. Everything is configurable in
+ * owner-confirmed booking times. Ceramic protection and the three ceramic
+ * coating packages carry owner-confirmed prices too; the remaining non-flyer
+ * work (paint correction, PPF, tint, styling) stays quote-only because its
+ * price depends on the vehicle's condition. Everything is configurable in
  * Admin → Services.
  */
 
@@ -74,9 +76,18 @@ const CATALOG: { category: string; slug: string; description: string; services: 
   {
     category: "Paint Protection",
     slug: "paint-protection",
-    description: "Long-term protection: ceramic coatings, paint protection film, wax and sealants.",
+    description: "Long-term protection: ceramic protection, ceramic coating packages, paint protection film, wax and sealants.",
     services: [
-      { name: "Ceramic Coating", slug: "ceramic-coating", short: "Professional-grade ceramic coating with multi-year durability.", priceCents: null, durationMin: 480, mode: "inspection_required", featured: true, photosRequired: true },
+      // Ceramic protection is ONE layer of ceramic protection and is not a
+      // ceramic coating package. Sold standalone here; the discounted
+      // Ultimate Detail version is the add-on below, never this row.
+      { name: "Ceramic Protection - Standalone", slug: "ceramic-protection", short: "A single layer of ceramic protection applied on its own, without a detailing package.", priceCents: 19900, durationMin: 120, mode: "bookable", largeVehicleDeltaCents: 10000, largeVehicleDeltaMin: 30 },
+      // The three ceramic coating packages. Durations fit inside the 9-5 day
+      // once the 15+15 setup/cleanup buffers are added — over that, the slot
+      // engine can never offer an appointment at all.
+      { name: "Ceramic Coating - Crystal", slug: "ceramic-coating-crystal", short: "Vehicle wash, paint preparation and ceramic coating application.", priceCents: 39900, durationMin: 300, mode: "bookable", featured: true, largeVehicleDeltaCents: 2000, largeVehicleDeltaMin: 30 },
+      { name: "Ceramic Coating - Pro", slug: "ceramic-coating-pro", short: "A higher-grade ceramic coating with a six-year warranty.", priceCents: 99900, durationMin: 420, mode: "bookable", largeVehicleDeltaCents: 10000 },
+      { name: "Ceramic Coating - Max", slug: "ceramic-coating-max", short: "Our longest-lasting ceramic coating, with a premium top layer and a ten-year warranty.", priceCents: 139900, durationMin: 450, mode: "bookable", largeVehicleDeltaCents: 10000 },
       { name: "Paint Protection Film", slug: "paint-protection-film", short: "Self-healing film for high-impact areas or full panels.", priceCents: null, durationMin: 480, mode: "inspection_required", photosRequired: true },
       { name: "Wax & Sealant", slug: "wax-sealant", short: "Premium carnauba wax or synthetic sealant application.", priceCents: null, durationMin: 90, mode: "quote_required" },
     ],
@@ -121,11 +132,51 @@ const CATALOG: { category: string; slug: string; description: string; services: 
  */
 const LARGE_VEHICLE_CATEGORIES = ["suv_small", "suv_large", "pickup", "van", "commercial"];
 
-/** Flyer extras ("$X Extra" box) — confirmed prices. */
-const ADDONS = [
-  { name: "Dog Hair Clean", description: "Removal of embedded pet hair (for interior clean-up packages).", priceCents: 5000, durationMin: 30 },
-  { name: "Wax / Buff", description: "Machine wax and buff for added gloss and protection.", priceCents: 12000, durationMin: 120 },
-  { name: "Salt Stain Removal", description: "Winter salt stain extraction from carpets and mats.", priceCents: 5000, durationMin: 30 },
+/** The six flyer detailing packages every general-purpose extra belongs to. */
+const FLYER_PACKAGE_SLUGS = [
+  "complete-detail-engine",
+  "the-works",
+  "interior-detail",
+  "wash-interior-refresh",
+  "basic-interior-clean",
+  "basic-car-wash",
+];
+
+/**
+ * Flyer extras ("$X Extra" box) plus the ceramic protection add-on.
+ *
+ * `serviceSlugs` is explicit rather than "every bookable service": an add-on
+ * is only ever offered alongside a service it is linked to, and the interior
+ * extras have no business appearing on a ceramic coating booking.
+ *
+ * The ceramic protection add-on is linked ONLY to Ultimate Detail, which is
+ * what makes its discounted price unreachable anywhere else — priceBooking
+ * refuses an add-on that is not linked to a selected service, so the rule is
+ * enforced on the server rather than merely hidden in the booking UI.
+ */
+const ADDONS: {
+  name: string;
+  slug?: string;
+  description: string;
+  priceCents: number;
+  durationMin: number;
+  serviceSlugs: string[];
+  largeVehicleDeltaCents?: number;
+  largeVehicleDeltaMin?: number;
+}[] = [
+  { name: "Dog Hair Clean", description: "Removal of embedded pet hair (for interior clean-up packages).", priceCents: 5000, durationMin: 30, serviceSlugs: FLYER_PACKAGE_SLUGS },
+  { name: "Wax / Buff", description: "Machine wax and buff for added gloss and protection.", priceCents: 12000, durationMin: 120, serviceSlugs: FLYER_PACKAGE_SLUGS },
+  { name: "Salt Stain Removal", description: "Winter salt stain extraction from carpets and mats.", priceCents: 5000, durationMin: 30, serviceSlugs: FLYER_PACKAGE_SLUGS },
+  {
+    name: "Ceramic Protection - Ultimate Detail Add-On",
+    slug: "ceramic-protection-ultimate",
+    description: "A single layer of ceramic protection, added to your Ultimate Detail.",
+    priceCents: 12000,
+    durationMin: 45,
+    serviceSlugs: ["complete-detail-engine"],
+    largeVehicleDeltaCents: 7900,
+    largeVehicleDeltaMin: 15,
+  },
 ];
 
 /**
@@ -215,16 +266,45 @@ export async function runSeed() {
   }
 
   // --- addons ------------------------------------------------------------
+  // Keyed by name so the catalogue below can link each add-on to exactly the
+  // services it belongs with, rather than to every bookable service.
   const existingAddons = await db.select().from(schema.addons);
-  const addonIds: string[] = [];
+  const addonIdByName = new Map(existingAddons.map((a) => [a.name, a.id]));
   if (existingAddons.length === 0) {
     for (const [i, a] of ADDONS.entries()) {
       const addonId = newId("add");
-      addonIds.push(addonId);
-      await db.insert(schema.addons).values({ id: addonId, sort: i, ...a });
+      addonIdByName.set(a.name, addonId);
+      await db.insert(schema.addons).values({
+        id: addonId,
+        name: a.name,
+        slug: a.slug ?? null,
+        description: a.description,
+        priceCents: a.priceCents,
+        durationMin: a.durationMin,
+        sort: i,
+      });
+      // Same base-plus-category-delta rule services use, so one explanation
+      // covers every price on the site.
+      if (a.largeVehicleDeltaCents) {
+        for (const category of LARGE_VEHICLE_CATEGORIES) {
+          await db.insert(schema.addonVehicleAdjustments).values({
+            id: newId("aja"),
+            addonId,
+            vehicleCategory: category,
+            priceDeltaCents: a.largeVehicleDeltaCents,
+            durationDeltaMin: a.largeVehicleDeltaMin ?? 0,
+          });
+        }
+      }
     }
-  } else {
-    addonIds.push(...existingAddons.map((a) => a.id));
+  }
+  const addonsForService = new Map<string, string[]>();
+  for (const a of ADDONS) {
+    const addonId = addonIdByName.get(a.name);
+    if (!addonId) continue;
+    for (const slug of a.serviceSlugs) {
+      addonsForService.set(slug, [...(addonsForService.get(slug) ?? []), addonId]);
+    }
   }
 
   // --- catalog -----------------------------------------------------------
@@ -269,7 +349,7 @@ export async function runSeed() {
               });
             }
           }
-          for (const addonId of addonIds) {
+          for (const addonId of addonsForService.get(svc.slug) ?? []) {
             await db.insert(schema.serviceAddons).values({ id: newId("add"), serviceId, addonId });
           }
         }

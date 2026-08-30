@@ -53,8 +53,8 @@ export type AppointmentSlotsResult =
   | { ok: false; error: string };
 
 /**
- * A line the catalog cannot price — ceramic coating, paint correction, or any
- * other quote-only job. The price is typed by staff rather than looked up, so
+ * A line the catalog cannot price — paint correction, PPF, or any other
+ * quote-only job. The price is typed by staff rather than looked up, so
  * this only ever reaches priceBooking from behind the manage_bookings check
  * below; the public booking actions never pass custom lines.
  *

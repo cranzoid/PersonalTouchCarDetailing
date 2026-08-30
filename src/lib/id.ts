@@ -19,7 +19,8 @@ export type IdPrefix =
   | "lead"
   | "cat" // service category
   | "svc" // service
-  | "adj" // vehicle adjustment
+  | "adj" // service vehicle adjustment
+  | "aja" // addon vehicle adjustment
   | "add" // addon
   | "res" // resource / bay
   | "blk" // schedule block

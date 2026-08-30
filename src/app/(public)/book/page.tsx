@@ -5,6 +5,12 @@ import { getSettings } from "@/lib/settings";
 import { activePromotion } from "@/lib/promotions";
 import { BookingWizard, type WizardAddon, type WizardService } from "./wizard";
 import { pageMetadata, SEO_PAGES } from "@/lib/seo";
+import {
+  CERAMIC_CONDITION_DISCLAIMER_SHORT,
+  CERAMIC_PROTECTION_ADDON_QUALIFIER,
+  CERAMIC_PROTECTION_ADDON_SLUG,
+  isCeramicServiceSlug,
+} from "@/lib/ceramic";
 
 export const metadata = pageMetadata(SEO_PAGES.book);
 export const dynamic = "force-dynamic";
@@ -12,9 +18,14 @@ export const dynamic = "force-dynamic";
 export default async function BookPage({
   searchParams,
 }: {
-  searchParams: Promise<{ service?: string; offer?: string }>;
+  // `addon` lets a campaign land the visitor on a fully-configured cart, e.g.
+  // /book?service=complete-detail-engine&addon=ceramic-protection-ultimate.
+  // It is only a suggestion: priceBooking still refuses any add-on that is not
+  // linked to the chosen service, so a stale ad URL cannot buy the discounted
+  // price without the qualifying package.
+  searchParams: Promise<{ service?: string; offer?: string; addon?: string }>;
 }) {
-  const { service: preselectSlug, offer } = await searchParams;
+  const { service: preselectSlug, offer, addon: preselectAddonSlug } = await searchParams;
   const settings = await getSettings();
   // Resolved server-side so the page can never advertise something the server
   // would refuse to honour. The wizard decides whether this visitor *claims*
@@ -32,6 +43,7 @@ export default async function BookPage({
     .from(schema.serviceCategories)
     .orderBy(asc(schema.serviceCategories.sort));
   const adjustments = await db().select().from(schema.serviceVehicleAdjustments);
+  const addonAdjustments = await db().select().from(schema.addonVehicleAdjustments);
   const addonLinks = await db().select().from(schema.serviceAddons);
   const addons = await db()
     .select()
@@ -57,14 +69,26 @@ export default async function BookPage({
           .map((a) => [a.vehicleCategory, { priceDeltaCents: a.priceDeltaCents, durationDeltaMin: a.durationDeltaMin }]),
       ),
       addonIds: addonLinks.filter((l) => l.serviceId === s.id).map((l) => l.addonId),
+      // Ceramic prices cover the coating for the vehicle category and nothing
+      // else; preparation is condition-dependent and approved separately.
+      conditionNotice: isCeramicServiceSlug(s.slug) ? CERAMIC_CONDITION_DISCLAIMER_SHORT : null,
     }));
 
   const wizardAddons: WizardAddon[] = addons.map((a) => ({
     id: a.id,
+    slug: a.slug,
     name: a.name,
     description: a.description ?? "",
     priceCents: a.priceCents,
     durationMin: a.durationMin,
+    adjustments: Object.fromEntries(
+      addonAdjustments
+        .filter((adj) => adj.addonId === a.id)
+        .map((adj) => [adj.vehicleCategory, { priceDeltaCents: adj.priceDeltaCents, durationDeltaMin: adj.durationDeltaMin }]),
+    ),
+    // The discounted ceramic protection price is never allowed to appear
+    // without the sentence that says what it depends on.
+    qualifier: a.slug === CERAMIC_PROTECTION_ADDON_SLUG ? CERAMIC_PROTECTION_ADDON_QUALIFIER : null,
   }));
 
   return (
@@ -94,6 +118,7 @@ export default async function BookPage({
             : null
         }
         offerFromUrl={offer}
+        preselectAddonSlug={preselectAddonSlug}
       />
     </Container>
   );

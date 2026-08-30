@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { BOOKING_MODES, VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
 import {
   updateAddonAction,
+  updateAddonVehicleAdjustmentAction,
   updateServiceAction,
   updateVehicleAdjustmentAction,
 } from "./actions";
@@ -159,7 +160,11 @@ export function ServiceEditor({
               </p>
               <div className="mt-3 space-y-2">
                 {adjustments.map((adjustment) => (
-                  <VehicleAdjustmentEditor key={adjustment.id} adjustment={adjustment} />
+                  <VehicleAdjustmentEditor
+                    key={adjustment.id}
+                    adjustment={adjustment}
+                    onSave={updateVehicleAdjustmentAction}
+                  />
                 ))}
               </div>
             </div>
@@ -179,7 +184,19 @@ export function ServiceEditor({
   );
 }
 
-function VehicleAdjustmentEditor({ adjustment }: { adjustment: EditableAdjustment }) {
+function VehicleAdjustmentEditor({
+  adjustment,
+  onSave,
+}: {
+  adjustment: EditableAdjustment;
+  /** Which table this row belongs to; services and add-ons share the form. */
+  onSave: (input: {
+    adjustmentId: string;
+    vehicleCategory: string;
+    priceDeltaCents: number;
+    durationDeltaMin: number;
+  }) => Promise<{ ok: true } | { ok: false; error: string }>;
+}) {
   const router = useRouter();
   const [price, setPrice] = useState((adjustment.priceDeltaCents / 100).toFixed(2));
   const [duration, setDuration] = useState(String(adjustment.durationDeltaMin));
@@ -193,7 +210,7 @@ function VehicleAdjustmentEditor({ adjustment }: { adjustment: EditableAdjustmen
   async function save() {
     setBusy(true);
     setMsg(null);
-    const res = await updateVehicleAdjustmentAction({
+    const res = await onSave({
       adjustmentId: adjustment.id,
       vehicleCategory: adjustment.vehicleCategory,
       priceDeltaCents: Math.round(Number(price) * 100),
@@ -241,7 +258,13 @@ type EditableAddon = {
   active: boolean;
 };
 
-export function AddonEditor({ addon }: { addon: EditableAddon }) {
+export function AddonEditor({
+  addon,
+  adjustments,
+}: {
+  addon: EditableAddon;
+  adjustments: EditableAdjustment[];
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -294,6 +317,26 @@ export function AddonEditor({ addon }: { addon: EditableAddon }) {
           Active
         </label>
       </div>
+      {adjustments.length > 0 && (
+        <div className="mt-5 border-t border-ink-800 pt-4">
+          <p className="text-xs font-semibold uppercase tracking-wider text-ink-400">
+            Vehicle price and time adjustments
+          </p>
+          <p className="mt-1 text-xs text-ink-500">
+            These amounts are added to the add-on price and duration above, the same way service
+            adjustments work. Each row saves on its own.
+          </p>
+          <div className="mt-3 space-y-2">
+            {adjustments.map((adjustment) => (
+              <VehicleAdjustmentEditor
+                key={adjustment.id}
+                adjustment={adjustment}
+                onSave={updateAddonVehicleAdjustmentAction}
+              />
+            ))}
+          </div>
+        </div>
+      )}
       {msg && <p className={`mt-3 text-sm ${msg.ok ? "text-emerald-300" : "text-red-400"}`}>{msg.text}</p>}
       <button
         type="button"

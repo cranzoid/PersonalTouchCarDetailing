@@ -99,6 +99,13 @@
       "when": 1787773663093,
       "tag": "0013_counter_package_revision",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1788050973197,
+      "tag": "0014_ceramic_protection_and_coating",
+      "breakpoints": true
     }
   ]
 }

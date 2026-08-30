@@ -40,6 +40,8 @@ const updateVehicleAdjustmentInput = z.object({
   durationDeltaMin: z.number().int().min(0).max(24 * 60 * 7),
 });
 
+const updateAddonVehicleAdjustmentInput = updateVehicleAdjustmentInput;
+
 export type ActionResult = { ok: true } | { ok: false; error: string };
 export type CreateResult = { ok: true; id: string } | { ok: false; error: string };
 
@@ -427,6 +429,68 @@ export async function updateVehicleAdjustmentAction(raw: unknown): Promise<Actio
   } catch (err) {
     if (err instanceof AuthError) return { ok: false, error: err.message };
     console.error("updateVehicleAdjustmentAction failed", err);
+    return { ok: false, error: "Something went wrong" };
+  }
+}
+
+/**
+ * Vehicle-size pricing for an add-on — the same edit as
+ * updateVehicleAdjustmentAction, against the add-on table.
+ *
+ * This is how the owner changes what ceramic protection costs on an SUV
+ * versus a sedan when it is bought alongside a detail, without a deploy.
+ */
+export async function updateAddonVehicleAdjustmentAction(raw: unknown): Promise<ActionResult> {
+  try {
+    const staff = await requireStaff("manage_services");
+    const parsed = updateAddonVehicleAdjustmentInput.safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Invalid vehicle adjustment" };
+    const input = parsed.data;
+
+    return await db().transaction(async (tx) => {
+      const [before] = await tx
+        .select()
+        .from(schema.addonVehicleAdjustments)
+        .where(eq(schema.addonVehicleAdjustments.id, input.adjustmentId))
+        .for("update");
+      if (!before) return { ok: false, error: "Vehicle adjustment not found" };
+      // The category is submitted alongside the id purely so a stale form
+      // cannot rewrite the wrong row's price, exactly as for services.
+      if (before.vehicleCategory !== input.vehicleCategory) {
+        return { ok: false, error: "Vehicle category does not match this adjustment" };
+      }
+
+      const after = {
+        priceDeltaCents: input.priceDeltaCents,
+        durationDeltaMin: input.durationDeltaMin,
+      };
+      await tx
+        .update(schema.addonVehicleAdjustments)
+        .set({ ...after, updatedAt: new Date() })
+        .where(eq(schema.addonVehicleAdjustments.id, input.adjustmentId));
+      await audit(tx, {
+        actorType: "staff",
+        actorId: staff.id,
+        action: "addon_vehicle_adjustment.updated",
+        entityType: "addon_vehicle_adjustment",
+        entityId: input.adjustmentId,
+        before: {
+          vehicleCategory: before.vehicleCategory,
+          priceDeltaCents: before.priceDeltaCents,
+          durationDeltaMin: before.durationDeltaMin,
+        },
+        after: { vehicleCategory: input.vehicleCategory, ...after },
+      });
+
+      revalidatePath("/admin/services");
+      revalidatePath("/services");
+      revalidatePath("/book");
+      invalidatePublicCatalogCache();
+      return { ok: true };
+    });
+  } catch (err) {
+    if (err instanceof AuthError) return { ok: false, error: err.message };
+    console.error("updateAddonVehicleAdjustmentAction failed", err);
     return { ok: false, error: "Something went wrong" };
   }
 }

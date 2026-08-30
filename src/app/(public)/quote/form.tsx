@@ -166,7 +166,7 @@ export function QuoteForm({
           className={input}
           value={form.condition}
           onChange={(e) => setForm({ ...form, condition: e.target.value })}
-          placeholder="e.g. Swirl marks on the hood and doors, interested in one-stage correction and ceramic coating…"
+          placeholder="e.g. Swirl marks on the hood and doors, interested in one-stage correction before a coating…"
         />
       </label>
 

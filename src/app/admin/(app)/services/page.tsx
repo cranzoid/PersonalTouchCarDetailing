@@ -12,10 +12,11 @@ export default async function ServicesAdminPage() {
     .select()
     .from(schema.serviceCategories)
     .orderBy(asc(schema.serviceCategories.sort));
-  const [services, adjustments, addons] = await Promise.all([
+  const [services, adjustments, addons, addonAdjustments] = await Promise.all([
     db().select().from(schema.services).orderBy(asc(schema.services.sort)),
     db().select().from(schema.serviceVehicleAdjustments),
     db().select().from(schema.addons).orderBy(asc(schema.addons.sort)),
+    db().select().from(schema.addonVehicleAdjustments),
   ]);
 
   return (
@@ -82,6 +83,14 @@ export default async function ServicesAdminPage() {
                   durationMin: addon.durationMin,
                   active: addon.active,
                 }}
+                adjustments={addonAdjustments
+                  .filter((adjustment) => adjustment.addonId === addon.id)
+                  .map((adjustment) => ({
+                    id: adjustment.id,
+                    vehicleCategory: adjustment.vehicleCategory,
+                    priceDeltaCents: adjustment.priceDeltaCents,
+                    durationDeltaMin: adjustment.durationDeltaMin,
+                  }))}
               />
             ))}
           </div>

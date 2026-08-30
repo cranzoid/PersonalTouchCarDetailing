@@ -192,8 +192,8 @@ export function NewAppointmentBuilder({
         <section className="rounded-xl border border-ink-800 p-5">
           <h2 className="font-semibold text-white">3. Custom lines</h2>
           <p className="mt-1 text-sm text-ink-400">
-            For work the catalog cannot price — a ceramic coating, paint correction, or anything
-            quoted at the counter. A booking can be made of custom lines alone, with no package.
+            For work the catalog cannot price — paint correction, PPF, or anything quoted at the
+            counter. A booking can be made of custom lines alone, with no package.
           </p>
           {customLines.length > 0 && (
             <div className="mt-4 space-y-3">
@@ -205,7 +205,7 @@ export function NewAppointmentBuilder({
                       value={line.description}
                       onChange={(event) => setCustomLine(index, { description: event.target.value })}
                       maxLength={200}
-                      placeholder="Ceramic coating — 5 year"
+                      placeholder="Two-stage paint correction"
                       className={`${inputClass} mt-1`}
                     />
                   </label>

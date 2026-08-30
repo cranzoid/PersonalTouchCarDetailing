@@ -19,8 +19,8 @@ export type PricedLine = {
 };
 
 /**
- * A staff-authored line with no catalog entry behind it — a ceramic coating or
- * any other quote-only job, priced at the counter. Only reachable from the
+ * A staff-authored line with no catalog entry behind it — a paint correction
+ * or any other quote-only job, priced at the counter. Only reachable from the
  * staff booking path: the price is supplied rather than looked up, so the
  * public booking flow must never be able to pass one.
  */
@@ -79,16 +79,17 @@ export async function priceBooking(input: {
    */
   promo?: ResolvedPromotion | null;
   /**
-   * Staff-supplied lines for work the catalog cannot price — a ceramic coating
-   * quoted at the counter. The caller is responsible for restricting these to
-   * staff; the public booking actions never pass them.
+   * Staff-supplied lines for work the catalog cannot price — paint correction
+   * quoted at the counter after inspection. The caller is responsible for
+   * restricting these to staff; the public booking actions never pass them.
    */
   customLines?: CustomBookingLine[];
 }): Promise<BookingPricing> {
   const { serviceIds, addonIds, vehicleCategory, settings, promo } = input;
   const customLines = input.customLines ?? [];
-  // A booking may be entirely custom — a coating with no package attached — so
-  // the requirement is one line of some kind, not one catalog service.
+  // A booking may be entirely custom — correction work with no catalogue
+  // package attached — so the requirement is one line of some kind, not one
+  // catalog service.
   if (serviceIds.length === 0 && customLines.length === 0) {
     throw new PricingError("Select at least one service, or add a custom line");
   }
@@ -149,6 +150,22 @@ export async function priceBooking(input: {
     if (addonRows.length !== addonIds.length) throw new PricingError("One or more add-ons are unavailable");
   }
 
+  // Add-ons take a vehicle-size delta exactly as services do — ceramic
+  // protection costs more on an SUV whether it is bought on its own or
+  // alongside a detail, and one rule has to explain both.
+  const addonAdjustments = addonIds.length > 0
+    ? await db()
+        .select()
+        .from(schema.addonVehicleAdjustments)
+        .where(
+          and(
+            inArray(schema.addonVehicleAdjustments.addonId, addonIds),
+            eq(schema.addonVehicleAdjustments.vehicleCategory, vehicleCategory),
+          ),
+        )
+    : [];
+  const adjByAddon = new Map(addonAdjustments.map((a) => [a.addonId, a]));
+
   const lines: PricedLine[] = [];
   for (const svc of services) {
     const adj = adjByService.get(svc.id);
@@ -161,11 +178,12 @@ export async function priceBooking(input: {
   }
   const serviceLineCount = lines.length;
   for (const addon of addonRows) {
+    const adj = adjByAddon.get(addon.id);
     lines.push({
       addonId: addon.id,
       description: addon.name,
-      priceCents: addon.priceCents,
-      durationMin: addon.durationMin,
+      priceCents: addon.priceCents + (adj?.priceDeltaCents ?? 0),
+      durationMin: addon.durationMin + (adj?.durationDeltaMin ?? 0),
     });
   }
   // Appended last so the deposit loop below still walks only catalog service
@@ -269,10 +287,25 @@ export async function resolveCatalogPrices(input: {
 
   if (input.addonIds.length > 0) {
     const rows = await db().select().from(schema.addons).where(inArray(schema.addons.id, input.addonIds));
+    // Same reasoning as services above: only size-adjust when the vehicle is
+    // known, so an invoice raised without one records the honest base price.
+    const adjustments = input.vehicleCategory
+      ? await db()
+          .select()
+          .from(schema.addonVehicleAdjustments)
+          .where(
+            and(
+              inArray(schema.addonVehicleAdjustments.addonId, input.addonIds),
+              eq(schema.addonVehicleAdjustments.vehicleCategory, input.vehicleCategory),
+            ),
+          )
+      : [];
+    const adjByAddon = new Map(adjustments.map((a) => [a.addonId, a]));
+
     for (const addon of rows) {
       addons.set(addon.id, {
         description: addon.name,
-        priceCents: addon.priceCents,
+        priceCents: addon.priceCents + (adjByAddon.get(addon.id)?.priceDeltaCents ?? 0),
         requiresManualPrice: false,
       });
     }

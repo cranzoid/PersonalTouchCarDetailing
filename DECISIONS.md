@@ -665,3 +665,58 @@ having this screen quietly widen what their role can do.
 **Revisit when:** the shop wants to correct the vehicle on a sale that has
 already been paid and have the money follow. That is a credit note (#21), not an
 edit.
+
+## 25. Ceramic protection and ceramic coating are two products, priced by the ordinary catalogue
+Ceramic coating was quote-only (`inspection_required`, no price), so every
+enquiry became a manual quote. It is now priced and bookable — but the owner
+sells *two* ceramic things, and the expensive way to get this wrong is to blur
+them. **Ceramic protection** is a single layer of ceramic protection.
+**Ceramic coating** is the premium service, in three packages. They are never
+described, priced or labelled interchangeably, and the $120 figure is never
+allowed to read as the price of a coating.
+
+- **No second pricing system.** All five products are ordinary `services` /
+  `addons` rows with `service_vehicle_adjustments`, priced by `priceBooking`
+  like every other package. `src/lib/ceramic.ts` holds only what a price column
+  cannot: which slugs are ceramic, the editorial content, and the disclaimer.
+  Every price on the ceramic pages is read from the catalogue per request, so
+  Admin → Services still moves them without a deploy.
+- **The $120 rule is a foreign key, not a UI rule.** Ceramic protection at the
+  discounted price is an add-on linked *only* to Ultimate Detail. `priceBooking`
+  already refuses an add-on that is not linked to a selected service, so the
+  qualification is enforced server-side and a hand-written URL cannot buy it
+  alone. The standalone service is a separate row at its own higher price.
+  Changing service in the wizard keeps the add-ons the new service still offers
+  and *announces* the ones it dropped, rather than silently shrinking the total.
+- **Add-ons gained vehicle-size pricing** (`addon_vehicle_adjustments`), because
+  ceramic protection costs more on an SUV whether or not it is bought with a
+  detail. Deliberately the same shape as `service_vehicle_adjustments` so one
+  rule — base plus category delta — still explains every price on the site, and
+  editable in the same admin control.
+- **Durations are capped by the working day, not by the work.** The slot engine
+  requires setup + work + cleanup to fit between opening and closing, so a
+  service over 450 minutes is offered *no times at all* — which reads to a
+  customer as "never available". Crystal 300, Pro 420, Max 450: Max therefore
+  offers exactly one start per day, which is the honest answer for a full-day
+  job. This is why the retired 480-minute ceramic coating could never have been
+  booked even if it had carried a price.
+- **Paint correction is never folded into a coating price.** The displayed price
+  covers the coating for the chosen vehicle category; condition-dependent prep
+  goes through the existing additional-work approval flow. The disclaimer sits
+  next to the estimate in the booking summary, not buried in an FAQ.
+- **Only ceramic-relevant extras.** The interior extras (pet hair, salt stains)
+  and Wax / Buff are linked to the detailing packages only. The seed used to
+  link every add-on to every bookable service, which would have offered pet-hair
+  removal on a $1,399 coating.
+- **The old `ceramic-coating` service row is deactivated, not deleted** — past
+  appointments and invoices reference it, and `resolveCatalogPrices` reads
+  inactive services so that history still prices. `/services/ceramic-coating` is
+  now a hand-written hub comparing the three packages, and static routes win
+  over `/services/[slug]`.
+- **Ads deep-link into a configured cart.** `/book?service=…&addon=…` (add-ons
+  gained a `slug` for this) lands a campaign on a ready-made booking. It is only
+  a suggestion — the add-on is applied only if the chosen service offers it — so
+  a stale ad URL lands on a valid cart instead of one the server would reject.
+
+**Revisit when:** a coating genuinely needs to occupy the bay for more than one
+working day. That is multi-day scheduling, not a longer `base_duration_min`.

@@ -310,6 +310,14 @@ export const serviceVehicleAdjustments = pgTable(
 export const addons = pgTable("addons", {
   id: id(),
   name: text("name").notNull(),
+  /**
+   * Stable key for deep links (`/book?service=…&addon=…`), so an ad can land a
+   * visitor on a pre-configured cart without putting a database id in the URL.
+   * Nullable: add-ons created before this column, and any the owner adds by
+   * hand, simply have no deep link. It is NOT a customer-facing label — the
+   * name is, and renaming one must never break a live ad.
+   */
+  slug: text("slug").unique(),
   description: text("description"),
   priceCents: integer("price_cents").notNull().default(0),
   durationMin: integer("duration_min").notNull().default(0),
@@ -318,6 +326,32 @@ export const addons = pgTable("addons", {
   createdAt: createdAt(),
   updatedAt: updatedAt(),
 });
+
+/**
+ * Vehicle-size pricing for an add-on, identical in shape and meaning to
+ * `service_vehicle_adjustments`: the delta is ADDED to `addons.price_cents`
+ * for that category, and absent means no adjustment.
+ *
+ * Exists because ceramic protection costs more on an SUV than on a sedan even
+ * when it is bought as an add-on. Deliberately the same mechanism as services
+ * rather than a second pricing system, so one rule — base plus category delta
+ * — explains every price on the site.
+ */
+export const addonVehicleAdjustments = pgTable(
+  "addon_vehicle_adjustments",
+  {
+    id: id(),
+    addonId: text("addon_id")
+      .notNull()
+      .references(() => addons.id),
+    vehicleCategory: text("vehicle_category").notNull(),
+    priceDeltaCents: integer("price_delta_cents").notNull().default(0),
+    durationDeltaMin: integer("duration_delta_min").notNull().default(0),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("addon_vehicle_adj_unique").on(t.addonId, t.vehicleCategory)],
+);
 
 export const serviceAddons = pgTable(
   "service_addons",

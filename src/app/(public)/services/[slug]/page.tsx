@@ -10,6 +10,13 @@ import { BUSINESS_ENTITY_ID, PUBLIC_SITE_URL, absoluteUrl, pageMetadata } from "
 import { SERVICE_SEO } from "@/lib/service-seo";
 import { getSettings } from "@/lib/settings";
 import { VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
+import {
+  CERAMIC_CONDITION_DISCLAIMER,
+  CERAMIC_COATING_HUB_PATH,
+  coatingPackage,
+  isCeramicServiceSlug,
+  warrantyLabel,
+} from "@/lib/ceramic";
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
   const { slug } = await params;
@@ -82,6 +89,14 @@ export default async function ServiceDetailPage({
 
   const bookable = svc.bookingMode === "bookable" && svc.basePriceCents !== null;
   const quotePath = svc.bookingMode === "contact_only" ? "/contact" : `/quote?service=${svc.slug}`;
+  /**
+   * Ceramic pages quote a single figure. The price is read against the other
+   * coating packages, and showing two numbers per row turns that comparison
+   * into arithmetic; the payment terms are stated once instead. Tax behaviour
+   * itself is unchanged — cash and e-transfer still pay the listed price.
+   */
+  const singlePrice = isCeramicServiceSlug(svc.slug);
+  const coating = coatingPackage(svc.slug);
 
   const canonicalPath = `/services/${svc.slug}`;
   const serviceSchema = {
@@ -181,8 +196,12 @@ export default async function ServiceDetailPage({
                   <thead>
                     <tr className="border-b border-white/10 text-xs uppercase tracking-wider text-ink-500">
                       <th scope="col" className="py-2 text-left font-medium">Vehicle</th>
-                      <th scope="col" className="py-2 text-right font-medium">Cash / e-transfer</th>
-                      <th scope="col" className="py-2 text-right font-medium">Card / cheque</th>
+                      <th scope="col" className="py-2 text-right font-medium">
+                        {singlePrice ? "Price" : "Cash / e-transfer"}
+                      </th>
+                      {!singlePrice && (
+                        <th scope="col" className="py-2 text-right font-medium">Card / cheque</th>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
@@ -191,9 +210,11 @@ export default async function ServiceDetailPage({
                       <td className="py-2 text-right text-accent-300">
                         {formatCents(svc.basePriceCents!)}
                       </td>
-                      <td className="py-2 text-right text-ink-300">
-                        {formatCents(withTaxCents(svc.basePriceCents!, settings.taxRateBp))}
-                      </td>
+                      {!singlePrice && (
+                        <td className="py-2 text-right text-ink-300">
+                          {formatCents(withTaxCents(svc.basePriceCents!, settings.taxRateBp))}
+                        </td>
+                      )}
                     </tr>
                     {adjustments.map((adj) => (
                       <tr key={adj.id} className="border-b border-white/10">
@@ -204,22 +225,63 @@ export default async function ServiceDetailPage({
                         <td className="py-2 text-right text-accent-300">
                           {formatCents(svc.basePriceCents! + adj.priceDeltaCents)}
                         </td>
-                        <td className="py-2 text-right text-ink-300">
-                          {formatCents(
-                            withTaxCents(svc.basePriceCents! + adj.priceDeltaCents, settings.taxRateBp),
-                          )}
-                        </td>
+                        {!singlePrice && (
+                          <td className="py-2 text-right text-ink-300">
+                            {formatCents(
+                              withTaxCents(svc.basePriceCents! + adj.priceDeltaCents, settings.taxRateBp),
+                            )}
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
               <p className="mt-2 text-xs text-ink-500">
-                Final pricing is confirmed at booking. Heavily soiled vehicles may require
-                additional time, always discussed with you first. Listed prices are what you pay in
-                cash or by Interac e-transfer; card and cheque add {settings.taxLabel}.
+                {singlePrice
+                  ? `Listed prices are what you pay in cash or by Interac e-transfer; card and cheque add ${settings.taxLabel}.`
+                  : `Final pricing is confirmed at booking. Heavily soiled vehicles may require additional time, always discussed with you first. Listed prices are what you pay in cash or by Interac e-transfer; card and cheque add ${settings.taxLabel}.`}
               </p>
             </div>
+          )}
+
+          {coating && (
+            <div className="mt-10 grid gap-5 md:grid-cols-2">
+              <Card>
+                <h2 className="font-display text-2xl text-white">What this package includes</h2>
+                <ul className="mt-4 space-y-2 text-sm leading-6 text-ink-300">
+                  {coating.includes.map((item) => <li key={item}>• {item}</li>)}
+                </ul>
+              </Card>
+              <Card>
+                <h2 className="font-display text-2xl text-white">Who it suits</h2>
+                <p className="mt-4 text-sm leading-6 text-ink-300">{coating.bestFor}</p>
+                <p className="mt-4 text-sm text-ink-300">
+                  <span className="font-semibold text-white">{warrantyLabel(coating.warrantyYears)}.</span>{" "}
+                  {coating.warrantyYears === null
+                    ? "Pro and Max add a coating warranty."
+                    : "Warranty terms are confirmed in writing when the work is booked."}
+                </p>
+                <Link className="mt-4 inline-flex text-sm font-semibold text-accent-300 hover:text-accent-200" href={CERAMIC_COATING_HUB_PATH}>
+                  Compare all three coating packages →
+                </Link>
+              </Card>
+            </div>
+          )}
+
+          {singlePrice && (
+            <Card className="mt-10 border-accent-500/30">
+              <h2 className="font-semibold text-accent-300">Before we start: paint condition</h2>
+              <p className="mt-2 text-sm leading-6 text-ink-300">{CERAMIC_CONDITION_DISCLAIMER}</p>
+              <p className="mt-3 text-sm leading-6 text-ink-400">
+                Paint correction is never added to this price without your approval. If we think your
+                paint needs{" "}
+                <Link className="text-accent-300 hover:text-accent-200" href="/services/paint-correction">
+                  enhancement or correction
+                </Link>
+                , we tell you what it costs and wait for your go-ahead before doing it.
+              </p>
+            </Card>
           )}
 
           {addonRows.length > 0 && (
@@ -305,9 +367,20 @@ export default async function ServiceDetailPage({
               {bookable ? formatCents(svc.basePriceCents!) : "By quote"}
             </p>
             {bookable && settings.taxRateBp > 0 && (
-              <p className="mt-1 text-sm text-ink-400">
-                in cash or by Interac e-transfer ·{" "}
-                {formatCents(withTaxCents(svc.basePriceCents!, settings.taxRateBp))} by card or cheque
+              singlePrice ? (
+                <p className="mt-1 text-sm text-ink-400">
+                  for a coupe or sedan. Listed prices exclude {settings.taxLabel}.
+                </p>
+              ) : (
+                <p className="mt-1 text-sm text-ink-400">
+                  in cash or by Interac e-transfer ·{" "}
+                  {formatCents(withTaxCents(svc.basePriceCents!, settings.taxRateBp))} by card or cheque
+                </p>
+              )
+            )}
+            {coating && (
+              <p className="mt-3 inline-flex rounded-full border border-accent-400/30 bg-accent-400/10 px-3 py-1 text-xs font-semibold text-accent-200">
+                {warrantyLabel(coating.warrantyYears)}
               </p>
             )}
             <p className="mt-1 text-sm text-ink-400">

@@ -5,8 +5,31 @@ import { Container, SectionHeading, Card, ButtonLink } from "@/components/ui";
 import { formatCents, withTaxCents } from "@/lib/money";
 import { getSettings } from "@/lib/settings";
 import { pageMetadata, SEO_PAGES } from "@/lib/seo";
+import {
+  CERAMIC_COATING_HUB_PATH,
+  CERAMIC_PROTECTION_PATH,
+  isCeramicServiceSlug,
+} from "@/lib/ceramic";
 
 export const metadata = pageMetadata(SEO_PAGES.services);
+
+/**
+ * Categories whose own name links to a hand-written overview page, and the
+ * guides offered underneath them. These pages compare options that a grid of
+ * service cards cannot explain on its own — correction levels, and the
+ * difference between ceramic protection and the ceramic coating packages.
+ */
+const CATEGORY_PAGE: Record<string, string> = {
+  "paint-correction": "/services/paint-correction",
+};
+
+const CATEGORY_GUIDES: Record<string, { href: string; label: string }[]> = {
+  "paint-correction": [{ href: "/services/paint-correction", label: "Compare correction levels" }],
+  "paint-protection": [
+    { href: CERAMIC_COATING_HUB_PATH, label: "Compare ceramic coating packages" },
+    { href: CERAMIC_PROTECTION_PATH, label: "What ceramic protection covers" },
+  ],
+};
 
 export default async function ServicesPage() {
   const settings = await getSettings();
@@ -35,13 +58,19 @@ export default async function ServicesPage() {
             <div className="flex flex-col gap-3 border-t border-white/10 pt-7 sm:flex-row sm:items-end sm:justify-between">
               <div>
                 <h2 className="font-display text-3xl text-white">
-                  {cat.slug === "paint-correction" ? (
-                    <Link className="hover:text-accent-300" href="/services/paint-correction">{cat.name}</Link>
+                  {CATEGORY_PAGE[cat.slug] ? (
+                    <Link className="hover:text-accent-300" href={CATEGORY_PAGE[cat.slug]}>{cat.name}</Link>
                   ) : cat.name}
                 </h2>
                 <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-400">{cat.description}</p>
-                {cat.slug === "paint-correction" && (
-                  <Link className="mt-3 inline-flex text-sm font-semibold text-accent-300 hover:text-accent-200" href="/services/paint-correction">Compare correction levels →</Link>
+                {(CATEGORY_GUIDES[cat.slug] ?? []).length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-x-5 gap-y-2">
+                    {CATEGORY_GUIDES[cat.slug].map((guide) => (
+                      <Link key={guide.href} className="text-sm font-semibold text-accent-300 hover:text-accent-200" href={guide.href}>
+                        {guide.label} →
+                      </Link>
+                    ))}
+                  </div>
                 )}
               </div>
               <span className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-300">
@@ -60,7 +89,11 @@ export default async function ServicesPage() {
                         {svc.basePriceCents !== null ? (
                           <>
                             From {formatCents(svc.basePriceCents)}
-                            {settings.taxRateBp > 0 && (
+                            {/* Ceramic cards quote one figure. These prices are
+                                read next to three other packages, and a second
+                                number per card turns the comparison into noise.
+                                The service page states the payment terms. */}
+                            {settings.taxRateBp > 0 && !isCeramicServiceSlug(svc.slug) && (
                               <span className="block text-xs text-ink-500">
                                 {formatCents(withTaxCents(svc.basePriceCents, settings.taxRateBp))} by
                                 card or cheque

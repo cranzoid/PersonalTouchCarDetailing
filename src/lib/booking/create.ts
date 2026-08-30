@@ -281,7 +281,7 @@ export async function createStaffAppointment(input: {
   vehicleId: string;
   serviceIds: string[];
   addonIds: string[];
-  /** Hand-priced work with no catalog entry — a ceramic coating, say. */
+  /** Hand-priced work with no catalog entry — paint correction, say. */
   customLines?: CustomBookingLine[];
   dateISO: string;
   startMs: number;

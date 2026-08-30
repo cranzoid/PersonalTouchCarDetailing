@@ -16,7 +16,7 @@ const FAQS: [string, string][] = [
   ],
   [
     "Why do some services require a quote first?",
-    "Services like paint correction, ceramic coating, tinting and odour removal depend heavily on your vehicle's condition. A few photos let us quote accurately instead of guessing — and you avoid surprises at drop-off.",
+    "Services like paint correction, paint protection film, tinting and odour removal depend heavily on your vehicle's condition. A few photos let us quote accurately instead of guessing — and you avoid surprises at drop-off. Our detailing packages, ceramic protection and ceramic coating packages are priced up front and can be booked online.",
   ],
   [
     "Do prices vary by vehicle size?",

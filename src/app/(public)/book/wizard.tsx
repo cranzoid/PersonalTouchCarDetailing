@@ -19,15 +19,39 @@ export type WizardService = {
   baseDurationMin: number;
   adjustments: Record<string, { priceDeltaCents: number; durationDeltaMin: number }>;
   addonIds: string[];
+  /**
+   * Condition caveat shown beside the estimate for services whose displayed
+   * price covers the work itself but not condition-dependent preparation.
+   * Null for services where the price is the whole story.
+   */
+  conditionNotice: string | null;
 };
 
 export type WizardAddon = {
   id: string;
+  /** Deep-link key, so an ad can preselect this add-on. Null for most. */
+  slug: string | null;
   name: string;
   description: string;
   priceCents: number;
   durationMin: number;
+  /** Vehicle-size deltas, same shape and meaning as a service's. */
+  adjustments: Record<string, { priceDeltaCents: number; durationDeltaMin: number }>;
+  /**
+   * Condition attached to this add-on's price — shown wherever the price is,
+   * never separated from it.
+   */
+  qualifier: string | null;
 };
+
+/** An add-on's price and time for a vehicle category: base plus its delta. */
+function addonFor(addon: WizardAddon, vehicleCategory: string) {
+  const adj = addon.adjustments[vehicleCategory];
+  return {
+    priceCents: addon.priceCents + (adj?.priceDeltaCents ?? 0),
+    durationMin: addon.durationMin + (adj?.durationDeltaMin ?? 0),
+  };
+}
 
 export type WizardPromo = {
   code: string;
@@ -49,6 +73,7 @@ export function BookingWizard({
   timezone,
   promo = null,
   offerFromUrl,
+  preselectAddonSlug,
 }: {
   services: WizardService[];
   addons: WizardAddon[];
@@ -60,14 +85,28 @@ export function BookingWizard({
   /** The offer currently running, resolved server-side. */
   promo?: WizardPromo | null;
   offerFromUrl?: string;
+  /** Add-on an ad asked to preselect. Honoured only if the chosen service offers it. */
+  preselectAddonSlug?: string;
 }) {
   const idPrefix = useId();
   const preselected = services.find((s) => s.slug === preselectSlug);
+  // A campaign can arrive with both halves of the cart. The add-on is applied
+  // only when the preselected service actually offers it, so a stale ad URL
+  // lands on a valid cart instead of one the server would reject.
+  const preselectedAddon = addons.find(
+    (a) => !!preselectAddonSlug && a.slug === preselectAddonSlug && !!preselected?.addonIds.includes(a.id),
+  );
   const [step, setStep] = useState(preselected ? 1 : 0);
   const [serviceId, setServiceId] = useState<string | null>(preselected?.id ?? null);
   const [vehicleCategory, setVehicleCategory] = useState<VehicleCategory>("sedan");
   const [vehicle, setVehicle] = useState({ year: "", make: "", model: "", colour: "" });
-  const [selectedAddons, setSelectedAddons] = useState<string[]>([]);
+  const [selectedAddons, setSelectedAddons] = useState<string[]>(
+    preselectedAddon ? [preselectedAddon.id] : [],
+  );
+  // Add-ons dropped because the customer changed service. Announced rather
+  // than silently removed — a ceramic protection selection disappearing from
+  // the total without a word is exactly the surprise we are avoiding.
+  const [droppedAddons, setDroppedAddons] = useState<string[]>([]);
   const [dateISO, setDateISO] = useState("");
   const [slots, setSlots] = useState<{ startMs: number; label: string }[] | null>(null);
   const [slotsLoading, setSlotsLoading] = useState(false);
@@ -109,8 +148,9 @@ export function BookingWizard({
     for (const id of selectedAddons) {
       const a = addons.find((x) => x.id === id);
       if (a) {
-        subtotal += a.priceCents;
-        duration += a.durationMin;
+        const priced = addonFor(a, vehicleCategory);
+        subtotal += priced.priceCents;
+        duration += priced.durationMin;
       }
     }
     // Mirrors the server: the offer applies to the eligible service line only,
@@ -266,7 +306,19 @@ export function BookingWizard({
                 aria-pressed={serviceId === s.id}
                 onClick={() => {
                   setServiceId(s.id);
-                  setSelectedAddons([]);
+                  // Carry over only what this service actually offers. The
+                  // discounted ceramic protection price is linked to one
+                  // package, so switching away from it must remove — and say
+                  // that it removed — the selection rather than reprice it
+                  // silently.
+                  const kept = selectedAddons.filter((id) => s.addonIds.includes(id));
+                  setDroppedAddons(
+                    selectedAddons
+                      .filter((id) => !s.addonIds.includes(id))
+                      .map((id) => addons.find((a) => a.id === id)?.name)
+                      .filter((name): name is string => !!name),
+                  );
+                  setSelectedAddons(kept);
                   setSlots(null);
                   setStartMs(null);
                   setStep(1);
@@ -339,6 +391,7 @@ export function BookingWizard({
             )}
             {eligibleAddons.map((a) => {
               const checked = selectedAddons.includes(a.id);
+              const priced = addonFor(a, vehicleCategory);
               return (
                 <button
                   type="button"
@@ -348,6 +401,7 @@ export function BookingWizard({
                     setSelectedAddons(
                       checked ? selectedAddons.filter((x) => x !== a.id) : [...selectedAddons, a.id],
                     );
+                    setDroppedAddons([]);
                     setSlots(null);
                     setStartMs(null);
                   }}
@@ -358,8 +412,11 @@ export function BookingWizard({
                   <div>
                     <p className="font-medium text-white">{a.name}</p>
                     <p className="text-sm text-ink-400">{a.description}</p>
+                    {a.qualifier && (
+                      <p className="mt-1 text-xs text-ink-500">{a.qualifier}</p>
+                    )}
                   </div>
-                  <span className="text-accent-300">+{formatCents(a.priceCents)}</span>
+                  <span className="shrink-0 text-accent-300">+{formatCents(priced.priceCents)}</span>
                 </button>
               );
             })}
@@ -496,6 +553,13 @@ export function BookingWizard({
               {promo!.percentOffBp / 100}% off applied automatically — no code needed.
             </p>
           )}
+          {droppedAddons.length > 0 && (
+            <p role="status" className="mt-3 rounded-xl border border-amber-400/30 bg-amber-950/20 px-3 py-2 text-xs text-amber-200">
+              {droppedAddons.join(", ")} {droppedAddons.length === 1 ? "was" : "were"} removed, because
+              {droppedAddons.length === 1 ? " it is" : " they are"} only available with the service you
+              had selected. Nothing has been booked — the total below is up to date.
+            </p>
+          )}
           {!service && <p className="mt-3 text-sm text-ink-500">Select a service to begin.</p>}
           {service && preview && (
             <div className="mt-4 space-y-2 text-sm">
@@ -509,7 +573,14 @@ export function BookingWizard({
                 )}
               {selectedAddons.map((id) => {
                 const a = addons.find((x) => x.id === id);
-                return a ? <Row key={id} label={a.name} value={`+${formatCents(a.priceCents)}`} /> : null;
+                if (!a) return null;
+                return (
+                  <Row
+                    key={id}
+                    label={a.name}
+                    value={`+${formatCents(addonFor(a, vehicleCategory).priceCents)}`}
+                  />
+                );
               })}
               <div className="my-2 border-t border-ink-700" />
               <Row label="Subtotal" value={formatCents(preview.subtotal)} />
@@ -550,6 +621,19 @@ export function BookingWizard({
                   The {promo?.label ?? "offer"} is for first-time detailing customers, so it
                   doesn&apos;t apply to this booking. Nothing has been booked yet — the total above
                   is what you&apos;ll pay.
+                </p>
+              )}
+              {selectedAddons
+                .map((id) => addons.find((a) => a.id === id))
+                .filter((a): a is WizardAddon => !!a?.qualifier)
+                .map((a) => (
+                  <p key={a.id} className="rounded-xl border border-ink-700 bg-ink-950/50 p-3 text-xs text-ink-300">
+                    {a.qualifier}
+                  </p>
+                ))}
+              {service.conditionNotice && (
+                <p className="rounded-xl border border-ink-700 bg-ink-950/50 p-3 text-xs text-ink-300">
+                  {service.conditionNotice}
                 </p>
               )}
               <p className="pt-2 text-xs text-ink-500">
