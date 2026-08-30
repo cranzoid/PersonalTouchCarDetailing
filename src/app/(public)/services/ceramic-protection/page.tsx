@@ -5,11 +5,17 @@ import { db, schema } from "@/db";
 import { ButtonLink, Card, Container } from "@/components/ui";
 import { GoogleReviewStrip, ServiceImage } from "@/components/public-sections";
 import { StructuredData } from "@/components/structured-data";
-import { formatCents, withTaxCents } from "@/lib/money";
+import { formatCents } from "@/lib/money";
+import { hasPublishedResults } from "@/lib/results";
 import { getSettings } from "@/lib/settings";
 import { BUSINESS_ENTITY_ID, PUBLIC_SITE_URL, absoluteUrl, pageMetadata } from "@/lib/seo";
 import { SERVICE_SEO } from "@/lib/service-seo";
-import { VEHICLE_CATEGORIES, VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
+import {
+  VEHICLE_CATEGORIES,
+  VEHICLE_CATEGORY_LABELS,
+  isQuoteOnlyVehicleCategory,
+  type VehicleCategory,
+} from "@/lib/types";
 import {
   CERAMIC_COATING_HUB_PATH,
   CERAMIC_PROTECTION_ADDON_SLUG,
@@ -35,7 +41,7 @@ const definition = SERVICE_SEO["ceramic-protection"];
 export const metadata = pageMetadata(definition);
 
 export default async function CeramicProtectionPage() {
-  const settings = await getSettings();
+  const [settings, resultsPublished] = await Promise.all([getSettings(), hasPublishedResults()]);
 
   const [standalone] = await db()
     .select()
@@ -86,20 +92,26 @@ export default async function CeramicProtectionPage() {
     : false;
   const offerAvailable = !!addon && addon.active && !!ultimateDetail?.active && addonLinked;
 
-  const standalonePrice = (category: VehicleCategory | null) => withTaxCents(
-    standalone.basePriceCents! +
-    (category
-      ? serviceAdjustments.find((a) => a.vehicleCategory === category)?.priceDeltaCents ?? 0
-      : 0),
-    settings.taxRateBp,
-  );
-  const addonPrice = (category: VehicleCategory | null) => withTaxCents(
-    (addon?.priceCents ?? 0) +
-    (category
-      ? addonAdjustments.find((a) => a.vehicleCategory === category)?.priceDeltaCents ?? 0
-      : 0),
-    settings.taxRateBp,
-  );
+  // Listed, tax-exclusive prices. Null for a category we refuse to put a number
+  // against — a commercial vehicle is quoted, never priced as a sedan plus a
+  // delta. See QUOTE_ONLY_VEHICLE_CATEGORIES.
+  const standalonePrice = (category: VehicleCategory | null): number | null => {
+    if (category && isQuoteOnlyVehicleCategory(category)) return null;
+    return standalone.basePriceCents! +
+      (category
+        ? serviceAdjustments.find((a) => a.vehicleCategory === category)?.priceDeltaCents ?? 0
+        : 0);
+  };
+  const addonPrice = (category: VehicleCategory | null): number | null => {
+    if (category && isQuoteOnlyVehicleCategory(category)) return null;
+    return (addon?.priceCents ?? 0) +
+      (category
+        ? addonAdjustments.find((a) => a.vehicleCategory === category)?.priceDeltaCents ?? 0
+        : 0);
+  };
+  /** A cell in the vehicle-size table: a price, or the quote-only fallback. */
+  const priceCell = (cents: number | null) =>
+    cents === null ? <span className="text-ink-400">By quote</span> : formatCents(cents);
 
   // Base row plus every category either price actually adjusts, in canonical
   // order — derived rather than assumed, so a later price change still shows.
@@ -131,7 +143,7 @@ export default async function CeramicProtectionPage() {
         offers: {
           "@type": "Offer",
           priceCurrency: settings.currency,
-          price: (withTaxCents(standalone.basePriceCents!, settings.taxRateBp) / 100).toFixed(2),
+          price: (standalone.basePriceCents! / 100).toFixed(2),
           url: absoluteUrl(`/book?service=${CERAMIC_PROTECTION_SLUG}`),
         },
       },
@@ -187,15 +199,15 @@ export default async function CeramicProtectionPage() {
                   Added to an {ULTIMATE_DETAIL_LABEL}
                 </p>
                 <p className="mt-4 font-display text-5xl text-white">
-                  {formatCents(addonPrice(null))}
+                  {formatCents(addonPrice(null)!)}
                   <span aria-hidden="true" className="align-super text-2xl text-accent-300">*</span>
                 </p>
                 {/* The asterisk is answered immediately, in the same card. The
                     price is never allowed to travel without this sentence. */}
                 <p className="mt-3 text-sm leading-6 text-ink-300">
                   <span aria-hidden="true">*</span> Available at this price when added to an{" "}
-                  {ULTIMATE_DETAIL_LABEL}. Shown for a coupe or sedan; larger vehicles are{" "}
-                  {formatCents(addonPrice("suv_large"))}.
+                  {ULTIMATE_DETAIL_LABEL}. Shown for a coupe or sedan before {settings.taxLabel}; larger
+                  vehicles are {formatCents(addonPrice("suv_large")!)}.
                 </p>
                 <p className="mt-3 flex-1 text-sm leading-6 text-ink-400">
                   Your vehicle is already washed and prepared as part of the detail, so the layer goes
@@ -208,9 +220,10 @@ export default async function CeramicProtectionPage() {
             )}
             <Card className="flex flex-col">
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-300">On its own</p>
-              <p className="mt-4 font-display text-5xl text-white">{formatCents(standalonePrice(null))}</p>
+              <p className="mt-4 font-display text-5xl text-white">{formatCents(standalonePrice(null)!)}</p>
               <p className="mt-3 text-sm leading-6 text-ink-300">
-                For a coupe or sedan; larger vehicles are {formatCents(standalonePrice("suv_large"))}.
+                For a coupe or sedan before {settings.taxLabel}; larger vehicles are{" "}
+                {formatCents(standalonePrice("suv_large")!)}.
               </p>
               <p className="mt-3 flex-1 text-sm leading-6 text-ink-400">
                 Booked without a detailing package. The preparation has to be done from scratch, which
@@ -244,9 +257,9 @@ export default async function CeramicProtectionPage() {
                   <tr key={row.label} className="border-b border-white/10">
                     <th scope="row" className="py-2 text-left font-normal text-ink-300">{row.label}</th>
                     {offerAvailable && (
-                      <td className="py-2 text-right text-accent-300">{formatCents(addonPrice(row.category))}</td>
+                      <td className="py-2 text-right text-accent-300">{priceCell(addonPrice(row.category))}</td>
                     )}
-                    <td className="py-2 text-right text-accent-300">{formatCents(standalonePrice(row.category))}</td>
+                    <td className="py-2 text-right text-accent-300">{priceCell(standalonePrice(row.category))}</td>
                   </tr>
                 ))}
               </tbody>
@@ -259,7 +272,8 @@ export default async function CeramicProtectionPage() {
                 {ULTIMATE_DETAIL_LABEL} booking; the package itself is priced separately.{" "}
               </>
             )}
-            Prices include {settings.taxLabel}. The exact figure for your vehicle is shown before booking confirmation.
+            Prices are before {settings.taxLabel}, which is added when you book. Commercial vehicles are
+            quoted individually. The exact figure for your vehicle is shown before booking confirmation.
           </p>
         </section>
 
@@ -336,7 +350,7 @@ export default async function CeramicProtectionPage() {
                 {service.label}
               </Link>
             ))}
-            <Link href="/results" className="rounded-full border border-white/15 px-4 py-2 text-sm text-ink-200 transition hover:border-accent-400 hover:text-accent-300">View real results</Link>
+            {resultsPublished && <Link href="/results" className="rounded-full border border-white/15 px-4 py-2 text-sm text-ink-200 transition hover:border-accent-400 hover:text-accent-300">View real results</Link>}
           </div>
         </section>
 

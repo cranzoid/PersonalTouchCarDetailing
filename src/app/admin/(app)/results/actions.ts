@@ -12,6 +12,7 @@ import {
   type CaseStudyEditorInput,
 } from "@/lib/case-studies";
 import { newId } from "@/lib/id";
+import { invalidatePublishedResultsCache } from "@/lib/results";
 
 export type CaseStudyActionResult =
   | { ok: true; id: string; message?: string }
@@ -148,6 +149,9 @@ export async function saveCaseStudyAction(raw: unknown): Promise<CaseStudyAction
 
     revalidatePath("/admin/results");
     revalidatePath(`/admin/results/${caseStudyId}`);
+    // The public nav and sitemap are gated on there being a published story,
+    // and that answer is cached — drop it now rather than a minute from now.
+    invalidatePublishedResultsCache();
     revalidatePath("/results");
     revalidatePath(`/results/${slug}`);
     revalidatePath("/sitemap.xml");
@@ -234,6 +238,9 @@ export async function publishCaseStudyAction(caseStudyId: string): Promise<CaseS
 
     revalidatePath("/admin/results");
     revalidatePath(`/admin/results/${caseStudyId}`);
+    // The public nav and sitemap are gated on there being a published story,
+    // and that answer is cached — drop it now rather than a minute from now.
+    invalidatePublishedResultsCache();
     revalidatePath("/results");
     revalidatePath(`/results/${story.slug}`);
     revalidatePath("/sitemap.xml");
@@ -270,6 +277,9 @@ export async function unpublishCaseStudyAction(caseStudyId: string): Promise<Cas
 
     revalidatePath("/admin/results");
     revalidatePath(`/admin/results/${caseStudyId}`);
+    // The public nav and sitemap are gated on there being a published story,
+    // and that answer is cached — drop it now rather than a minute from now.
+    invalidatePublishedResultsCache();
     revalidatePath("/results");
     revalidatePath(`/results/${story.slug}`);
     revalidatePath("/sitemap.xml");

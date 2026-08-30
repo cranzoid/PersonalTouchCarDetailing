@@ -6,12 +6,13 @@ import { db, schema } from "@/db";
 import { Container, ButtonLink, Card } from "@/components/ui";
 import { CheckList, GoogleReviewStrip, ServiceImage } from "@/components/public-sections";
 import { StructuredData } from "@/components/structured-data";
-import { formatCents, withTaxCents } from "@/lib/money";
+import { formatCents } from "@/lib/money";
 import { BUSINESS_ENTITY_ID, PUBLIC_SITE_URL, absoluteUrl, pageMetadata } from "@/lib/seo";
 import { SERVICE_SEO } from "@/lib/service-seo";
+import { hasPublishedResults } from "@/lib/results";
 import { getSettings } from "@/lib/settings";
 import { servicePresentation } from "@/lib/public-content";
-import { VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
+import { VEHICLE_CATEGORY_LABELS, isQuoteOnlyVehicleCategory, type VehicleCategory } from "@/lib/types";
 import {
   CERAMIC_CONDITION_DISCLAIMER,
   CERAMIC_COATING_HUB_PATH,
@@ -52,7 +53,7 @@ export default async function ServiceDetailPage({
   params: Promise<{ slug: string }>;
 }) {
   const { slug } = await params;
-  const settings = await getSettings();
+  const [settings, resultsPublished] = await Promise.all([getSettings(), hasPublishedResults()]);
   const rows = await db()
     .select()
     .from(schema.services)
@@ -110,7 +111,7 @@ export default async function ServiceDetailPage({
         areaServed: { "@type": "City", name: "Hamilton", containedInPlace: { "@type": "AdministrativeArea", name: "Ontario" } },
         serviceType: svc.name,
         ...(svc.basePriceCents !== null
-          ? { offers: { "@type": "Offer", priceCurrency: "CAD", price: (withTaxCents(svc.basePriceCents, settings.taxRateBp) / 100).toFixed(2), url: absoluteUrl(`/book?service=${svc.slug}`) } }
+          ? { offers: { "@type": "Offer", priceCurrency: "CAD", price: (svc.basePriceCents / 100).toFixed(2), url: absoluteUrl(`/book?service=${svc.slug}`) } }
           : {}),
       },
       {
@@ -218,7 +219,7 @@ export default async function ServiceDetailPage({
                     <tr className="border-b border-white/10">
                       <td className="py-2 text-ink-300">Coupe / Sedan</td>
                       <td className="py-2 text-right text-accent-300">
-                        {formatCents(withTaxCents(svc.basePriceCents!, settings.taxRateBp))}
+                        {formatCents(svc.basePriceCents!)}
                       </td>
                     </tr>
                     {adjustments.map((adj) => (
@@ -228,7 +229,11 @@ export default async function ServiceDetailPage({
                             adj.vehicleCategory}
                         </td>
                         <td className="py-2 text-right text-accent-300">
-                          {formatCents(withTaxCents(svc.basePriceCents! + adj.priceDeltaCents, settings.taxRateBp))}
+                          {/* A commercial vehicle is quoted, never priced as a
+                              sedan plus a delta. */}
+                          {isQuoteOnlyVehicleCategory(adj.vehicleCategory)
+                            ? <span className="text-ink-400">By quote</span>
+                            : formatCents(svc.basePriceCents! + adj.priceDeltaCents)}
                         </td>
                       </tr>
                     ))}
@@ -236,7 +241,7 @@ export default async function ServiceDetailPage({
                 </table>
               </div>
               <p className="mt-2 text-xs text-ink-500">
-                Prices include {settings.taxLabel}. Final pricing is confirmed at booking. Heavily soiled vehicles may require additional time, always discussed with you first.
+                Prices are before {settings.taxLabel}, which is added when you book. Commercial vehicles are quoted individually. Final pricing is confirmed at booking. Heavily soiled vehicles may require additional time, always discussed with you first.
               </p>
             </div>
           )}
@@ -288,7 +293,7 @@ export default async function ServiceDetailPage({
                   <li key={a.id} className="flex min-h-12 items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm">
                     <span className="text-ink-200">{a.name}</span>
                     <span className="text-right text-accent-300">
-                      {formatCents(withTaxCents(a.priceCents, settings.taxRateBp))}
+                      {formatCents(a.priceCents)}
                       <span className="block text-xs text-ink-500">+{formatDuration(a.durationMin)}</span>
                     </span>
                   </li>
@@ -351,7 +356,7 @@ export default async function ServiceDetailPage({
                         </Link>
                       );
                     })}
-                    <Link href="/results" className="rounded-full border border-white/15 px-4 py-2 text-sm text-ink-200 transition hover:border-accent-400 hover:text-accent-300">View real results</Link>
+                    {resultsPublished && <Link href="/results" className="rounded-full border border-white/15 px-4 py-2 text-sm text-ink-200 transition hover:border-accent-400 hover:text-accent-300">View real results</Link>}
                   </div>
                 </section>
               )}
@@ -365,9 +370,9 @@ export default async function ServiceDetailPage({
               {bookable ? "Starting at" : "Pricing"}
             </p>
             <p className="mt-2 font-display text-4xl text-white">
-              {bookable ? formatCents(withTaxCents(svc.basePriceCents!, settings.taxRateBp)) : "By quote"}
+              {bookable ? formatCents(svc.basePriceCents!) : "By quote"}
             </p>
-            {bookable && <p className="mt-1 text-sm text-ink-400">for a coupe or sedan, including {settings.taxLabel}.</p>}
+            {bookable && <p className="mt-1 text-sm text-ink-400">for a coupe or sedan, before {settings.taxLabel}.</p>}
             {coating && (
               <p className="mt-3 inline-flex rounded-full border border-accent-400/30 bg-accent-400/10 px-3 py-1 text-xs font-semibold text-accent-200">
                 {warrantyLabel(coating.warrantyYears)}

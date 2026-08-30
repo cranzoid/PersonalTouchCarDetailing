@@ -4,7 +4,7 @@ import { asc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { ButtonLink, Card, Container, SectionHeading } from "@/components/ui";
 import { CheckList, GoogleReviewStrip, ServiceImage } from "@/components/public-sections";
-import { formatCents, withTaxCents } from "@/lib/money";
+import { formatCents } from "@/lib/money";
 import { getSettings } from "@/lib/settings";
 import { pageMetadata, SEO_PAGES } from "@/lib/seo";
 import { isCeramicServiceSlug, resolveCeramicMenu } from "@/lib/ceramic";
@@ -57,7 +57,7 @@ export default async function ServicesPage() {
             />
             <div className="lg:pb-2">
               <GoogleReviewStrip settings={settings} tone="dark" />
-              <p className="mt-4 text-sm leading-6 text-ink-400">Standard online prices include {settings.taxLabel}. Condition-dependent work is quoted after we review the vehicle or photos.</p>
+              <p className="mt-4 text-sm leading-6 text-ink-400">Prices shown are before {settings.taxLabel}, which is added when you book. Condition-dependent work is quoted after we review the vehicle or photos.</p>
             </div>
           </div>
         </Container>
@@ -88,7 +88,7 @@ export default async function ServicesPage() {
                         <h2 className="mt-3 font-display text-[2rem] leading-tight text-ink-900">{presentation.publicName}</h2>
                       </div>
                       <span className="rounded-full bg-ink-900 px-4 py-2 text-sm font-semibold text-white">
-                        {price !== null ? `From ${formatCents(withTaxCents(price, settings.taxRateBp))}` : "By quote"}
+                        {price !== null ? `From ${formatCents(price)}` : "By quote"}
                       </span>
                     </div>
                     <div className="mt-6"><CheckList items={presentation.highlights} tone="light" /></div>
@@ -115,7 +115,7 @@ export default async function ServicesPage() {
                   {compareServices.map((service) => service && (
                     <th key={service.id} className="p-5 sm:p-6">
                       <span className="block font-display text-2xl text-ink-900">{servicePresentation(service.slug).publicName}</span>
-                      <span className="mt-1 block text-sm font-semibold text-accent-600">{service.basePriceCents !== null ? `From ${formatCents(withTaxCents(service.basePriceCents, settings.taxRateBp))}` : "By quote"}</span>
+                      <span className="mt-1 block text-sm font-semibold text-accent-600">{service.basePriceCents !== null ? `From ${formatCents(service.basePriceCents)}` : "By quote"}</span>
                     </th>
                   ))}
                 </tr>
@@ -147,7 +147,7 @@ export default async function ServicesPage() {
                 const linkedNames = addonLinks.filter((link) => link.addonId === addon.id).map((link) => serviceById.get(link.serviceId)).filter(Boolean).map((service) => servicePresentation(service!.slug).publicName);
                 return (
                   <Card key={addon.id} className="p-6">
-                    <div className="flex items-start justify-between gap-4"><h3 className="text-lg font-semibold text-white">{addon.name.replace(" - Ultimate Detail Add-On", "")}</h3><span className="shrink-0 text-sm font-semibold text-accent-300">+{formatCents(withTaxCents(addon.priceCents, settings.taxRateBp))}</span></div>
+                    <div className="flex items-start justify-between gap-4"><h3 className="text-lg font-semibold text-white">{addon.name.replace(" - Ultimate Detail Add-On", "")}</h3><span className="shrink-0 text-sm font-semibold text-accent-300">+{formatCents(addon.priceCents)}</span></div>
                     <p className="mt-3 text-sm leading-6 text-ink-300">{addon.description}</p>
                     {linkedNames.length > 0 && <p className="mt-4 border-t border-white/10 pt-4 text-xs leading-5 text-ink-500">Available with {unique(linkedNames).join(", ")}.</p>}
                   </Card>
@@ -195,8 +195,8 @@ export default async function ServicesPage() {
                       {(CATEGORY_GUIDES[category.slug] ?? []).map((guide) => <Link key={guide.href} href={guide.href} className="mt-3 inline-flex text-sm font-semibold text-accent-300 hover:text-accent-200">{guide.label} →</Link>)}
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">
-                      {includeCeramic && ceramicMenu.map((product) => <CompactService key={product.key} href={product.href} name={product.name} description={product.shortDescription} price={formatCents(withTaxCents(product.fromPriceCents, settings.taxRateBp))} />)}
-                      {categoryServices.map((service) => <CompactService key={service.id} href={`/services/${service.slug}`} name={service.name} description={service.shortDescription ?? "See service details and request options."} price={service.basePriceCents !== null ? formatCents(withTaxCents(service.basePriceCents, settings.taxRateBp)) : null} />)}
+                      {includeCeramic && ceramicMenu.map((product) => <CompactService key={product.key} href={product.href} name={product.name} description={product.shortDescription} price={formatCents(product.fromPriceCents)} />)}
+                      {categoryServices.map((service) => <CompactService key={service.id} href={`/services/${service.slug}`} name={service.name} description={service.shortDescription ?? "See service details and request options."} price={service.basePriceCents !== null ? formatCents(service.basePriceCents) : null} />)}
                     </div>
                   </div>
                 </section>

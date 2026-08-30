@@ -33,6 +33,22 @@ export const VEHICLE_CATEGORY_LABELS: Record<VehicleCategory, string> = {
 };
 
 /**
+ * Vehicle categories we never publish a list price for. A commercial vehicle's
+ * size, fit-out and access vary far too much for one figure to be honest, so
+ * every public price table says "By quote" for it and the booking flow sends it
+ * to the quote form instead of pricing it from a sedan plus a delta.
+ *
+ * Kept here rather than in a page, because the public tables and the booking
+ * wizard have to agree — a price shown as "By quote" that the wizard then
+ * quotes is worse than either answer on its own.
+ */
+export const QUOTE_ONLY_VEHICLE_CATEGORIES = ["commercial"] as const;
+
+export function isQuoteOnlyVehicleCategory(category: string): boolean {
+  return (QUOTE_ONLY_VEHICLE_CATEGORIES as readonly string[]).includes(category);
+}
+
+/**
  * Payment methods staff record by hand, i.e. money that arrived outside the
  * online checkout. Single source of truth for the Zod enums and the UI selects
  * — these values were previously repeated inline in five places, so adding one

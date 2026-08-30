@@ -81,7 +81,9 @@ const CATALOG: { category: string; slug: string; description: string; services: 
       // Ceramic protection is ONE layer of ceramic protection and is not a
       // ceramic coating package. Sold standalone here; the discounted
       // Ultimate Detail version is the add-on below, never this row.
-      { name: "Ceramic Protection - Standalone", slug: "ceramic-protection", short: "A single layer of ceramic protection applied on its own, without a detailing package.", priceCents: 19900, durationMin: 120, mode: "bookable", largeVehicleDeltaCents: 10000, largeVehicleDeltaMin: 30 },
+      // Owner-confirmed: $199 sedan, $229 for SUVs, trucks and vans — a $30
+      // delta, not the $100 the coating packages carry.
+      { name: "Ceramic Protection - Standalone", slug: "ceramic-protection", short: "A single layer of ceramic protection applied on its own, without a detailing package.", priceCents: 19900, durationMin: 120, mode: "bookable", largeVehicleDeltaCents: 3000, largeVehicleDeltaMin: 30 },
       // The three ceramic coating packages. Durations fit inside the 9-5 day
       // once the 15+15 setup/cleanup buffers are added — over that, the slot
       // engine can never offer an appointment at all.
@@ -255,8 +257,8 @@ export async function runSeed() {
     ]);
   }
 
-  // --- business hours (owner-confirmed: Mon–Sat 9–5, Sun closed; editable
-  // in Admin → Settings) --------------------------------------------------
+  // --- business hours (owner-confirmed: Mon–Fri 9–5, Sat 9–6, Sun closed;
+  // editable in Admin → Settings) -----------------------------------------
   const existingHours = await db.select().from(schema.businessHours);
   if (existingHours.length === 0) {
     const rows = [
@@ -266,7 +268,7 @@ export async function runSeed() {
       { weekday: 3, closed: false, open: "09:00", close: "17:00" },
       { weekday: 4, closed: false, open: "09:00", close: "17:00" },
       { weekday: 5, closed: false, open: "09:00", close: "17:00" },
-      { weekday: 6, closed: false, open: "09:00", close: "17:00" },
+      { weekday: 6, closed: false, open: "09:00", close: "18:00" },
     ];
     await db.insert(schema.businessHours).values(rows.map((r) => ({ id: newId("blk"), ...r })));
   }

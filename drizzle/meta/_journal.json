@@ -120,6 +120,13 @@
       "when": 1788138973197,
       "tag": "0016_contextual_addons_and_tint_menu",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1788225373197,
+      "tag": "0017_protection_delta_and_saturday_hours",
+      "breakpoints": true
     }
   ]
 }

@@ -8,7 +8,9 @@ import { MetaPixel } from "@/components/meta-pixel";
 import { GoogleTag } from "@/components/google-tag";
 import { SeoClickTracking } from "@/components/seo-click-tracking";
 import { StructuredData } from "@/components/structured-data";
+import { ServicesMenu } from "@/components/site-nav";
 import { db, schema } from "@/db";
+import { hasPublishedResults } from "@/lib/results";
 import { getPublicSettings } from "@/lib/settings";
 import { absoluteUrl, BUSINESS_ENTITY_ID, PUBLIC_SITE_URL, WEBSITE_ENTITY_ID } from "@/lib/seo";
 
@@ -16,6 +18,8 @@ import { absoluteUrl, BUSINESS_ENTITY_ID, PUBLIC_SITE_URL, WEBSITE_ENTITY_ID } f
 // them at request time so production builds do not depend on an initialized DB.
 export const dynamic = "force-dynamic";
 
+// Results is conditional: it only earns a place in the navigation once a case
+// study is actually published. See src/lib/results.ts.
 const PRIMARY_NAV = [
   { href: "/services", label: "Services" },
   { href: "/results", label: "Results" },
@@ -52,10 +56,12 @@ function BrandLogo({ footer = false }: { footer?: boolean }) {
 }
 
 export default async function PublicLayout({ children }: { children: ReactNode }) {
-  const [settings, hours] = await Promise.all([
+  const [settings, hours, resultsPublished] = await Promise.all([
     getPublicSettings(),
     db().select().from(schema.businessHours).orderBy(asc(schema.businessHours.weekday)),
+    hasPublishedResults(),
   ]);
+  const primaryNav = PRIMARY_NAV.filter((item) => item.href !== "/results" || resultsPublished);
   const digits = settings.phone.replace(/\D/g, "");
   const telephone = digits.length === 10 ? `+1${digits}` : settings.phone;
   const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -115,20 +121,8 @@ export default async function PublicLayout({ children }: { children: ReactNode }
           </Link>
 
           <nav aria-label="Primary navigation" className="hidden items-center gap-1 lg:flex">
-            <details className="group relative">
-              <summary className="flex cursor-pointer list-none items-center gap-1 rounded-lg px-3 py-2 text-[0.94rem] font-medium text-[#536477] transition-colors hover:bg-[#0B2A4A]/6 hover:text-[#0B2A4A]">
-                Services <span aria-hidden="true" className="text-[0.68rem] transition group-open:rotate-180">▾</span>
-              </summary>
-              <div className="absolute left-0 top-12 w-80 overflow-hidden rounded-2xl border border-[#D8D1C4] bg-[#FFFEFB] p-2 shadow-[0_22px_60px_rgba(3,15,27,0.2)]">
-                {SERVICE_NAV.map((item) => (
-                  <Link key={item.href} href={item.href} className="block rounded-xl px-4 py-3 transition hover:bg-[#F2EDE3]">
-                    <span className="block text-sm font-semibold text-[#0B2A4A]">{item.label}</span>
-                    <span className="mt-0.5 block text-xs text-[#6B7280]">{item.detail}</span>
-                  </Link>
-                ))}
-              </div>
-            </details>
-            {PRIMARY_NAV.filter((item) => item.href !== "/services").map((item) => (
+            <ServicesMenu items={SERVICE_NAV} />
+            {primaryNav.filter((item) => item.href !== "/services").map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
@@ -165,7 +159,7 @@ export default async function PublicLayout({ children }: { children: ReactNode }
                       ))}
                     </div>
                   </details>
-                  {[...PRIMARY_NAV.filter((item) => item.href !== "/services"), ...SECONDARY_NAV].map((item) => (
+                  {[...primaryNav.filter((item) => item.href !== "/services"), ...SECONDARY_NAV].map((item) => (
                     <Link
                       key={item.href}
                       href={item.href}
@@ -203,7 +197,7 @@ export default async function PublicLayout({ children }: { children: ReactNode }
             <div>
               <p className="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-[#0B2A4A]">Explore</p>
               <ul className="space-y-3 text-sm text-[#5C6876]">
-                {PRIMARY_NAV.map((item) => (
+                {primaryNav.map((item) => (
                   <li key={item.href}><Link href={item.href} className="transition-colors hover:text-accent-600">{item.label}</Link></li>
                 ))}
               </ul>

@@ -10,7 +10,7 @@ import { createAppointment, BookingError, OfferChangedError } from "@/lib/bookin
 import { sendMessageTemplate } from "@/lib/messaging";
 import { formatCents } from "@/lib/money";
 import { formatInZone } from "@/lib/tz";
-import { VEHICLE_CATEGORIES } from "@/lib/types";
+import { VEHICLE_CATEGORIES, isQuoteOnlyVehicleCategory } from "@/lib/types";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { getAppBaseUrl } from "@/lib/urls";
 import { sendAppointmentDepositRequest } from "@/lib/appointment-deposits";
@@ -37,6 +37,16 @@ const attributionSchema = z
   })
   .optional();
 
+/**
+ * The public booking flow refuses a quote-only vehicle category outright. The
+ * wizard already blocks it, but this is the rule and the wizard is only the UI:
+ * a hand-built request must not be able to buy a commercial job at the sedan
+ * price plus a delta. Staff booking and invoicing are unaffected — they price
+ * commercial work by hand, which is the whole point.
+ */
+const QUOTE_ONLY_VEHICLE_MESSAGE =
+  "Commercial vehicles are quoted individually. Please request a quote and we will come back with a price and a time.";
+
 const slotsInputSchema = z.object({
   dateISO: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   serviceIds: z.array(z.string()).min(1).max(5),
@@ -54,6 +64,7 @@ export async function getSlotsAction(raw: unknown): Promise<SlotsResult> {
   const parsed = slotsInputSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, error: "Invalid request" };
   const input = parsed.data;
+  if (isQuoteOnlyVehicleCategory(input.vehicleCategory)) return { ok: false, error: QUOTE_ONLY_VEHICLE_MESSAGE };
   try {
     const settings = await getSettings();
     const pricing = await priceBooking({ ...input, settings });
@@ -150,6 +161,7 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
     return { ok: false, error: "Please check the form — some fields are missing or invalid." };
   }
   const input = parsed.data;
+  if (isQuoteOnlyVehicleCategory(input.vehicleCategory)) return { ok: false, error: QUOTE_ONLY_VEHICLE_MESSAGE };
   try {
     const settings = await getSettings();
     // Server-side authority: recompute price/duration; never trust the client.

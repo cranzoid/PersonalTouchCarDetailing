@@ -1,12 +1,18 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useId, useMemo, useState } from "react";
 import { getStoredAttribution } from "@/components/attribution";
 import { trackMetaLead } from "@/components/meta-pixel";
 import { trackBookAppointmentConversion } from "@/components/google-tag";
 import { formatCents } from "@/lib/money";
 import { localDateISO } from "@/lib/tz";
-import { VEHICLE_CATEGORIES, VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
+import {
+  VEHICLE_CATEGORIES,
+  VEHICLE_CATEGORY_LABELS,
+  isQuoteOnlyVehicleCategory,
+  type VehicleCategory,
+} from "@/lib/types";
 import { getSlotsAction, submitBookingAction, type BookingResult } from "./actions";
 
 export type WizardService = {
@@ -129,6 +135,10 @@ export function BookingWizard({
   }, [claimedCode]);
 
   const service = services.find((s) => s.id === serviceId) ?? null;
+  // Commercial vehicles are quoted, never priced from the catalogue — the
+  // public price tables say so, and the booking flow has to agree rather than
+  // quietly charging a sedan price plus a delta.
+  const quoteOnlyVehicle = isQuoteOnlyVehicleCategory(vehicleCategory);
   // A claim is worth something only against the offer the server is running.
   const claimsOffer =
     !!promo && !!claimedCode && claimedCode.trim().toUpperCase() === promo.code && !offerWithdrawn;
@@ -140,7 +150,7 @@ export function BookingWizard({
 
   /** Advisory preview only — the server recomputes authoritative pricing. */
   const preview = useMemo(() => {
-    if (!service) return null;
+    if (!service || isQuoteOnlyVehicleCategory(vehicleCategory)) return null;
     const adj = service.adjustments[vehicleCategory];
     const servicePrice = service.basePriceCents + (adj?.priceDeltaCents ?? 0);
     let subtotal = servicePrice;
@@ -375,10 +385,20 @@ export function BookingWizard({
               <Field id={`${idPrefix}-make`} label="Make" required value={vehicle.make} onChange={(v) => setVehicle({ ...vehicle, make: v })} placeholder="Honda" />
               <Field id={`${idPrefix}-model`} label="Model" required value={vehicle.model} onChange={(v) => setVehicle({ ...vehicle, model: v })} placeholder="Civic" />
             </div>
+            {quoteOnlyVehicle && (
+              <p role="status" className="rounded-xl border border-amber-400/30 bg-amber-950/20 p-4 text-sm leading-6 text-amber-200">
+                Commercial vehicles are quoted individually — size, fit-out and access vary too much for
+                a list price.{" "}
+                <Link className="font-semibold underline hover:text-amber-100" href="/quote">
+                  Request a quote
+                </Link>{" "}
+                and we will come back with a price and a time.
+              </p>
+            )}
             <StepNav
               onBack={() => setStep(0)}
               onNext={() => setStep(2)}
-              nextDisabled={!vehicle.make.trim() || !vehicle.model.trim()}
+              nextDisabled={quoteOnlyVehicle || !vehicle.make.trim() || !vehicle.model.trim()}
             />
           </div>
         )}
@@ -561,6 +581,11 @@ export function BookingWizard({
             </p>
           )}
           {!service && <p className="mt-3 text-sm text-ink-500">Select a service to begin.</p>}
+          {service && quoteOnlyVehicle && (
+            <p className="mt-3 text-sm leading-6 text-ink-400">
+              Commercial vehicles are priced by quote, so there is no online estimate for one.
+            </p>
+          )}
           {service && preview && (
             <div className="mt-4 space-y-2 text-sm">
               <Row label={service.name} value={formatCents(service.basePriceCents)} />

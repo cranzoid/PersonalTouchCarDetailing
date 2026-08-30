@@ -3,6 +3,7 @@ import { and, asc, eq, inArray } from "drizzle-orm";
 import { StructuredData } from "@/components/structured-data";
 import { ButtonLink, Card, Container } from "@/components/ui";
 import { db, schema } from "@/db";
+import { hasPublishedResults } from "@/lib/results";
 import { BUSINESS_ENTITY_ID, PUBLIC_SITE_URL, absoluteUrl, pageMetadata } from "@/lib/seo";
 
 const definition = {
@@ -30,6 +31,7 @@ const EXPLANATIONS: Record<string, string> = {
 };
 
 export default async function PaintCorrectionPage() {
+  const resultsPublished = await hasPublishedResults();
   const services = await db()
     .select({
       slug: schema.services.slug,
@@ -128,7 +130,7 @@ export default async function PaintCorrectionPage() {
             <div className="mt-4 flex flex-wrap gap-3 text-sm">
               <Link className="text-accent-300 hover:text-accent-200" href="/services/ceramic-coating">Ceramic coating</Link>
               <Link className="text-accent-300 hover:text-accent-200" href="/services/paint-protection-film">Paint protection film</Link>
-              <Link className="text-accent-300 hover:text-accent-200" href="/results">Real results</Link>
+              {resultsPublished && <Link className="text-accent-300 hover:text-accent-200" href="/results">Real results</Link>}
             </div>
           </Card>
         </section>

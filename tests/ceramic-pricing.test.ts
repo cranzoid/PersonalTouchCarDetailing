@@ -11,9 +11,11 @@ import {
   ULTIMATE_DETAIL_SLUG,
   ceramicMenuLinkFor,
   isCeramicServiceSlug,
+  mostPopularCoating,
   resolveCeramicMenu,
   warrantyLabel,
 } from "../src/lib/ceramic";
+import { isQuoteOnlyVehicleCategory } from "../src/lib/types";
 
 /**
  * Ceramic protection and ceramic coating are two different products with two
@@ -54,7 +56,7 @@ async function seed() {
   ]);
   await db().insert(schema.serviceVehicleAdjustments).values([
     { id: "adj_test_crystal", serviceId: CRYSTAL, vehicleCategory: "suv_large", priceDeltaCents: 10000, durationDeltaMin: 30 },
-    { id: "adj_test_protection", serviceId: PROTECTION, vehicleCategory: "suv_large", priceDeltaCents: 10000, durationDeltaMin: 30 },
+    { id: "adj_test_protection", serviceId: PROTECTION, vehicleCategory: "suv_large", priceDeltaCents: 3000, durationDeltaMin: 30 },
   ]);
   await db().insert(schema.addons).values([
     { id: CERAMIC_ADDON, name: "Ceramic Protection - Ultimate Detail Add-On", slug: CERAMIC_PROTECTION_ADDON_SLUG, priceCents: 12000, durationMin: 45 },
@@ -150,7 +152,9 @@ describe("ceramic protection pricing", () => {
       settings,
     });
     expect(sedan.subtotalCents).toBe(19900);
-    expect(suv.subtotalCents).toBe(29900);
+    // Owner-confirmed: $229 on a large vehicle, a $30 delta — not the $100 the
+    // coating packages carry.
+    expect(suv.subtotalCents).toBe(22900);
     // Standalone must never undercut the qualified add-on price, or the
     // Ultimate Detail condition stops meaning anything.
     expect(sedan.subtotalCents).toBeGreaterThan(12000);
@@ -239,6 +243,23 @@ describe("ceramic catalogue definitions", () => {
     expect(warrantyLabel(6)).toBe("6-year warranty");
   });
 
+  it("recommends exactly one package, and it is the middle one", () => {
+    const popular = mostPopularCoating();
+    expect(popular?.tier).toBe("Pro");
+    // Two badges would answer nothing, and the highlight is positional on the
+    // hub page — the recommended package has to be the one in the middle.
+    expect(COATING_PACKAGES.filter((pkg) => pkg.mostPopular)).toHaveLength(1);
+    expect(COATING_PACKAGES.findIndex((pkg) => pkg.mostPopular)).toBe(1);
+  });
+
+  it("lists the vehicle history registration on the warranty packages only", () => {
+    const carfax = (tier: string) =>
+      COATING_PACKAGES.find((pkg) => pkg.tier === tier)!.includes.some((line) => line.includes("Carfax"));
+    expect(carfax("Pro")).toBe(true);
+    expect(carfax("Max")).toBe(true);
+    expect(carfax("Crystal")).toBe(false);
+  });
+
   it("never names a coating brand in customer-facing copy", async () => {
     const source = await import("node:fs/promises").then((fs) =>
       fs.readFile(new URL("../src/lib/ceramic.ts", import.meta.url), "utf8"),
@@ -247,6 +268,17 @@ describe("ceramic catalogue definitions", () => {
     // product name that legitimately runs all through this file.
     for (const brand of [/\bSystem X\b/, /\bCeramic Pro\b/, /\bGtechniq\b/, /\bCQuartz\b/, /\bOpti-Coat\b/]) {
       expect(source).not.toMatch(brand);
+    }
+  });
+});
+
+describe("quote-only vehicle categories", () => {
+  it("refuses to price a commercial vehicle from the catalogue", () => {
+    // The public price tables and the booking wizard both read this, so a
+    // "By quote" cell can never sit beside a wizard that quotes a number.
+    expect(isQuoteOnlyVehicleCategory("commercial")).toBe(true);
+    for (const category of ["sedan", "coupe", "suv_large", "pickup", "van", "other"]) {
+      expect(isQuoteOnlyVehicleCategory(category)).toBe(false);
     }
   });
 });

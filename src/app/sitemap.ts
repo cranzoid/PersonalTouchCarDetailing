@@ -19,7 +19,6 @@ const PUBLIC_ROUTES = [
   "/book",
   "/quote",
   "/gallery",
-  "/results",
   "/fleet",
   "/about",
   "/reviews",
@@ -48,6 +47,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ...PUBLIC_ROUTES.map((route) => ({
       url: `${PUBLIC_SITE_URL}${route}`,
     })),
+    // /results 404s until a case study is published, so it is advertised only
+    // once one is. See src/lib/results.ts.
+    ...(caseStudies.length > 0 ? [{ url: `${PUBLIC_SITE_URL}/results` }] : []),
     ...services.map((service) => ({
       url: `${PUBLIC_SITE_URL}/services/${service.slug}`,
       lastModified: service.updatedAt,

@@ -720,3 +720,53 @@ allowed to read as the price of a coating.
 
 **Revisit when:** a coating genuinely needs to occupy the bay for more than one
 working day. That is multi-day scheduling, not a longer `base_duration_min`.
+
+## 26. Listed prices are tax-exclusive, and a page that has nothing to show is absent
+A round of owner corrections that mostly pull in one direction: the site should
+state the price the shop actually quotes, and should not fill space with
+scaffolding for content that does not exist yet.
+
+- **Every public price is now tax-exclusive.** `withTaxCents` has left the
+  public pages entirely — the home page, `/services`, both ceramic pages and
+  `/services/[slug]`, including their `schema.org` `Offer` prices. Tax is added
+  once, in the cart: the booking wizard's live estimate already showed
+  subtotal → tax → total, and that is now the only place the customer sees a
+  tax-added figure. The reason is not cosmetic — cash and Interac sales charge
+  no tax at all (#8), so a tax-inclusive list price was wrong for a large share
+  of sales and right for none of them. `withTaxCents` itself stays, because
+  `dualPriceLabel` still needs it.
+- **Commercial vehicles are quoted, never priced.** `QUOTE_ONLY_VEHICLE_CATEGORIES`
+  in `src/lib/types.ts` is read by both the public price tables (which render
+  "By quote" for that row) and the public booking actions (which refuse the
+  category outright). It lives in `types.ts` rather than in a page because the
+  failure we are avoiding is the two disagreeing: a table saying "By quote"
+  beside a wizard happily charging sedan-plus-a-delta. Staff booking and
+  invoicing are untouched — pricing commercial work by hand is the point.
+- **Ceramic protection's large-vehicle delta is $30, not $100** — $199 sedan,
+  $229 SUV/truck/van. Corrected by migration as a delta, for the same reason as
+  #25's Crystal correction. The standalone price still sits above the qualified
+  add-on price ($199 on a large vehicle), so the Ultimate Detail condition keeps
+  meaning something.
+- **Pro is the recommended coating package**, flagged once in `COATING_PACKAGES`
+  and rendered as a lifted, outlined card rather than a bare badge — a badge
+  beside two visually identical cards reads as decoration. Pro and Max both
+  list Carfax vehicle history registration. A test pins that exactly one package
+  is flagged and that it is the middle one, because the highlight is positional.
+- **The Results surface only exists once something is published.** No published
+  case study means no nav link, no `/results` page (it 404s), no sitemap entry,
+  and no "View real results" chips on the service pages; the home page's results
+  band is gated on there being consent-approved photos. Publishing in
+  Admin → Results IS the switch — there is no separate flag to forget to flip —
+  and `hasPublishedResults()` asks the same question the page's own query asks,
+  so a story that would not render can never light up the link. The three-step
+  "here is how publishing will work" placeholder is gone: that was a note to
+  ourselves rendered at customers, and it made a working site look unfinished.
+- **The services dropdown closes like a menu.** It was a bare `<details>`, which
+  only closes when you click the summary a second time, so the panel followed
+  the customer around the page. It is now a small client component that closes
+  on pointer leave, outside click, Escape, blur-out and navigation.
+- **Saturday closes at 6pm**, corrected by migration for open Saturdays only, so
+  a shop that has since closed Saturdays in Admin stays closed.
+
+**Revisit when:** the shop starts quoting commercial work from a rate card. That
+is a second price list keyed by vehicle class, not a delta on the sedan price.

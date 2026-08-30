@@ -9,10 +9,11 @@ import {
   ServiceImage,
 } from "@/components/public-sections";
 import { db, schema } from "@/db";
-import { formatCents, withTaxCents } from "@/lib/money";
+import { formatCents } from "@/lib/money";
 import { getPublicHomeCatalog } from "@/lib/public-catalog";
-import { ceramicMenuKeyFor } from "@/lib/ceramic";
+import { CERAMIC_PROTECTION_SLUG, ceramicMenuKeyFor } from "@/lib/ceramic";
 import { POPULAR_SERVICE_SLUGS, servicePresentation } from "@/lib/public-content";
+import { hasPublishedResults } from "@/lib/results";
 import { getPublicSettings } from "@/lib/settings";
 import { pageMetadata, SEO_PAGES, slugifySeoText } from "@/lib/seo";
 
@@ -37,7 +38,7 @@ const EXPERIENCE_POINTS = [
 ];
 
 export default async function HomePage() {
-  const [{ featured, categories, ceramicMenu }, settings, proofPhotos] = await Promise.all([
+  const [{ featured, categories, ceramicMenu }, settings, proofPhotos, resultsPublished] = await Promise.all([
     getPublicHomeCatalog(),
     getPublicSettings(),
     db()
@@ -50,6 +51,7 @@ export default async function HomePage() {
       ))
       .orderBy(desc(schema.files.createdAt))
       .limit(3),
+    hasPublishedResults(),
   ]);
 
   const popularCards = featured
@@ -74,6 +76,13 @@ export default async function HomePage() {
     });
 
   const visibleCategories = categories.filter((category) => category.slug !== "window-tinting");
+  // Ceramic protection is the owner's easiest upsell and the hardest product to
+  // find — it is one row inside a category on /services. It gets its own band
+  // on the home page, priced from the same menu resolver as everywhere else so
+  // the figure and its condition can never drift apart.
+  const ceramicProtection = ceramicMenu.find(
+    (product) => product.key === ceramicMenuKeyFor(CERAMIC_PROTECTION_SLUG),
+  );
 
   return (
     <>
@@ -159,7 +168,7 @@ export default async function HomePage() {
                     </div>
                     <p className="rounded-full bg-ink-900 px-4 py-2 text-sm font-semibold text-white">
                       {service.basePriceCents !== null
-                        ? `From ${formatCents(withTaxCents(service.basePriceCents, settings.taxRateBp))}`
+                        ? `From ${formatCents(service.basePriceCents)}`
                         : "By quote"}
                       {service.priceNote && <span aria-hidden="true">*</span>}
                     </p>
@@ -181,6 +190,39 @@ export default async function HomePage() {
           </div>
         </Container>
       </section>
+
+      {ceramicProtection && (
+        <section className="surface-light pb-20 sm:pb-28">
+          <Container>
+            <div className="grid overflow-hidden rounded-[1.5rem] border border-accent-400/35 bg-ink-900 lg:grid-cols-[1.05fr_0.95fr]">
+              <div className="relative min-h-64 lg:min-h-full">
+                <Image src="/images/services/ceramic-coating.png" alt="Gloved hands applying a ceramic layer to prepared paint" fill sizes="(min-width: 1024px) 50vw, 100vw" className="object-cover" />
+                <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(6,26,44,0.35)_0%,rgba(6,26,44,0.9)_100%)] lg:bg-[linear-gradient(90deg,transparent_0%,rgba(11,42,74,0.85)_100%)]" />
+              </div>
+              <div className="flex flex-col justify-center p-8 sm:p-12">
+                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent-300">Add protection to your detail</p>
+                <h2 className="mt-4 font-display text-[2.4rem] leading-tight text-white">{ceramicProtection.name}</h2>
+                <p className="mt-4 text-base leading-7 text-ink-300">{ceramicProtection.shortDescription}</p>
+                <p className="mt-6 flex flex-wrap items-baseline gap-3">
+                  <span className="font-display text-4xl text-white">
+                    From {formatCents(ceramicProtection.fromPriceCents)}
+                    {ceramicProtection.priceNote && <span aria-hidden="true" className="align-super text-xl text-accent-300">*</span>}
+                  </span>
+                  <span className="text-sm text-ink-400">plus {settings.taxLabel}</span>
+                </p>
+                {/* The conditional price never travels without its condition. */}
+                {ceramicProtection.priceNote && (
+                  <p className="mt-2 text-xs leading-5 text-ink-400">*{ceramicProtection.priceNote}</p>
+                )}
+                <div className="mt-7 flex flex-wrap gap-3">
+                  <ButtonLink href={ceramicProtection.href}>See Ceramic Protection</ButtonLink>
+                  <ButtonLink href={`/book?service=${CERAMIC_PROTECTION_SLUG}`} variant="outline">Book It</ButtonLink>
+                </div>
+              </div>
+            </div>
+          </Container>
+        </section>
+      )}
 
       <section className="relative overflow-hidden bg-ink-900 py-20 sm:py-28">
         <div className="pointer-events-none absolute -right-40 top-0 size-[32rem] rounded-full border border-accent-400/10" />
@@ -205,15 +247,18 @@ export default async function HomePage() {
         </Container>
       </section>
 
-      <section className="bg-[#FFFEFB] py-20 text-[#1C2026] sm:py-28">
-        <Container>
-          <SectionHeading
-            eyebrow="Real results"
-            title="The finish should speak for itself."
-            subtitle="Customer-approved work from the CRM appears here automatically. Photos stay private until separate marketing consent is recorded."
-            tone="light"
-          />
-          {proofPhotos.length > 0 ? (
+      {/* Shown only once there is customer-approved work to show. An empty
+          results section explaining that the results are coming reads as an
+          unfinished site, so it is absent rather than promissory. */}
+      {proofPhotos.length > 0 && (
+        <section className="bg-[#FFFEFB] py-20 text-[#1C2026] sm:py-28">
+          <Container>
+            <SectionHeading
+              eyebrow="Real results"
+              title="The finish should speak for itself."
+              subtitle="Customer-approved work from the CRM appears here automatically. Photos stay private until separate marketing consent is recorded."
+              tone="light"
+            />
             <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
               {proofPhotos.map((photo) => (
                 <figure key={photo.id} className="overflow-hidden rounded-[1.25rem] border border-[#DED8CE] bg-[#F8F5EE]">
@@ -224,21 +269,16 @@ export default async function HomePage() {
                 </figure>
               ))}
             </div>
-          ) : (
-            <div className="grid overflow-hidden rounded-[1.5rem] border border-[#DED8CE] bg-[#F8F5EE] lg:grid-cols-[1.1fr_0.9fr]">
-              <div className="relative min-h-72 lg:min-h-[26rem]">
-                <Image src="/images/services/interior-detail.png" alt="A detailer deep-cleaning a vehicle interior" fill sizes="(min-width: 1024px) 55vw, 100vw" className="object-cover" />
+            {resultsPublished && (
+              <div className="mt-10">
+                <Link href="/results" className="inline-flex border-b border-ink-900 pb-1 text-base font-semibold text-ink-900 transition-colors hover:border-accent-500 hover:text-accent-600">
+                  Read the case studies <span className="ml-2" aria-hidden="true">→</span>
+                </Link>
               </div>
-              <div className="flex flex-col justify-center p-8 sm:p-12">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-600">Results library in progress</p>
-                <h3 className="mt-4 font-display text-[2.2rem] leading-tight text-ink-900">Real jobs, published only with permission.</h3>
-                <p className="mt-4 text-base leading-7 text-slate-600">The Results workspace is already connected to completed jobs. As consent-approved before-and-after sets are published, they will replace this process image.</p>
-                <Link href="/results" className="mt-6 text-base font-semibold text-ink-900 hover:text-accent-600">Explore results <span aria-hidden="true">→</span></Link>
-              </div>
-            </div>
-          )}
-        </Container>
-      </section>
+            )}
+          </Container>
+        </section>
+      )}
 
       <section className="bg-[#F6F2EA] py-20 text-[#1C2026] sm:py-28">
         <Container>

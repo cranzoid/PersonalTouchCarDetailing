@@ -5,11 +5,17 @@ import { db, schema } from "@/db";
 import { ButtonLink, Card, Container } from "@/components/ui";
 import { GoogleReviewStrip, ServiceImage } from "@/components/public-sections";
 import { StructuredData } from "@/components/structured-data";
-import { formatCents, withTaxCents } from "@/lib/money";
+import { formatCents } from "@/lib/money";
+import { hasPublishedResults } from "@/lib/results";
 import { getSettings } from "@/lib/settings";
 import { BUSINESS_ENTITY_ID, PUBLIC_SITE_URL, absoluteUrl, pageMetadata } from "@/lib/seo";
 import { SERVICE_SEO } from "@/lib/service-seo";
-import { VEHICLE_CATEGORIES, VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
+import {
+  VEHICLE_CATEGORIES,
+  VEHICLE_CATEGORY_LABELS,
+  isQuoteOnlyVehicleCategory,
+  type VehicleCategory,
+} from "@/lib/types";
 import {
   CERAMIC_COATING_SLUGS,
   CERAMIC_CONDITION_DISCLAIMER,
@@ -33,7 +39,7 @@ const definition = SERVICE_SEO["ceramic-coating"];
 export const metadata = pageMetadata(definition);
 
 export default async function CeramicCoatingPage() {
-  const settings = await getSettings();
+  const [settings, resultsPublished] = await Promise.all([getSettings(), hasPublishedResults()]);
 
   const services = await db()
     .select()
@@ -57,10 +63,16 @@ export default async function CeramicCoatingPage() {
     return service ? [{ content, service }] : [];
   });
 
-  function priceFor(serviceId: string, base: number, category: VehicleCategory | null): number {
-    if (!category) return withTaxCents(base, settings.taxRateBp);
+  /**
+   * The listed, tax-exclusive price. Null for a category we refuse to put a
+   * number against — a commercial vehicle is quoted, never priced from a sedan
+   * plus a delta.
+   */
+  function priceFor(serviceId: string, base: number, category: VehicleCategory | null): number | null {
+    if (!category) return base;
+    if (isQuoteOnlyVehicleCategory(category)) return null;
     const adj = adjustments.find((a) => a.serviceId === serviceId && a.vehicleCategory === category);
-    return withTaxCents(base + (adj?.priceDeltaCents ?? 0), settings.taxRateBp);
+    return base + (adj?.priceDeltaCents ?? 0);
   }
 
   /**
@@ -93,7 +105,7 @@ export default async function CeramicCoatingPage() {
           itemListElement: packages.map(({ content, service }) => ({
             "@type": "Offer",
             priceCurrency: settings.currency,
-            price: (withTaxCents(service.basePriceCents!, settings.taxRateBp) / 100).toFixed(2),
+            price: (service.basePriceCents! / 100).toFixed(2),
             url: absoluteUrl(`/services/${content.slug}`),
             itemOffered: {
               "@type": "Service",
@@ -164,13 +176,28 @@ export default async function CeramicCoatingPage() {
         <section className="mt-14" aria-labelledby="packages-heading">
           <h2 id="packages-heading" className="font-display text-3xl text-white">Three coating packages</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-ink-400">
-            Prices shown are for a coupe or sedan. Larger vehicles are priced by category — the exact
-            figure for your vehicle appears in the booking flow before you confirm.
+            Prices shown are for a coupe or sedan, before {settings.taxLabel}. Larger vehicles are priced by
+            category — the exact figure for your vehicle appears in the booking flow before you confirm.
           </p>
-          <div className="mt-6 grid gap-5 lg:grid-cols-3">
+          {/* The most popular package is lifted and outlined rather than just
+              labelled: a badge alone reads as decoration beside two identical
+              cards, and the point is to answer "which one?" at a glance. */}
+          <div className="mt-6 grid items-start gap-5 lg:grid-cols-3">
             {packages.map(({ content, service }) => (
-              <Card key={content.slug} className="flex flex-col">
-                <div className="flex items-start justify-between gap-3">
+              <Card
+                key={content.slug}
+                className={`relative flex flex-col ${
+                  content.mostPopular
+                    ? "border-accent-400/60 bg-accent-400/[0.07] shadow-[0_22px_60px_rgba(224,169,59,0.14)] lg:-mt-4 lg:pb-8"
+                    : ""
+                }`}
+              >
+                {content.mostPopular && (
+                  <span className="absolute -top-3 left-6 rounded-full bg-accent-400 px-3 py-1 text-[0.68rem] font-bold uppercase tracking-[0.14em] text-ink-950">
+                    Most popular
+                  </span>
+                )}
+                <div className={`flex items-start justify-between gap-3 ${content.mostPopular ? "mt-3" : ""}`}>
                   <h3 className="font-display text-2xl text-white">{content.tier}</h3>
                   <span
                     className={`shrink-0 rounded-full border px-3 py-1 text-xs font-semibold ${
@@ -184,16 +211,18 @@ export default async function CeramicCoatingPage() {
                 </div>
                 <p className="mt-3 text-sm leading-6 text-ink-300">{content.tagline}</p>
                 <p className="mt-5 font-display text-4xl text-white">
-                  {formatCents(withTaxCents(service.basePriceCents!, settings.taxRateBp))}
+                  {formatCents(service.basePriceCents!)}
                 </p>
                 <p className="mt-1 text-xs text-ink-500">
-                  for a coupe or sedan · approx. {formatDuration(service.baseDurationMin)}
+                  for a coupe or sedan, before {settings.taxLabel} · approx. {formatDuration(service.baseDurationMin)}
                 </p>
                 <ul className="mt-5 flex-1 space-y-2 text-sm leading-6 text-ink-300">
                   {content.includes.map((item) => <li key={item}>• {item}</li>)}
                 </ul>
                 <div className="mt-6 flex flex-col gap-2">
-                  <ButtonLink href={`/book?service=${content.slug}`}>Book {content.tier}</ButtonLink>
+                  <ButtonLink href={`/book?service=${content.slug}`} variant={content.mostPopular ? "primary" : "outline"}>
+                    Book {content.tier}
+                  </ButtonLink>
                   <Link className="text-center text-sm font-semibold text-ink-200 hover:text-accent-300" href={`/services/${content.slug}`}>
                     Full {content.tier} details →
                   </Link>
@@ -222,7 +251,10 @@ export default async function CeramicCoatingPage() {
                     <th scope="row" className="py-2 text-left font-normal text-ink-300">{row.label}</th>
                     {packages.map(({ content, service }) => (
                       <td key={content.slug} className="py-2 text-right text-accent-300">
-                        {formatCents(priceFor(service.id, service.basePriceCents!, row.category))}
+                        {(() => {
+                          const price = priceFor(service.id, service.basePriceCents!, row.category);
+                          return price === null ? <span className="text-ink-400">By quote</span> : formatCents(price);
+                        })()}
                       </td>
                     ))}
                   </tr>
@@ -239,7 +271,8 @@ export default async function CeramicCoatingPage() {
             </table>
           </div>
           <p className="mt-3 text-xs text-ink-500">
-            Prices include {settings.taxLabel}. The exact figure for your vehicle is shown before booking confirmation.
+            Prices are before {settings.taxLabel}, which is added when you book. Commercial vehicles are quoted
+            individually. The exact figure for your vehicle is shown before booking confirmation.
           </p>
         </section>
 
@@ -301,7 +334,7 @@ export default async function CeramicCoatingPage() {
                 {service.label}
               </Link>
             ))}
-            <Link href="/results" className="rounded-full border border-white/15 px-4 py-2 text-sm text-ink-200 transition hover:border-accent-400 hover:text-accent-300">View real results</Link>
+            {resultsPublished && <Link href="/results" className="rounded-full border border-white/15 px-4 py-2 text-sm text-ink-200 transition hover:border-accent-400 hover:text-accent-300">View real results</Link>}
           </div>
         </section>
 

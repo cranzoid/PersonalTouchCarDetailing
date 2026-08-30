@@ -93,6 +93,12 @@ export type CoatingPackageContent = {
   warrantyYears: number | null;
   includes: readonly string[];
   bestFor: string;
+  /**
+   * The package we point an undecided customer at. Exactly one carries it —
+   * `mostPopularCoating()` asserts that — because two "most popular" badges
+   * tell a customer nothing.
+   */
+  mostPopular?: true;
 };
 
 /**
@@ -121,12 +127,14 @@ export const COATING_PACKAGES: readonly CoatingPackageContent[] = [
     tier: "Pro",
     tagline: "A higher-grade coating with a six-year warranty.",
     warrantyYears: 6,
+    mostPopular: true,
     includes: [
       "Everything in Crystal",
       "Higher-grade coating chemistry with longer service life",
       "Additional preparation time before application",
       "Extended controlled cure",
       "Six-year coating warranty",
+      "Carfax vehicle history registration, so the coating shows on the report",
     ],
     bestFor:
       "Daily drivers kept long term, where the owner wants a materially longer protection window and a warranty behind it.",
@@ -142,6 +150,7 @@ export const COATING_PACKAGES: readonly CoatingPackageContent[] = [
       "Our most thorough preparation stage",
       "Extended controlled cure",
       "Ten-year coating warranty",
+      "Carfax vehicle history registration, so the coating shows on the report",
     ],
     bestFor:
       "Vehicles being kept for the long term, and owners who want the most durable finish and the longest warranty we offer.",
@@ -150,6 +159,12 @@ export const COATING_PACKAGES: readonly CoatingPackageContent[] = [
 
 export function coatingPackage(slug: string): CoatingPackageContent | undefined {
   return COATING_PACKAGES.find((pkg) => pkg.slug === slug);
+}
+
+/** The one package flagged `mostPopular`, or undefined if none is. */
+export function mostPopularCoating(): CoatingPackageContent | undefined {
+  const flagged = COATING_PACKAGES.filter((pkg) => pkg.mostPopular);
+  return flagged.length === 1 ? flagged[0] : undefined;
 }
 
 export function warrantyLabel(years: number | null): string {
