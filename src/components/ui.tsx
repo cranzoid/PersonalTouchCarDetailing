@@ -27,7 +27,7 @@ export function ButtonLink({
   return (
     <Link
       href={href}
-      className={`inline-flex min-h-11 items-center justify-center rounded-xl px-6 py-3 text-sm tracking-[0.01em] transition-all duration-200 ${buttonStyles[variant]} ${className}`}
+      className={`inline-flex min-h-12 items-center justify-center rounded-xl px-6 py-3 text-[0.95rem] tracking-[0.01em] transition-all duration-200 ${buttonStyles[variant]} ${className}`}
     >
       {children}
     </Link>
@@ -59,14 +59,14 @@ export function SectionHeading({
         </p>
       )}
       <Heading
-        className={`font-display text-4xl leading-[1.05] tracking-[-0.025em] sm:text-5xl ${
+        className={`font-display text-[2.9rem] leading-[1.03] tracking-[-0.025em] sm:text-[3.5rem] ${
           tone === "light" ? "text-[#1C2026]" : "text-white"
         }`}
       >
         {title}
       </Heading>
       {subtitle && (
-        <p className={`mt-5 max-w-2xl text-base leading-7 ${centered ? "mx-auto" : ""} ${tone === "light" ? "text-slate-600" : "text-ink-300"}`}>
+        <p className={`mt-5 max-w-2xl text-[1.05rem] leading-8 ${centered ? "mx-auto" : ""} ${tone === "light" ? "text-slate-600" : "text-ink-300"}`}>
           {subtitle}
         </p>
       )}

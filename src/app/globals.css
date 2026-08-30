@@ -69,6 +69,29 @@ summary::-webkit-details-marker {
   background: linear-gradient(90deg, transparent, rgba(224, 169, 59, 0.72), transparent);
 }
 
+@keyframes review-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(calc(-50% - 0.5rem)); }
+}
+
+.review-marquee {
+  overflow: hidden;
+  mask-image: linear-gradient(90deg, transparent, black 6%, black 94%, transparent);
+}
+
+.review-marquee-track {
+  display: flex;
+  width: max-content;
+  gap: 1rem;
+  padding-inline: 1rem;
+  animation: review-marquee 30s linear infinite;
+}
+
+.review-marquee:hover .review-marquee-track,
+.review-marquee:focus-within .review-marquee-track {
+  animation-play-state: paused;
+}
+
 /* Light surfaces for admin app */
 .admin-surface {
   @apply bg-ink-50 text-ink-900;

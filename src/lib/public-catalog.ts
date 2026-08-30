@@ -1,6 +1,7 @@
-import { asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { CERAMIC_MENU_SERVICE_SLUGS, resolveCeramicMenu } from "@/lib/ceramic";
+import { POPULAR_SERVICE_SLUGS } from "@/lib/public-content";
 
 const PUBLIC_CATALOG_TTL_MS = 60_000;
 
@@ -9,9 +10,12 @@ async function loadPublicHomeCatalog() {
     db()
       .select()
       .from(schema.services)
-      .where(eq(schema.services.featured, true))
+      .where(and(
+        eq(schema.services.active, true),
+        inArray(schema.services.slug, [...POPULAR_SERVICE_SLUGS]),
+      ))
       .orderBy(asc(schema.services.sort))
-      .limit(3),
+      .limit(4),
     db()
       .select()
       .from(schema.serviceCategories)

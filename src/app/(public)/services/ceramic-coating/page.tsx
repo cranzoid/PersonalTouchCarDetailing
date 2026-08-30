@@ -3,8 +3,9 @@ import { notFound } from "next/navigation";
 import { and, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { ButtonLink, Card, Container } from "@/components/ui";
+import { GoogleReviewStrip, ServiceImage } from "@/components/public-sections";
 import { StructuredData } from "@/components/structured-data";
-import { formatCents } from "@/lib/money";
+import { formatCents, withTaxCents } from "@/lib/money";
 import { getSettings } from "@/lib/settings";
 import { BUSINESS_ENTITY_ID, PUBLIC_SITE_URL, absoluteUrl, pageMetadata } from "@/lib/seo";
 import { SERVICE_SEO } from "@/lib/service-seo";
@@ -57,9 +58,9 @@ export default async function CeramicCoatingPage() {
   });
 
   function priceFor(serviceId: string, base: number, category: VehicleCategory | null): number {
-    if (!category) return base;
+    if (!category) return withTaxCents(base, settings.taxRateBp);
     const adj = adjustments.find((a) => a.serviceId === serviceId && a.vehicleCategory === category);
-    return base + (adj?.priceDeltaCents ?? 0);
+    return withTaxCents(base + (adj?.priceDeltaCents ?? 0), settings.taxRateBp);
   }
 
   /**
@@ -92,7 +93,7 @@ export default async function CeramicCoatingPage() {
           itemListElement: packages.map(({ content, service }) => ({
             "@type": "Offer",
             priceCurrency: settings.currency,
-            price: (service.basePriceCents! / 100).toFixed(2),
+            price: (withTaxCents(service.basePriceCents!, settings.taxRateBp) / 100).toFixed(2),
             url: absoluteUrl(`/services/${content.slug}`),
             itemOffered: {
               "@type": "Service",
@@ -140,6 +141,10 @@ export default async function CeramicCoatingPage() {
           <h1 className="mt-5 font-display text-5xl leading-[1.02] tracking-[-0.03em] text-white sm:text-6xl">{definition.h1}</h1>
           <p className="mt-6 text-lg leading-8 text-ink-200">{definition.introduction}</p>
         </div>
+        <div className="group mt-9 max-w-5xl overflow-hidden rounded-[1.5rem] border border-white/10">
+          <ServiceImage slug="ceramic-coating-crystal" name="Ceramic coating" priority className="aspect-[16/8]" />
+        </div>
+        <GoogleReviewStrip settings={settings} tone="dark" className="mt-5 max-w-5xl" />
 
         {/* Ceramic protection is a different product at a very different
             price. Saying so up front is the whole reason this sits above the
@@ -179,7 +184,7 @@ export default async function CeramicCoatingPage() {
                 </div>
                 <p className="mt-3 text-sm leading-6 text-ink-300">{content.tagline}</p>
                 <p className="mt-5 font-display text-4xl text-white">
-                  {formatCents(service.basePriceCents!)}
+                  {formatCents(withTaxCents(service.basePriceCents!, settings.taxRateBp))}
                 </p>
                 <p className="mt-1 text-xs text-ink-500">
                   for a coupe or sedan · approx. {formatDuration(service.baseDurationMin)}
@@ -234,8 +239,7 @@ export default async function CeramicCoatingPage() {
             </table>
           </div>
           <p className="mt-3 text-xs text-ink-500">
-            Listed prices are what you pay in cash or by Interac e-transfer; card and cheque add{" "}
-            {settings.taxLabel}.
+            Prices include {settings.taxLabel}. The exact figure for your vehicle is shown before booking confirmation.
           </p>
         </section>
 

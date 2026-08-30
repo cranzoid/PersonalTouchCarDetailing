@@ -43,6 +43,9 @@ export function SettingsForm({
     phone: initial.phone,
     email: initial.email,
     googleReviewUrl: initial.googleReviewUrl,
+    googleReviewRating: initial.googleReviewRating.toFixed(1),
+    googleReviewCount: String(initial.googleReviewCount),
+    yearsInBusinessLabel: initial.yearsInBusinessLabel,
     taxRatePct: (initial.taxRateBp / 100).toFixed(2),
     taxRegistrationNumber: initial.taxRegistrationNumber,
     slotGranularityMin: String(initial.slotGranularityMin),
@@ -84,6 +87,9 @@ export function SettingsForm({
       phone: form.phone,
       email: form.email,
       googleReviewUrl: form.googleReviewUrl,
+      googleReviewRating: Number(form.googleReviewRating),
+      googleReviewCount: Number(form.googleReviewCount),
+      yearsInBusinessLabel: form.yearsInBusinessLabel,
       taxRateBp: Math.round(Number(form.taxRatePct) * 100),
       taxRegistrationNumber: form.taxRegistrationNumber,
       slotGranularityMin: Number(form.slotGranularityMin),
@@ -143,6 +149,9 @@ export function SettingsForm({
           {field("province", "Province")}
           {field("postalCode", "Postal code")}
           {field("googleReviewUrl", "Google review link")}
+          {field("googleReviewRating", "Google rating", { type: "number", min: 0, max: 5, step: 0.1 })}
+          {field("googleReviewCount", "Google review count", { type: "number", min: 0, step: 1 })}
+          {field("yearsInBusinessLabel", "Years in business label", { placeholder: "25+ years" })}
         </div>
       </section>
       <section>

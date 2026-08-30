@@ -4,11 +4,13 @@ import type { Metadata } from "next";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { Container, ButtonLink, Card } from "@/components/ui";
+import { CheckList, GoogleReviewStrip, ServiceImage } from "@/components/public-sections";
 import { StructuredData } from "@/components/structured-data";
 import { formatCents, withTaxCents } from "@/lib/money";
 import { BUSINESS_ENTITY_ID, PUBLIC_SITE_URL, absoluteUrl, pageMetadata } from "@/lib/seo";
 import { SERVICE_SEO } from "@/lib/service-seo";
 import { getSettings } from "@/lib/settings";
+import { servicePresentation } from "@/lib/public-content";
 import { VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
 import {
   CERAMIC_CONDITION_DISCLAIMER,
@@ -59,6 +61,7 @@ export default async function ServiceDetailPage({
   const svc = rows[0];
   if (!svc || !svc.active) notFound();
   const seo = SERVICE_SEO[slug];
+  const presentation = servicePresentation(slug);
 
   const adjustments = await db()
     .select()
@@ -90,13 +93,7 @@ export default async function ServiceDetailPage({
 
   const bookable = svc.bookingMode === "bookable" && svc.basePriceCents !== null;
   const quotePath = svc.bookingMode === "contact_only" ? "/contact" : `/quote?service=${svc.slug}`;
-  /**
-   * Ceramic pages quote a single figure. The price is read against the other
-   * coating packages, and showing two numbers per row turns that comparison
-   * into arithmetic; the payment terms are stated once instead. Tax behaviour
-   * itself is unchanged — cash and e-transfer still pay the listed price.
-   */
-  const singlePrice = isCeramicServiceSlug(svc.slug);
+  const isCoating = isCeramicServiceSlug(svc.slug);
   const coating = coatingPackage(svc.slug);
 
   const canonicalPath = `/services/${svc.slug}`;
@@ -113,7 +110,7 @@ export default async function ServiceDetailPage({
         areaServed: { "@type": "City", name: "Hamilton", containedInPlace: { "@type": "AdministrativeArea", name: "Ontario" } },
         serviceType: svc.name,
         ...(svc.basePriceCents !== null
-          ? { offers: { "@type": "Offer", priceCurrency: "CAD", price: (svc.basePriceCents / 100).toFixed(2), url: absoluteUrl(`/book?service=${svc.slug}`) } }
+          ? { offers: { "@type": "Offer", priceCurrency: "CAD", price: (withTaxCents(svc.basePriceCents, settings.taxRateBp) / 100).toFixed(2), url: absoluteUrl(`/book?service=${svc.slug}`) } }
           : {}),
       },
       {
@@ -147,7 +144,7 @@ export default async function ServiceDetailPage({
           <li aria-hidden="true">/</li>
           <li><Link className="hover:text-accent-300" href="/services">Services</Link></li>
           <li aria-hidden="true">/</li>
-          <li aria-current="page" className="text-ink-200">{svc.name}</li>
+          <li aria-current="page" className="text-ink-200">{presentation.publicName === "Vehicle care service" ? svc.name : presentation.publicName}</li>
         </ol>
       </nav>
       <div className="grid gap-14 lg:grid-cols-[minmax(0,1.45fr)_minmax(19rem,0.55fr)]">
@@ -156,6 +153,21 @@ export default async function ServiceDetailPage({
           <h1 className="mt-5 max-w-3xl font-display text-5xl leading-[1.02] tracking-[-0.03em] text-white sm:text-6xl">{seo?.h1 ?? `${svc.name} in Hamilton`}</h1>
           <p className="mt-6 max-w-2xl text-lg leading-8 text-ink-200">{seo?.introduction ?? svc.shortDescription}</p>
           {svc.longDescription && <p className="mt-5 max-w-2xl leading-7 text-ink-300">{svc.longDescription}</p>}
+
+          <div className="group mt-9 overflow-hidden rounded-[1.5rem] border border-white/10">
+            <ServiceImage slug={svc.slug} name={svc.name} priority className="aspect-[16/9]" />
+          </div>
+          <GoogleReviewStrip settings={settings} tone="dark" className="mt-5" />
+
+          {(presentation.interior || presentation.exterior) && (
+            <section className="mt-12" aria-labelledby="included-heading">
+              <h2 id="included-heading" className="font-display text-3xl text-white">What&apos;s included</h2>
+              <div className={`mt-5 grid gap-5 ${presentation.interior?.length && presentation.exterior?.length ? "md:grid-cols-2" : ""}`}>
+                {!!presentation.interior?.length && <Card><h3 className="font-display text-2xl text-white">Interior</h3><div className="mt-4"><CheckList items={presentation.interior} /></div></Card>}
+                {!!presentation.exterior?.length && <Card><h3 className="font-display text-2xl text-white">Exterior</h3><div className="mt-4"><CheckList items={presentation.exterior} /></div></Card>}
+              </div>
+            </section>
+          )}
 
           {seo && (
             <section className="mt-12" aria-labelledby="benefits-heading">
@@ -198,24 +210,16 @@ export default async function ServiceDetailPage({
                     <tr className="border-b border-white/10 text-xs uppercase tracking-wider text-ink-500">
                       <th scope="col" className="py-2 text-left font-medium">Vehicle</th>
                       <th scope="col" className="py-2 text-right font-medium">
-                        {singlePrice ? "Price" : "Cash / e-transfer"}
+                        Price
                       </th>
-                      {!singlePrice && (
-                        <th scope="col" className="py-2 text-right font-medium">Card / cheque</th>
-                      )}
                     </tr>
                   </thead>
                   <tbody>
                     <tr className="border-b border-white/10">
                       <td className="py-2 text-ink-300">Coupe / Sedan</td>
                       <td className="py-2 text-right text-accent-300">
-                        {formatCents(svc.basePriceCents!)}
+                        {formatCents(withTaxCents(svc.basePriceCents!, settings.taxRateBp))}
                       </td>
-                      {!singlePrice && (
-                        <td className="py-2 text-right text-ink-300">
-                          {formatCents(withTaxCents(svc.basePriceCents!, settings.taxRateBp))}
-                        </td>
-                      )}
                     </tr>
                     {adjustments.map((adj) => (
                       <tr key={adj.id} className="border-b border-white/10">
@@ -224,24 +228,15 @@ export default async function ServiceDetailPage({
                             adj.vehicleCategory}
                         </td>
                         <td className="py-2 text-right text-accent-300">
-                          {formatCents(svc.basePriceCents! + adj.priceDeltaCents)}
+                          {formatCents(withTaxCents(svc.basePriceCents! + adj.priceDeltaCents, settings.taxRateBp))}
                         </td>
-                        {!singlePrice && (
-                          <td className="py-2 text-right text-ink-300">
-                            {formatCents(
-                              withTaxCents(svc.basePriceCents! + adj.priceDeltaCents, settings.taxRateBp),
-                            )}
-                          </td>
-                        )}
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
               <p className="mt-2 text-xs text-ink-500">
-                {singlePrice
-                  ? `Listed prices are what you pay in cash or by Interac e-transfer; card and cheque add ${settings.taxLabel}.`
-                  : `Final pricing is confirmed at booking. Heavily soiled vehicles may require additional time, always discussed with you first. Listed prices are what you pay in cash or by Interac e-transfer; card and cheque add ${settings.taxLabel}.`}
+                Prices include {settings.taxLabel}. Final pricing is confirmed at booking. Heavily soiled vehicles may require additional time, always discussed with you first.
               </p>
             </div>
           )}
@@ -270,7 +265,7 @@ export default async function ServiceDetailPage({
             </div>
           )}
 
-          {singlePrice && (
+          {isCoating && (
             <Card className="mt-10 border-accent-500/30">
               <h2 className="font-semibold text-accent-300">Before we start: paint condition</h2>
               <p className="mt-2 text-sm leading-6 text-ink-300">{CERAMIC_CONDITION_DISCLAIMER}</p>
@@ -293,7 +288,7 @@ export default async function ServiceDetailPage({
                   <li key={a.id} className="flex min-h-12 items-center justify-between rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-sm">
                     <span className="text-ink-200">{a.name}</span>
                     <span className="text-right text-accent-300">
-                      {formatCents(a.priceCents)}
+                      {formatCents(withTaxCents(a.priceCents, settings.taxRateBp))}
                       <span className="block text-xs text-ink-500">+{formatDuration(a.durationMin)}</span>
                     </span>
                   </li>
@@ -370,20 +365,9 @@ export default async function ServiceDetailPage({
               {bookable ? "Starting at" : "Pricing"}
             </p>
             <p className="mt-2 font-display text-4xl text-white">
-              {bookable ? formatCents(svc.basePriceCents!) : "By quote"}
+              {bookable ? formatCents(withTaxCents(svc.basePriceCents!, settings.taxRateBp)) : "By quote"}
             </p>
-            {bookable && settings.taxRateBp > 0 && (
-              singlePrice ? (
-                <p className="mt-1 text-sm text-ink-400">
-                  for a coupe or sedan. Listed prices exclude {settings.taxLabel}.
-                </p>
-              ) : (
-                <p className="mt-1 text-sm text-ink-400">
-                  in cash or by Interac e-transfer ·{" "}
-                  {formatCents(withTaxCents(svc.basePriceCents!, settings.taxRateBp))} by card or cheque
-                </p>
-              )
-            )}
+            {bookable && <p className="mt-1 text-sm text-ink-400">for a coupe or sedan, including {settings.taxLabel}.</p>}
             {coating && (
               <p className="mt-3 inline-flex rounded-full border border-accent-400/30 bg-accent-400/10 px-3 py-1 text-xs font-semibold text-accent-200">
                 {warrantyLabel(coating.warrantyYears)}

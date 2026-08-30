@@ -29,6 +29,14 @@ const SECONDARY_NAV = [
   { href: "/faq", label: "FAQ" },
 ];
 
+const SERVICE_NAV = [
+  { href: "/services", label: "All services", detail: "Compare the complete menu" },
+  { href: "/services/complete-detail-engine", label: "Ultimate Detail", detail: "Our complete inside-and-out package" },
+  { href: "/services/the-works", label: "Signature Detail", detail: "Interior and exterior deep clean" },
+  { href: "/services/interior-detail", label: "Interior Detail", detail: "Deep cabin cleaning" },
+  { href: "/services/ceramic-coating", label: "Ceramic Coating", detail: "Crystal, Pro and Max" },
+];
+
 function BrandLogo({ footer = false }: { footer?: boolean }) {
   return (
     <Image
@@ -107,11 +115,24 @@ export default async function PublicLayout({ children }: { children: ReactNode }
           </Link>
 
           <nav aria-label="Primary navigation" className="hidden items-center gap-1 lg:flex">
-            {PRIMARY_NAV.map((item) => (
+            <details className="group relative">
+              <summary className="flex cursor-pointer list-none items-center gap-1 rounded-lg px-3 py-2 text-[0.94rem] font-medium text-[#536477] transition-colors hover:bg-[#0B2A4A]/6 hover:text-[#0B2A4A]">
+                Services <span aria-hidden="true" className="text-[0.68rem] transition group-open:rotate-180">▾</span>
+              </summary>
+              <div className="absolute left-0 top-12 w-80 overflow-hidden rounded-2xl border border-[#D8D1C4] bg-[#FFFEFB] p-2 shadow-[0_22px_60px_rgba(3,15,27,0.2)]">
+                {SERVICE_NAV.map((item) => (
+                  <Link key={item.href} href={item.href} className="block rounded-xl px-4 py-3 transition hover:bg-[#F2EDE3]">
+                    <span className="block text-sm font-semibold text-[#0B2A4A]">{item.label}</span>
+                    <span className="mt-0.5 block text-xs text-[#6B7280]">{item.detail}</span>
+                  </Link>
+                ))}
+              </div>
+            </details>
+            {PRIMARY_NAV.filter((item) => item.href !== "/services").map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
-                className="rounded-lg px-3 py-2 text-[0.82rem] font-medium text-[#536477] transition-colors hover:bg-[#0B2A4A]/6 hover:text-[#0B2A4A]"
+                className="rounded-lg px-3 py-2 text-[0.94rem] font-medium text-[#536477] transition-colors hover:bg-[#0B2A4A]/6 hover:text-[#0B2A4A]"
               >
                 {item.label}
               </Link>
@@ -132,11 +153,23 @@ export default async function PublicLayout({ children }: { children: ReactNode }
               </summary>
               <div className="absolute right-0 top-14 w-[min(22rem,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-white/10 bg-ink-900 p-3 shadow-2xl shadow-black/40">
                 <nav aria-label="Mobile navigation" className="grid">
-                  {[...PRIMARY_NAV, ...SECONDARY_NAV].map((item) => (
+                  <details className="group rounded-xl">
+                    <summary className="flex cursor-pointer list-none items-center justify-between rounded-xl px-4 py-3 text-[0.95rem] font-medium text-ink-200 transition-colors hover:bg-white/5 hover:text-accent-300">
+                      Services <span aria-hidden="true" className="text-xs transition group-open:rotate-180">▾</span>
+                    </summary>
+                    <div className="mb-2 ml-3 border-l border-white/10 pl-2">
+                      {SERVICE_NAV.map((item) => (
+                        <Link key={item.href} href={item.href} className="block rounded-lg px-3 py-2 text-sm text-ink-300 hover:bg-white/5 hover:text-accent-300">
+                          {item.label}
+                        </Link>
+                      ))}
+                    </div>
+                  </details>
+                  {[...PRIMARY_NAV.filter((item) => item.href !== "/services"), ...SECONDARY_NAV].map((item) => (
                     <Link
                       key={item.href}
                       href={item.href}
-                      className="rounded-xl px-4 py-3 text-sm font-medium text-ink-200 transition-colors hover:bg-white/5 hover:text-accent-300"
+                      className="rounded-xl px-4 py-3 text-[0.95rem] font-medium text-ink-200 transition-colors hover:bg-white/5 hover:text-accent-300"
                     >
                       {item.label}
                     </Link>

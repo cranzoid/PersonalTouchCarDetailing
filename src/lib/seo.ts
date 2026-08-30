@@ -20,14 +20,14 @@ export const SEO_PAGES = {
   home: {
     title: "Car Detailing Hamilton, ON | Personal Touch Car Detailing",
     description:
-      "Professional car detailing in Hamilton, Ontario, including interior detailing, paint correction, ceramic coating, PPF and window tinting. Book online or request a quote.",
+      "Professional car detailing in Hamilton, Ontario, including interior detailing, paint correction, ceramic coating, PPF and tint removal or replacement. Book online or request a quote.",
     path: "/",
     h1: "Hamilton car detailing, finished with precision",
   },
   services: {
     title: "Car Detailing Services Hamilton, ON | Personal Touch",
     description:
-      "Compare car detailing packages, interior cleaning, paint correction, ceramic coating, PPF, tinting and vehicle styling services in Hamilton.",
+      "Compare car detailing packages, interior cleaning, paint correction, ceramic coating, PPF, tint removal and vehicle styling services in Hamilton.",
     path: "/services",
     h1: "Car detailing services in Hamilton",
   },
@@ -55,7 +55,7 @@ export const SEO_PAGES = {
   faq: {
     title: "Car Detailing FAQ | Personal Touch Hamilton",
     description:
-      "Answers about car detailing time, pricing, vehicle preparation, paint correction, coatings, tinting, approvals and privacy in Hamilton.",
+      "Answers about car detailing time, pricing, vehicle preparation, paint correction, coatings, tint removal, approvals and privacy in Hamilton.",
     path: "/faq",
     h1: "Car detailing questions, answered",
   },
@@ -69,7 +69,7 @@ export const SEO_PAGES = {
   contact: {
     title: "Contact Personal Touch Car Detailing | Hamilton, ON",
     description:
-      "Contact or visit Personal Touch Car Detailing at 2481 Upper James Street in Hamilton for detailing, coating, PPF, tinting or fleet-service questions.",
+      "Contact or visit Personal Touch Car Detailing at 2481 Upper James Street in Hamilton for detailing, coating, PPF, tint removal or fleet-service questions.",
     path: "/contact",
     h1: "Contact our Hamilton car detailing studio",
   },
@@ -83,7 +83,7 @@ export const SEO_PAGES = {
   quote: {
     title: "Request a Car Detailing Quote in Hamilton | Personal Touch",
     description:
-      "Request a Hamilton quote for ceramic coating, paint correction, PPF, tinting, wraps or condition-dependent car detailing work.",
+      "Request a Hamilton quote for ceramic coating, paint correction, PPF, tint removal, wraps or condition-dependent car detailing work.",
     path: "/quote",
     h1: "Request a car detailing quote in Hamilton",
   },

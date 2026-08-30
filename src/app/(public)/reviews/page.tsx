@@ -1,61 +1,47 @@
-import { Container, SectionHeading, ButtonLink } from "@/components/ui";
+import { ButtonLink, Container, SectionHeading } from "@/components/ui";
+import { GoogleReviewCarousel, GoogleReviewStrip } from "@/components/public-sections";
 import { getSettings } from "@/lib/settings";
 import { pageMetadata, SEO_PAGES } from "@/lib/seo";
 
 export const metadata = pageMetadata(SEO_PAGES.reviews);
 export const dynamic = "force-dynamic";
 
-/**
- * No fabricated testimonials. Real reviews will be surfaced here once
- * collected. Automated review requests are active; the Google review
- * destination remains owner-configurable in Admin → Settings.
- */
 export default async function ReviewsPage() {
   const settings = await getSettings();
   return (
     <>
-      <Container className="py-20 sm:py-28">
-        <div className="grid gap-12 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
-          <SectionHeading
-            as="h1"
-            eyebrow="Customer feedback"
-            title={SEO_PAGES.reviews.h1}
-            subtitle="We only publish feedback we can verify. Our review collection is growing as customers complete services under the new ownership."
-          />
-          <div className="rounded-[2rem] border border-accent-400/25 bg-accent-400/[0.06] p-7 sm:p-9">
-            <p className="font-display text-2xl leading-9 text-white">
-              Recently visited us? Your candid feedback helps us improve and helps Hamilton drivers choose with confidence.
-            </p>
-            <div className="mt-7 flex flex-wrap gap-3">
-              {settings.googleReviewUrl && (
-                <ButtonLink href={settings.googleReviewUrl}>Review us on Google</ButtonLink>
-              )}
-              <ButtonLink href="/contact" variant="outline">Send Feedback</ButtonLink>
+      <section className="bg-ink-950 py-20 sm:py-28">
+        <Container>
+          <div className="grid gap-12 lg:grid-cols-[1.04fr_0.96fr] lg:items-end">
+            <SectionHeading as="h1" eyebrow="Customer feedback" title={SEO_PAGES.reviews.h1} subtitle="See the current Google rating, read selected public excerpts, or open the complete listing for the newest customer feedback." />
+            <div>
+              <GoogleReviewStrip settings={settings} tone="dark" />
+              <p className="mt-4 text-sm leading-6 text-ink-400">Rating and review count are editable in CRM settings so the website can stay current without a public API key.</p>
             </div>
           </div>
-        </div>
-      </Container>
+        </Container>
+      </section>
 
-      <section className="surface-light py-20">
+      <GoogleReviewCarousel settings={settings} />
+
+      <section className="bg-[#F6F2EA] py-20 text-ink-900 sm:py-28">
         <Container className="grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-center">
           <div>
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent-600">Our commitment</p>
-            <h2 className="mt-4 font-display text-4xl leading-tight text-[#0B2A4A]">No invented praise. No polished-up stories.</h2>
+            <h2 className="mt-4 font-display text-4xl leading-tight text-ink-900">Verified public feedback, linked to its source.</h2>
           </div>
           <div className="grid gap-4 sm:grid-cols-3">
-            {["Verified customer feedback", "Transparent service approvals", "Clear follow-up after every visit"].map((item) => (
-              <div key={item} className="rounded-2xl border border-slate-200 bg-white p-5 text-sm font-semibold leading-6 text-[#1C2026] shadow-[0_12px_35px_rgba(11,42,74,0.06)]">
-                {item}
-              </div>
+            {["Public Google excerpts", "Direct link to the full listing", "Clear follow-up after every visit"].map((item) => (
+              <div key={item} className="rounded-2xl border border-[#DED8CE] bg-[#FFFEFB] p-5 text-sm font-semibold leading-6 text-ink-900 shadow-[0_12px_35px_rgba(11,42,74,0.06)]">{item}</div>
             ))}
           </div>
         </Container>
       </section>
 
-      <Container className="py-20 text-center">
-        <h2 className="font-display text-4xl text-white">Ready to form your own opinion?</h2>
-        <p className="mx-auto mt-4 max-w-xl text-ink-300">Choose a package online, or request a tailored quote for condition-dependent work.</p>
-        <div className="mt-7"><ButtonLink href="/book">Book an Appointment</ButtonLink></div>
+      <Container className="py-20 text-center sm:py-28">
+        <h2 className="font-display text-4xl text-white sm:text-5xl">Ready to form your own opinion?</h2>
+        <p className="mx-auto mt-4 max-w-xl text-base leading-7 text-ink-300">Choose a package online, or request a tailored quote for condition-dependent work.</p>
+        <div className="mt-7 flex flex-wrap justify-center gap-3"><ButtonLink href="/book">Book an Appointment</ButtonLink><ButtonLink href={settings.googleReviewUrl} variant="outline">Review us on Google</ButtonLink></div>
       </Container>
     </>
   );

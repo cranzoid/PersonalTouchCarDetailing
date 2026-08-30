@@ -3,8 +3,9 @@ import { notFound } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { ButtonLink, Card, Container } from "@/components/ui";
+import { GoogleReviewStrip, ServiceImage } from "@/components/public-sections";
 import { StructuredData } from "@/components/structured-data";
-import { formatCents } from "@/lib/money";
+import { formatCents, withTaxCents } from "@/lib/money";
 import { getSettings } from "@/lib/settings";
 import { BUSINESS_ENTITY_ID, PUBLIC_SITE_URL, absoluteUrl, pageMetadata } from "@/lib/seo";
 import { SERVICE_SEO } from "@/lib/service-seo";
@@ -85,16 +86,20 @@ export default async function CeramicProtectionPage() {
     : false;
   const offerAvailable = !!addon && addon.active && !!ultimateDetail?.active && addonLinked;
 
-  const standalonePrice = (category: VehicleCategory | null) =>
+  const standalonePrice = (category: VehicleCategory | null) => withTaxCents(
     standalone.basePriceCents! +
     (category
       ? serviceAdjustments.find((a) => a.vehicleCategory === category)?.priceDeltaCents ?? 0
-      : 0);
-  const addonPrice = (category: VehicleCategory | null) =>
+      : 0),
+    settings.taxRateBp,
+  );
+  const addonPrice = (category: VehicleCategory | null) => withTaxCents(
     (addon?.priceCents ?? 0) +
     (category
       ? addonAdjustments.find((a) => a.vehicleCategory === category)?.priceDeltaCents ?? 0
-      : 0);
+      : 0),
+    settings.taxRateBp,
+  );
 
   // Base row plus every category either price actually adjusts, in canonical
   // order — derived rather than assumed, so a later price change still shows.
@@ -126,7 +131,7 @@ export default async function CeramicProtectionPage() {
         offers: {
           "@type": "Offer",
           priceCurrency: settings.currency,
-          price: (standalone.basePriceCents! / 100).toFixed(2),
+          price: (withTaxCents(standalone.basePriceCents!, settings.taxRateBp) / 100).toFixed(2),
           url: absoluteUrl(`/book?service=${CERAMIC_PROTECTION_SLUG}`),
         },
       },
@@ -168,6 +173,10 @@ export default async function CeramicProtectionPage() {
           <h1 className="mt-5 font-display text-5xl leading-[1.02] tracking-[-0.03em] text-white sm:text-6xl">{definition.h1}</h1>
           <p className="mt-6 text-lg leading-8 text-ink-200">{definition.introduction}</p>
         </div>
+        <div className="group mt-9 max-w-5xl overflow-hidden rounded-[1.5rem] border border-white/10">
+          <ServiceImage slug="ceramic-protection" name="Ceramic protection" priority className="aspect-[16/8]" />
+        </div>
+        <GoogleReviewStrip settings={settings} tone="dark" className="mt-5 max-w-5xl" />
 
         <section className="mt-12" aria-labelledby="ways-heading">
           <h2 id="ways-heading" className="font-display text-3xl text-white">Two ways to buy it</h2>
@@ -250,8 +259,7 @@ export default async function CeramicProtectionPage() {
                 {ULTIMATE_DETAIL_LABEL} booking; the package itself is priced separately.{" "}
               </>
             )}
-            Listed prices are what you pay in cash or by Interac e-transfer; card and cheque add{" "}
-            {settings.taxLabel}.
+            Prices include {settings.taxLabel}. The exact figure for your vehicle is shown before booking confirmation.
           </p>
         </section>
 

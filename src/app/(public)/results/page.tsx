@@ -1,14 +1,17 @@
+import Image from "next/image";
 import Link from "next/link";
 import { and, asc, desc, eq, inArray, isNotNull } from "drizzle-orm";
-import { ButtonLink, Card, Container, SectionHeading } from "@/components/ui";
+import { ButtonLink, Container, SectionHeading } from "@/components/ui";
+import { GoogleReviewStrip } from "@/components/public-sections";
 import { db, schema } from "@/db";
+import { getSettings } from "@/lib/settings";
 import { pageMetadata, SEO_PAGES, slugifySeoText } from "@/lib/seo";
 
 export const metadata = pageMetadata(SEO_PAGES.results);
 export const dynamic = "force-dynamic";
 
 export default async function ResultsPage() {
-  const stories = await db()
+  const [stories, settings] = await Promise.all([db()
     .select({
       id: schema.caseStudies.id,
       slug: schema.caseStudies.slug,
@@ -25,7 +28,7 @@ export default async function ResultsPage() {
       eq(schema.services.active, true),
     ))
     .where(eq(schema.caseStudies.status, "published"))
-    .orderBy(desc(schema.caseStudies.publishedAt));
+    .orderBy(desc(schema.caseStudies.publishedAt)), getSettings()]);
 
   const media = stories.length > 0
     ? await db()
@@ -45,49 +48,69 @@ export default async function ResultsPage() {
   for (const item of media) if (!covers.has(item.caseStudyId)) covers.set(item.caseStudyId, item);
 
   return (
-    <Container className="py-20 sm:py-28">
-      <SectionHeading
-        as="h1"
-        eyebrow="Documented Hamilton work"
-        title={SEO_PAGES.results.h1}
-        subtitle="Each story is based on a genuine job and customer-approved media. We explain the starting condition, the work performed, realistic outcomes and practical maintenance—not a one-size-fits-all promise."
-      />
+    <>
+      <section className="overflow-hidden bg-ink-950 py-20 sm:py-28">
+        <Container>
+          <div className="grid items-center gap-10 lg:grid-cols-[0.92fr_1.08fr]">
+            <div>
+              <SectionHeading as="h1" eyebrow="Documented Hamilton work" title={SEO_PAGES.results.h1} subtitle="Real vehicles, customer-approved media and an honest account of the work performed. No stock transformations and no one-size-fits-all promises." />
+              <GoogleReviewStrip settings={settings} tone="dark" />
+            </div>
+            <div className="relative min-h-72 overflow-hidden rounded-[1.5rem] border border-white/10 sm:min-h-[28rem]">
+              <Image src="/images/services/hand-wash.png" alt="A vehicle receiving a careful brush-free hand wash" fill priority sizes="(min-width: 1024px) 50vw, 100vw" className="object-cover" />
+              <div className="absolute inset-0 bg-[linear-gradient(180deg,transparent_50%,rgba(6,26,44,0.82)_100%)]" />
+              <p className="absolute bottom-6 left-6 right-6 text-sm font-semibold text-white">Careful process imagery now. Customer-approved before-and-after work appears as it is published.</p>
+            </div>
+          </div>
+        </Container>
+      </section>
+
+      <section className="surface-light py-20 text-ink-900 sm:py-28">
+        <Container>
+          <SectionHeading eyebrow={stories.length > 0 ? "Published case studies" : "Results library"} title={stories.length > 0 ? "See the condition, process and outcome." : "Built for real before-and-after stories."} subtitle={stories.length > 0 ? "Every result below is connected to a genuine CRM job and separately approved for public use." : "The publishing workflow is ready in the CRM. A result appears here only after its photos and story pass both consent and privacy checks."} tone="light" />
 
       {stories.length > 0 ? (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {stories.map((story) => {
             const cover = covers.get(story.id);
             return (
-              <article key={story.id} className="overflow-hidden rounded-3xl border border-white/10 bg-white/[0.035] shadow-[0_22px_55px_rgba(0,0,0,0.16)]">
+              <article key={story.id} className="overflow-hidden rounded-3xl border border-[#DED8CE] bg-[#FFFEFB] shadow-[0_22px_55px_rgba(11,42,74,0.08)]">
                 {cover ? (
                   // Consent is rechecked at request time by the media route.
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={mediaUrl(cover)} alt={cover.altText} width={1200} height={900} loading="lazy" className="aspect-[4/3] w-full bg-ink-900 object-cover" />
-                ) : <div className="grid aspect-[4/3] place-items-center bg-ink-900 text-sm text-ink-500">Media consent withdrawn</div>}
+                ) : <div className="grid aspect-[4/3] place-items-center bg-[#F6F2EA] text-sm text-slate-500">Media consent withdrawn</div>}
                 <div className="p-6">
-                  <Link href={`/services/${story.serviceSlug}`} className="text-xs font-semibold uppercase tracking-[0.16em] text-accent-300 hover:text-accent-200">{story.serviceName}</Link>
-                  <h2 className="mt-3 font-display text-2xl leading-tight text-white"><Link className="hover:text-accent-200" href={`/results/${story.slug}`}>{story.title}</Link></h2>
-                  <p className="mt-3 line-clamp-4 text-sm leading-6 text-ink-300">{story.summary}</p>
-                  <Link href={`/results/${story.slug}`} className="mt-5 inline-flex text-sm font-semibold text-accent-300 hover:text-accent-200">Read the case study →</Link>
+                  <Link href={`/services/${story.serviceSlug}`} className="text-xs font-semibold uppercase tracking-[0.16em] text-accent-600 hover:text-accent-500">{story.serviceName}</Link>
+                  <h2 className="mt-3 font-display text-2xl leading-tight text-ink-900"><Link className="hover:text-accent-600" href={`/results/${story.slug}`}>{story.title}</Link></h2>
+                  <p className="mt-3 line-clamp-4 text-sm leading-6 text-slate-600">{story.summary}</p>
+                  <Link href={`/results/${story.slug}`} className="mt-5 inline-flex text-sm font-semibold text-accent-600 hover:text-accent-500">Read the case study →</Link>
                 </div>
               </article>
             );
           })}
         </div>
       ) : (
-        <Card className="max-w-3xl border-accent-400/25 bg-accent-400/[0.05] p-8 sm:p-10">
-          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent-300">Stories in preparation</p>
-          <h2 className="mt-4 font-display text-3xl text-white">Genuine work comes before content volume.</h2>
-          <p className="mt-4 max-w-2xl text-sm leading-7 text-ink-300">We publish only complete, consent-approved stories from real jobs. In the meantime, the gallery contains currently approved result photos.</p>
-          <Link className="mt-5 inline-flex text-sm font-semibold text-accent-300" href="/gallery">View the gallery →</Link>
-        </Card>
+        <div className="grid gap-5 md:grid-cols-3">
+          {[
+            ["01", "Link a completed job", "Staff select the service, explain the starting condition and document the work performed."],
+            ["02", "Confirm customer consent", "Every public photo requires a separate marketing-consent record; job photos stay private by default."],
+            ["03", "Privacy-check and publish", "Only a reviewed case study becomes public. Withdrawing photo consent removes that media from the page."],
+          ].map(([number, title, body]) => (
+            <article key={number} className="rounded-[1.25rem] border border-[#DED8CE] bg-[#FFFEFB] p-6 shadow-[0_14px_38px_rgba(11,42,74,0.06)]">
+              <p className="font-display text-4xl text-accent-500">{number}</p><h2 className="mt-5 text-lg font-semibold text-ink-900">{title}</h2><p className="mt-3 text-sm leading-6 text-slate-600">{body}</p>
+            </article>
+          ))}
+        </div>
       )}
 
-      <section className="mt-16 flex flex-col items-start justify-between gap-5 border-t border-white/10 pt-9 sm:flex-row sm:items-center">
-        <div><h2 className="font-display text-2xl text-white">Have a vehicle that needs the same level of care?</h2><p className="mt-1 text-sm text-ink-400">Choose a service or send photos for a condition-based quote.</p></div>
-        <div className="flex flex-wrap gap-3"><ButtonLink href="/book">Book Detailing</ButtonLink><ButtonLink href="/quote" variant="outline">Request a Quote</ButtonLink></div>
+      <section className="mt-16 flex flex-col items-start justify-between gap-5 border-t border-[#DED8CE] pt-9 sm:flex-row sm:items-center">
+        <div><h2 className="font-display text-2xl text-ink-900">Have a vehicle that needs the same level of care?</h2><p className="mt-1 text-sm text-slate-600">Choose a service or send photos for a condition-based quote.</p></div>
+        <div className="flex flex-wrap gap-3"><ButtonLink href="/book">Book Detailing</ButtonLink><ButtonLink href="/quote" variant="outline" className="!border-ink-900/30 !text-ink-900 hover:!border-accent-500 hover:!text-accent-600">Request a Quote</ButtonLink></div>
       </section>
-    </Container>
+        </Container>
+      </section>
+    </>
   );
 }
 

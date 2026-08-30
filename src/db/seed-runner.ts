@@ -93,11 +93,10 @@ const CATALOG: { category: string; slug: string; description: string; services: 
     ],
   },
   {
-    category: "Window Tinting",
+    category: "Tint Removal & Replacement",
     slug: "window-tinting",
-    description: "Professional window film installation, removal and replacement.",
+    description: "Removal of old or damaged window film, with replacement available by quote.",
     services: [
-      { name: "Vehicle Tinting", slug: "vehicle-tinting", short: "Premium films in a range of shades, installed cleanly.", priceCents: null, durationMin: 180, mode: "quote_required" },
       { name: "Tint Removal", slug: "tint-removal", short: "Clean removal of old or damaged film, adhesive included.", priceCents: null, durationMin: 120, mode: "quote_required" },
       { name: "Tint Replacement", slug: "tint-replacement", short: "Removal of old film and installation of new film.", priceCents: null, durationMin: 240, mode: "quote_required" },
     ],
@@ -132,13 +131,20 @@ const CATALOG: { category: string; slug: string; description: string; services: 
  */
 const LARGE_VEHICLE_CATEGORIES = ["suv_small", "suv_large", "pickup", "van", "commercial"];
 
-/** The six flyer detailing packages every general-purpose extra belongs to. */
-const FLYER_PACKAGE_SLUGS = [
+/** Packages with meaningful interior work. */
+const INTERIOR_PACKAGE_SLUGS = [
   "complete-detail-engine",
   "the-works",
   "interior-detail",
   "wash-interior-refresh",
   "basic-interior-clean",
+];
+
+/** Packages with exterior paint work where wax/buff can be performed. */
+const EXTERIOR_PACKAGE_SLUGS = [
+  "complete-detail-engine",
+  "the-works",
+  "wash-interior-refresh",
   "basic-car-wash",
 ];
 
@@ -164,9 +170,9 @@ const ADDONS: {
   largeVehicleDeltaCents?: number;
   largeVehicleDeltaMin?: number;
 }[] = [
-  { name: "Dog Hair Clean", description: "Removal of embedded pet hair (for interior clean-up packages).", priceCents: 5000, durationMin: 30, serviceSlugs: FLYER_PACKAGE_SLUGS },
-  { name: "Wax / Buff", description: "Machine wax and buff for added gloss and protection.", priceCents: 12000, durationMin: 120, serviceSlugs: FLYER_PACKAGE_SLUGS },
-  { name: "Salt Stain Removal", description: "Winter salt stain extraction from carpets and mats.", priceCents: 5000, durationMin: 30, serviceSlugs: FLYER_PACKAGE_SLUGS },
+  { name: "Dog Hair Clean", description: "Removal of embedded pet hair (for interior clean-up packages).", priceCents: 5000, durationMin: 30, serviceSlugs: INTERIOR_PACKAGE_SLUGS },
+  { name: "Wax / Buff", description: "Machine wax and buff for added gloss and protection.", priceCents: 12000, durationMin: 120, serviceSlugs: EXTERIOR_PACKAGE_SLUGS },
+  { name: "Salt Stain Removal", description: "Winter salt stain extraction from carpets and mats.", priceCents: 5000, durationMin: 30, serviceSlugs: INTERIOR_PACKAGE_SLUGS },
   {
     name: "Ceramic Protection - Ultimate Detail Add-On",
     slug: "ceramic-protection-ultimate",

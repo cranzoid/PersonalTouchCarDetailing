@@ -23,6 +23,11 @@ export type BusinessSettings = {
   email: string;
   /** Public Google review destination shown on the Reviews page. */
   googleReviewUrl: string;
+  /** Public Google rating summary, editable as the listing changes. */
+  googleReviewRating: number;
+  googleReviewCount: number;
+  /** Owner-confirmed public longevity label, e.g. "25+ years". */
+  yearsInBusinessLabel: string;
   timezone: string;
   /** Ontario HST default; staff-configurable. */
   taxRateBp: number;
@@ -97,6 +102,11 @@ export const SETTINGS_DEFAULTS: BusinessSettings = {
   phone: "905-679-0143",
   email: "info@personaltouchcardetailing.ca",
   googleReviewUrl: "https://share.google/s5WvXvgHbcWAiornU",
+  // Verified against the public Google listing on 2026-08-30.
+  googleReviewRating: 4.7,
+  googleReviewCount: 73,
+  // Owner-confirmed for the 2026-08-30 public-site redesign.
+  yearsInBusinessLabel: "25+ years",
   timezone: "America/Toronto",
   taxRateBp: 1300,
   taxLabel: "HST",

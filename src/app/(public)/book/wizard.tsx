@@ -596,20 +596,6 @@ export function BookingWizard({
                 <span>Estimated total</span>
                 <span className="text-accent-300">{formatCents(preview.total)}</span>
               </div>
-              {/* The booking quotes the tax-added figure as the conservative
-                  default — it is an estimate, and the invoice is the tax
-                  document. But the shop charges no tax on cash or e-transfer,
-                  so a customer planning to pay that way should see the price
-                  they will actually be asked for. */}
-              {preview.tax > 0 && (
-                <p className="rounded-xl border border-ink-700 bg-ink-950/50 p-3 text-xs text-ink-300">
-                  Paying in cash or by Interac e-transfer? No {taxLabel} is charged —{" "}
-                  <span className="font-semibold text-white">
-                    {formatCents(preview.subtotal - preview.discount)}
-                  </span>
-                  . Card and cheque are {formatCents(preview.total)}.
-                </p>
-              )}
               {claimsOffer && !serviceQualifies && (
                 <p className="rounded-xl border border-ink-700 bg-ink-950/50 p-3 text-xs text-ink-300">
                   The {promo!.label} applies to our detailing packages, so it doesn&apos;t come off

@@ -185,6 +185,10 @@ icon, web manifest, robots rules, sitemap, and a branded not-found page. The
 generated hero is stored at `public/images/detailing-studio-hero.png`; its
 Open Graph crop is `public/og.png`.
 
+The owner confirmed the public longevity claim as `25+ years` on 2026-08-30.
+It is stored as the editable `yearsInBusinessLabel` business setting rather
+than being embedded in page copy.
+
 ## Database and migrations
 
 Repository migrations, in order:
