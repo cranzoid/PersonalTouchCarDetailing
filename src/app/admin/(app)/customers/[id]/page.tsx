@@ -4,7 +4,7 @@ import { desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { StatusBadge } from "@/components/admin";
 import { formatCents } from "@/lib/money";
-import { formatInZone } from "@/lib/tz";
+import { appointmentWhenLabel } from "@/lib/appointment-time";
 import { getSettings } from "@/lib/settings";
 import { CustomerActionPanels } from "./customer-actions";
 import { VehicleList } from "./vehicle-list";
@@ -87,12 +87,10 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
               className="flex items-center justify-between rounded-xl border border-ink-800 p-4 text-sm hover:border-accent-500/50"
             >
               <span className="text-white">
-                {formatInZone(a.startsAt, settings.timezone, {
+                {appointmentWhenLabel(a, settings.timezone, {
                   year: "numeric",
                   month: "short",
                   day: "numeric",
-                  hour: "numeric",
-                  minute: "2-digit",
                 })}
               </span>
               <span className="flex items-center gap-3">

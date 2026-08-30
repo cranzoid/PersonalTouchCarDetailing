@@ -223,6 +223,12 @@ export async function loadDayContext(input: {
       .where(
         and(
           inArray(schema.appointments.status, APPOINTMENT_BLOCKING_STATUSES),
+          // A booking whose time the shop still owes the customer holds no
+          // capacity. Its starts_at is that day's opening time, so counting it
+          // would close the morning to everyone else over a slot nobody has
+          // agreed to — and would cap how many coatings the shop can take on
+          // one date, which is exactly the limit this booking mode removes.
+          eq(schema.appointments.timeToBeConfirmed, false),
           input.excludeAppointmentId
             ? ne(schema.appointments.id, input.excludeAppointmentId)
             : undefined,

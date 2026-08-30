@@ -5,13 +5,60 @@ import { audit } from "@/lib/audit";
 import type { BusinessSettings } from "@/lib/settings";
 import type { Attribution } from "@/db/schema";
 import { normalizePhone } from "@/lib/phone";
+import { isDateOnlyBookingSlug } from "@/lib/ceramic";
 import { priceBooking, type BookingPricing, type CustomBookingLine } from "@/lib/pricing";
 import { isFirstTimeDetailCustomer, type ResolvedPromotion } from "@/lib/promotions";
+import { localDateISO } from "@/lib/tz";
 import { VEHICLE_CATEGORIES, type VehicleCategory } from "@/lib/types";
 import { createAppointmentDepositAccessToken } from "@/lib/appointment-deposits";
-import { computeDaySlots, loadDayContext, pickFreeBay, pickFreeStaff, type Interval } from "./availability";
+import {
+  computeDaySlots,
+  loadDayContext,
+  pickFreeBay,
+  pickFreeStaff,
+  type DayContext,
+  type Interval,
+} from "./availability";
 
 export class BookingError extends Error {}
+
+/**
+ * The nominal window stored for a booking that has a date but no agreed time.
+ *
+ * It starts at that day's opening time purely so the row sits on the right
+ * calendar day for every "what is on today" query and every ordering; nothing
+ * reads it as a promise (see `appointment-time.ts`), and the availability
+ * engine skips the row entirely, so the length overrunning closing time costs
+ * nobody a slot.
+ *
+ * What IS checked is the date itself: the shop must be open, the day must
+ * still be ahead, and it must fall inside the booking window. The minimum-
+ * notice rule is deliberately expressed as "a later day than today" rather
+ * than as hours-from-now — the customer is not claiming a time, so measuring
+ * notice to an opening time nobody has agreed to would refuse dates the
+ * date picker itself offers.
+ */
+function dateOnlyWindow(ctx: DayContext, req: BookingRequest): Interval {
+  const { openMs, closeMs } = ctx;
+  if (openMs === null || closeMs === null) {
+    throw new BookingError("We are closed on that date. Please choose another day.");
+  }
+  // Only a closure covering the whole working day rules the date out. A block
+  // over part of it does not: no time has been claimed, so there is nothing
+  // for it to collide with.
+  if (ctx.globalBlocks.some((block) => block.start <= openMs && block.end >= closeMs)) {
+    throw new BookingError("We are closed on that date. Please choose another day.");
+  }
+  if (!ctx.allowOutsideBookingWindow) {
+    if (req.dateISO <= localDateISO(req.settings.timezone, 0, ctx.nowMs)) {
+      throw new BookingError("Please choose a date from tomorrow onwards.");
+    }
+    if (openMs > ctx.nowMs + ctx.maxBookingWindowDays * 86_400_000) {
+      throw new BookingError("That date is too far ahead. Please choose an earlier date.");
+    }
+  }
+  return { start: openMs, end: openMs + ctx.totalDurationMin * 60_000 };
+}
 
 /**
  * The promotion the customer was shown no longer applies — they became
@@ -51,7 +98,12 @@ export type BookingRequest = {
   };
   pricing: BookingPricing;
   dateISO: string;
-  startMs: number;
+  /**
+   * The chosen start, or `null` to book the DATE and leave the time to the
+   * shop. A customer booking a service the shop schedules by hand is always
+   * date-only whatever this says — see `createAppointmentInTransaction`.
+   */
+  startMs: number | null;
   customerNotes?: string;
   attribution?: Attribution;
   policiesAccepted: boolean;
@@ -79,6 +131,10 @@ type CreatedAppointment = {
   customerId: string;
   vehicleId: string;
   status: string;
+  /** As stored. For a date-only booking this is the day's opening time. */
+  startsAt: Date;
+  /** True when the shop still owes the customer a time. */
+  timeToBeConfirmed: boolean;
   depositAccessToken?: string;
 };
 
@@ -150,21 +206,43 @@ export async function createAppointmentInTransaction(
       // caller can never relax the notice window, whatever it passes.
       allowOutsideBookingWindow: actor.type === "staff" && req.allowOutsideBookingWindow === true,
     });
-    const window: Interval = {
-      start: req.startMs,
-      end: req.startMs + ctx.totalDurationMin * 60_000,
-    };
-    const slots = computeDaySlots(ctx);
-    if (!slots.some((s) => s.start === window.start)) {
-      throw new BookingError("That time is no longer available. Please choose another slot.");
+
+    // Whether this booking gets a time is decided by the catalogue, not by the
+    // request: a customer booking a service the shop schedules by hand is
+    // always date-only however the form was filled in, and a customer booking
+    // anything else always owes a real slot — otherwise omitting the field
+    // would be a way to skip the availability check entirely. Staff keep the
+    // choice, because they ARE the phone call that agrees the time.
+    const dateOnly =
+      actor.type === "customer"
+        ? req.pricing.serviceSlugs.some(isDateOnlyBookingSlug)
+        : req.startMs === null;
+    if (!dateOnly && req.startMs === null) {
+      throw new BookingError("Please choose an appointment time.");
     }
-    const bayIdx = pickFreeBay(ctx, window);
-    if (bayIdx === null) {
-      throw new BookingError("That time is no longer available. Please choose another slot.");
-    }
-    const assignedStaffId = pickFreeStaff(ctx, window);
-    if (ctx.staffingConfigured && !assignedStaffId) {
-      throw new BookingError("That time is no longer available. Please choose another slot.");
+
+    const window: Interval = dateOnly
+      ? dateOnlyWindow(ctx, req)
+      : { start: req.startMs!, end: req.startMs! + ctx.totalDurationMin * 60_000 };
+
+    // A date-only booking reserves nothing, so there is no slot to re-validate
+    // and no bay or staff member to hold: the shop assigns both by hand when it
+    // agrees the time. Everything below this point is the ordinary path.
+    let bayIdx: number | null = null;
+    let assignedStaffId: string | null | undefined;
+    if (!dateOnly) {
+      const slots = computeDaySlots(ctx);
+      if (!slots.some((s) => s.start === window.start)) {
+        throw new BookingError("That time is no longer available. Please choose another slot.");
+      }
+      bayIdx = pickFreeBay(ctx, window);
+      if (bayIdx === null) {
+        throw new BookingError("That time is no longer available. Please choose another slot.");
+      }
+      assignedStaffId = pickFreeStaff(ctx, window);
+      if (ctx.staffingConfigured && !assignedStaffId) {
+        throw new BookingError("That time is no longer available. Please choose another slot.");
+      }
     }
 
     // Customer: reuse when a known id is given; otherwise create.
@@ -209,8 +287,11 @@ export async function createAppointmentInTransaction(
       status,
       startsAt: new Date(window.start),
       endsAt: new Date(window.end),
-      resourceId: bayIds[bayIdx],
+      // Null for a date-only booking: nothing is reserved until the shop has
+      // agreed a time and rescheduled it onto a real slot.
+      resourceId: bayIdx === null ? null : bayIds[bayIdx],
       assignedStaffId: assignedStaffId ?? null,
+      timeToBeConfirmed: dateOnly,
       subtotalCents: req.pricing.subtotalCents,
       discountCents: req.pricing.discountCents,
       promoCode: req.pricing.promoCode,
@@ -250,7 +331,8 @@ export async function createAppointmentInTransaction(
         status,
         startsAt: new Date(window.start).toISOString(),
         endsAt: new Date(window.end).toISOString(),
-        resourceId: bayIds[bayIdx],
+        timeToBeConfirmed: dateOnly,
+        resourceId: bayIdx === null ? null : bayIds[bayIdx],
         assignedStaffId: assignedStaffId ?? null,
         requiredSkills: req.pricing.requiredSkills,
         totalCents: req.pricing.totalCents,
@@ -268,7 +350,15 @@ export async function createAppointmentInTransaction(
           })
         : undefined;
 
-    return { appointmentId, customerId, vehicleId, status, depositAccessToken };
+    return {
+      appointmentId,
+      customerId,
+      vehicleId,
+      status,
+      startsAt: new Date(window.start),
+      timeToBeConfirmed: dateOnly,
+      depositAccessToken,
+    };
 }
 
 /**

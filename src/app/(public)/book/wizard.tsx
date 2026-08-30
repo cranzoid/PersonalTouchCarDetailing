@@ -5,6 +5,7 @@ import { useEffect, useId, useMemo, useState } from "react";
 import { getStoredAttribution } from "@/components/attribution";
 import { trackMetaLead } from "@/components/meta-pixel";
 import { trackBookAppointmentConversion } from "@/components/google-tag";
+import { DATE_ONLY_BOOKING_NOTICE, DATE_ONLY_BOOKING_NOTICE_SHORT } from "@/lib/ceramic";
 import { formatCents } from "@/lib/money";
 import { localDateISO } from "@/lib/tz";
 import {
@@ -31,6 +32,12 @@ export type WizardService = {
    * Null for services where the price is the whole story.
    */
   conditionNotice: string | null;
+  /**
+   * The shop schedules this service by hand, so the customer picks a date and
+   * we call them about the time. Resolved on the server from the catalogue
+   * slug; the wizard only decides what to render, never what is allowed.
+   */
+  dateOnly: boolean;
 };
 
 export type WizardAddon = {
@@ -67,6 +74,8 @@ export type WizardPromo = {
 };
 
 const STEPS = ["Service", "Vehicle", "Add-ons", "Time", "Details"] as const;
+/** Same five steps; the fourth asks for a date alone. */
+const DATE_ONLY_STEPS = ["Service", "Vehicle", "Add-ons", "Date", "Details"] as const;
 const focusRing = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-950";
 
 export function BookingWizard({
@@ -139,6 +148,9 @@ export function BookingWizard({
   // public price tables say so, and the booking flow has to agree rather than
   // quietly charging a sedan price plus a delta.
   const quoteOnlyVehicle = isQuoteOnlyVehicleCategory(vehicleCategory);
+  // A coating takes most of a working day and the shop arranges the drop-off
+  // by phone, so this customer chooses a date and never sees a slot picker.
+  const dateOnly = !!service?.dateOnly;
   // A claim is worth something only against the offer the server is running.
   const claimsOffer =
     !!promo && !!claimedCode && claimedCode.trim().toUpperCase() === promo.code && !offerWithdrawn;
@@ -193,14 +205,16 @@ export function BookingWizard({
   }
 
   async function submit() {
-    if (!service || !startMs || !dateISO) return;
+    if (!service || !dateISO || (!dateOnly && !startMs)) return;
     setSubmitting(true);
     const res = await submitBookingAction({
       serviceIds: [service.id],
       addonIds: selectedAddons,
       vehicleCategory,
       dateISO,
-      startMs,
+      // Omitted for a date-only service. The server does not take the wizard's
+      // word for it either way — it re-reads the catalogue.
+      startMs: dateOnly ? undefined : startMs,
       customer: {
         firstName: contact.firstName,
         lastName: contact.lastName,
@@ -250,6 +264,11 @@ export function BookingWizard({
         <p className="mt-3 text-ink-300">
           {result.whenLabel} — estimated total {result.totalLabel} (incl. {taxLabel}).
         </p>
+        {result.timeToBeConfirmed && (
+          <p className="mt-3 rounded-2xl border border-accent-500/25 bg-[#0B2A4A]/55 p-4 text-sm leading-6 text-ink-200">
+            {DATE_ONLY_BOOKING_NOTICE_SHORT}
+          </p>
+        )}
         {result.depositLabel && result.depositUrl && (
           <div className="mt-5 rounded-2xl border border-accent-500/25 bg-[#0B2A4A]/55 p-5">
             <p className="text-sm text-ink-200">
@@ -289,7 +308,7 @@ export function BookingWizard({
       <section aria-labelledby={`${idPrefix}-booking-step`} className="min-w-0 rounded-[2rem] border border-ink-700/70 bg-gradient-to-br from-ink-900/95 via-ink-900/75 to-[#0B2A4A]/25 p-5 shadow-2xl shadow-black/20 sm:p-8">
         {/* Step indicator */}
         <ol aria-label="Booking progress" className="mb-8 grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">
-          {STEPS.map((label, i) => (
+          {(dateOnly ? DATE_ONLY_STEPS : STEPS).map((label, i) => (
             <li
               key={label}
               aria-current={i === step ? "step" : undefined}
@@ -446,7 +465,14 @@ export function BookingWizard({
 
         {step === 3 && (
           <div className="max-w-lg space-y-4">
-            <h2 id={`${idPrefix}-booking-step`} className="text-xl font-semibold text-white">Choose your appointment time</h2>
+            <h2 id={`${idPrefix}-booking-step`} className="text-xl font-semibold text-white">
+              {dateOnly ? "Choose your appointment date" : "Choose your appointment time"}
+            </h2>
+            {dateOnly && (
+              <p className="rounded-xl border border-accent-500/25 bg-[#0B2A4A]/45 p-4 text-sm leading-6 text-ink-200">
+                {DATE_ONLY_BOOKING_NOTICE}
+              </p>
+            )}
             <div>
               <label htmlFor={`${idPrefix}-date`} className="mb-2 block text-sm font-medium text-ink-200">Choose a date</label>
               <input
@@ -457,11 +483,14 @@ export function BookingWizard({
                 value={dateISO}
                 onChange={(e) => {
                   setDateISO(e.target.value);
-                  void loadSlots(e.target.value);
+                  // Nothing to look up when the shop sets the time by hand:
+                  // the date carries no capacity, so there are no slots.
+                  if (!dateOnly) void loadSlots(e.target.value);
                 }}
                 className={`min-h-11 w-full rounded-xl border border-ink-600 bg-ink-950/60 px-4 py-2 text-white [color-scheme:dark] sm:w-auto ${focusRing}`}
               />
             </div>
+            {!dateOnly && (
             <div aria-live="polite" aria-atomic="true">
             {slotsLoading && <p className="text-ink-300">Checking availability…</p>}
             {slotsError && <p role="alert" className="rounded-xl border border-red-400/30 bg-red-950/30 p-3 text-red-300">{slotsError}</p>}
@@ -490,7 +519,12 @@ export function BookingWizard({
               </div>
             )}
             </div>
-            <StepNav onBack={() => setStep(2)} onNext={() => setStep(4)} nextDisabled={!startMs} />
+            )}
+            <StepNav
+              onBack={() => setStep(2)}
+              onNext={() => setStep(4)}
+              nextDisabled={dateOnly ? !dateISO : !startMs}
+            />
           </div>
         )}
 
@@ -651,6 +685,11 @@ export function BookingWizard({
                 Approx. {Math.floor(preview.duration / 60)}h{preview.duration % 60 ? ` ${preview.duration % 60}m` : ""} of work.
                 Final price confirmed at drop-off.
               </p>
+              {/* The estimate shows hours of work, which reads like a start
+                  time unless the promise to arrange one sits beside it. */}
+              {dateOnly && (
+                <p className="text-xs text-ink-500">{DATE_ONLY_BOOKING_NOTICE_SHORT}</p>
+              )}
             </div>
           )}
         </div>

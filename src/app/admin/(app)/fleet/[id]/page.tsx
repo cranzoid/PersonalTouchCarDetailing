@@ -7,6 +7,7 @@ import { roleHas } from "@/lib/auth/permissions";
 import { getStaff } from "@/lib/auth/session";
 import { formatCents } from "@/lib/money";
 import { getSettings } from "@/lib/settings";
+import { appointmentWhenLabel } from "@/lib/appointment-time";
 import { formatInZone } from "@/lib/tz";
 import { CustomerActionPanels } from "../../customers/[id]/customer-actions";
 import { VehicleList } from "../../customers/[id]/vehicle-list";
@@ -90,7 +91,7 @@ export default async function FleetDetailPage({ params }: { params: Promise<{ id
         <div className="mt-3 space-y-2">
           {appointments.map((appointment) => (
             <Link key={appointment.id} href={`/admin/appointments/${appointment.id}`} className="flex items-center justify-between rounded-xl border border-ink-800 p-4 text-sm hover:border-accent-500/50">
-              <span className="text-white">{formatInZone(appointment.startsAt, settings.timezone, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+              <span className="text-white">{appointmentWhenLabel(appointment, settings.timezone, { month: "short", day: "numeric", year: "numeric" })}</span>
               <StatusBadge status={appointment.status} />
             </Link>
           ))}

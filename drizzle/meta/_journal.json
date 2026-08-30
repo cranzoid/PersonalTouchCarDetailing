@@ -134,6 +134,13 @@
       "when": 1788228973197,
       "tag": "0018_saturday_opens_at_nine",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788232573197,
+      "tag": "0019_date_only_ceramic_bookings",
+      "breakpoints": true
     }
   ]
 }

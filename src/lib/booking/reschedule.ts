@@ -82,6 +82,9 @@ export async function rescheduleAppointment(input: {
         resourceId,
         assignedStaffId: ctx.staffingConfigured ? eligibleStaffId : appointment.assignedStaffId,
         status: appointment.status,
+        // The shop has now agreed a time, so the booking stops being date-only:
+        // it holds this bay, blocks the slot, and its reminder can go out.
+        timeToBeConfirmed: false,
         reminderSentAt: null,
         updatedAt: new Date(),
       })
@@ -95,6 +98,7 @@ export async function rescheduleAppointment(input: {
       before: {
         startsAt: appointment.startsAt.toISOString(),
         endsAt: appointment.endsAt.toISOString(),
+        timeToBeConfirmed: appointment.timeToBeConfirmed,
         resourceId: appointment.resourceId,
         assignedStaffId: appointment.assignedStaffId,
         status: appointment.status,
@@ -102,6 +106,7 @@ export async function rescheduleAppointment(input: {
       after: {
         startsAt: startsAt.toISOString(),
         endsAt: endsAt.toISOString(),
+        timeToBeConfirmed: false,
         resourceId,
         assignedStaffId: ctx.staffingConfigured ? eligibleStaffId : appointment.assignedStaffId,
         status: appointment.status,

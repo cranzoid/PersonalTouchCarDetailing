@@ -2,10 +2,10 @@ import "server-only";
 
 import { asc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
+import { appointmentWhenLabel } from "@/lib/appointment-time";
 import { formatCents } from "@/lib/money";
 import { sendMessage } from "@/lib/messaging";
 import { getSettings, type BusinessSettings } from "@/lib/settings";
-import { formatInZone } from "@/lib/tz";
 
 /**
  * Operational alerts to our own staff — currently "a booking just landed".
@@ -105,12 +105,12 @@ export async function notifyStaffOfNewAppointment(appointmentId: string): Promis
     .where(eq(schema.appointmentServices.appointmentId, appointmentId))
     .orderBy(asc(schema.appointmentServices.sort));
 
-  const when = formatInZone(appointment.startsAt, settings.timezone, {
+  // A date-only booking arrives with an unanswered question, so the alert that
+  // wakes the owner's phone says so — this is the prompt to call the customer.
+  const when = appointmentWhenLabel(appointment, settings.timezone, {
     weekday: "short",
     month: "short",
     day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
   });
   const who = customer ? `${customer.firstName} ${customer.lastName}`.trim() : "Unknown customer";
   const what = lines.map((l) => l.description).join(", ") || "No services listed";

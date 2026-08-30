@@ -6,6 +6,7 @@ import { db, schema } from "@/db";
 import { formatCents } from "@/lib/money";
 import { resolveCustomerPortalToken } from "@/lib/portal";
 import { getSettings } from "@/lib/settings";
+import { appointmentWhenLabel } from "@/lib/appointment-time";
 import { formatInZone } from "@/lib/tz";
 
 export const metadata = { title: "Customer Portal" };
@@ -57,7 +58,7 @@ export default async function CustomerPortalPage({ params }: { params: Promise<{
           {appointments.map((appointment) => {
             const vehicle = vehiclesById.get(appointment.vehicleId);
             return <div key={appointment.id} className="flex flex-col items-start justify-between gap-3 rounded-2xl border border-ink-700/70 bg-ink-900/60 p-5 text-sm shadow-lg shadow-black/10 sm:flex-row sm:items-center">
-              <span><span className="block font-medium text-white">{formatInZone(appointment.startsAt, settings.timezone, { month: "long", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}</span><span className="text-xs text-ink-500">{vehicle ? [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ") : "Vehicle"}</span></span>
+              <span><span className="block font-medium text-white">{appointmentWhenLabel(appointment, settings.timezone, { month: "long", day: "numeric", year: "numeric" })}</span><span className="text-xs text-ink-500">{vehicle ? [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ") : "Vehicle"}</span></span>
               <span className="flex w-full items-center justify-between gap-3 sm:w-auto"><span className="text-ink-200">{formatCents(appointment.totalCents, settings.currency)}</span><PortalStatus status={appointment.status} /></span>
             </div>;
           })}

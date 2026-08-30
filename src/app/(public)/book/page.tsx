@@ -10,6 +10,7 @@ import {
   CERAMIC_PROTECTION_ADDON_QUALIFIER,
   CERAMIC_PROTECTION_ADDON_SLUG,
   isCeramicServiceSlug,
+  isDateOnlyBookingSlug,
 } from "@/lib/ceramic";
 
 export const metadata = pageMetadata(SEO_PAGES.book);
@@ -72,6 +73,9 @@ export default async function BookPage({
       // Ceramic prices cover the coating for the vehicle category and nothing
       // else; preparation is condition-dependent and approved separately.
       conditionNotice: isCeramicServiceSlug(s.slug) ? CERAMIC_CONDITION_DISCLAIMER_SHORT : null,
+      // Same answer the booking transaction reaches from the same slug, so the
+      // step the customer sees and the record that gets written cannot differ.
+      dateOnly: isDateOnlyBookingSlug(s.slug),
     }));
 
   const wizardAddons: WizardAddon[] = addons.map((a) => ({

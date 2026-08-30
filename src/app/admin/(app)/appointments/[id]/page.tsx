@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { and, asc, eq, isNotNull, isNull } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { StatusBadge } from "@/components/admin";
+import { appointmentWhenLabel } from "@/lib/appointment-time";
 import { formatCents } from "@/lib/money";
 import { formatInZone } from "@/lib/tz";
 import { getSettings } from "@/lib/settings";
@@ -121,17 +122,19 @@ export default async function AppointmentDetailPage({
         <div>
           <p className="font-mono text-xs text-ink-500">{appt.id}</p>
           <h1 className="text-2xl font-bold text-white">
-            {formatInZone(appt.startsAt, settings.timezone, {
+            {appointmentWhenLabel(appt, settings.timezone, {
               weekday: "long",
               month: "long",
               day: "numeric",
-              hour: "numeric",
-              minute: "2-digit",
             })}
           </h1>
           <p className="mt-1 text-sm text-ink-400">
-            Until {formatInZone(appt.endsAt, settings.timezone, { hour: "numeric", minute: "2-digit" })}
-            {resource ? ` · ${resource.name}` : ""} · {appt.durationMin} min work
+            {/* A date-only booking holds no bay and no end time worth
+                printing — reschedule it once the time is agreed and both
+                come back. */}
+            {appt.timeToBeConfirmed
+              ? `Arrange the time with the customer · ${appt.durationMin} min work`
+              : `Until ${formatInZone(appt.endsAt, settings.timezone, { hour: "numeric", minute: "2-digit" })}${resource ? ` · ${resource.name}` : ""} · ${appt.durationMin} min work`}
           </p>
         </div>
         <StatusBadge status={appt.status} />

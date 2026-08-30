@@ -50,6 +50,14 @@ export type BookingPricing = {
   durationMin: number;
   /** Normalized union of skills required by every selected service. */
   requiredSkills: string[];
+  /**
+   * Catalogue slugs of the selected services, in line order. Carried so the
+   * booking transaction can answer questions the cents cannot — whether this
+   * is a service the shop schedules by hand (see `isDateOnlyBookingSlug`) —
+   * from the same rows the price came from, rather than re-reading the
+   * catalogue and risking a different answer.
+   */
+  serviceSlugs: string[];
 };
 
 /** A resolved discount, ready to apply. `cents` is authoritative. */
@@ -225,6 +233,7 @@ export async function priceBooking(input: {
       label: promo?.label ?? null,
     }),
     requiredSkills: [...new Set(services.flatMap((service) => service.requiredSkills.map(normalizeSkill)).filter(Boolean))],
+    serviceSlugs: services.map((service) => service.slug),
   };
 }
 
@@ -344,6 +353,10 @@ export function computeTotals(
     depositRequiredCents: Math.min(depositRequiredCents, totalCents),
     durationMin,
     requiredSkills: [],
+    // Pure math over lines that are already priced — it never looked the
+    // catalogue up, so it has no slugs to report. priceBooking, which did,
+    // fills both of these in.
+    serviceSlugs: [],
   };
 }
 

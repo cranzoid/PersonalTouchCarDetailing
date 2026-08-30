@@ -9,7 +9,7 @@ import {
 import { formatCents } from "@/lib/money";
 import { finalizeSucceededAppointmentDeposit } from "@/lib/payments";
 import { getSettings } from "@/lib/settings";
-import { formatInZone } from "@/lib/tz";
+import { appointmentWhenLabel } from "@/lib/appointment-time";
 import { DepositPayButton } from "./pay-button";
 
 export const metadata = { title: "Confirm Your Appointment" };
@@ -89,13 +89,11 @@ export default async function AppointmentDepositPage({
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-300">{settings.businessName}</p>
         <h1 className="mt-3 text-3xl font-bold text-white">{confirmed ? "Appointment confirmed" : "Confirm your appointment"}</h1>
         <p className="mt-3 text-sm leading-6 text-ink-300">
-          {formatInZone(appointment.startsAt, settings.timezone, {
+          {appointmentWhenLabel(appointment, settings.timezone, {
             weekday: "long",
             month: "long",
             day: "numeric",
             year: "numeric",
-            hour: "numeric",
-            minute: "2-digit",
           })}
         </p>
       </header>

@@ -773,3 +773,72 @@ scaffolding for content that does not exist yet.
 
 **Revisit when:** the shop starts quoting commercial work from a rate card. That
 is a second price list keyed by vehicle class, not a delta on the sedan price.
+
+## 27. A ceramic coating is booked by date; the shop owns the time
+#25 left an open question — "revisit when a coating genuinely needs to occupy
+the bay for more than one working day" — and the owner has now answered it from
+the other end. The problem was never that a coating is too long for the day; it
+is that the shop cannot know in advance how long it will take, because that
+depends on paint it has not seen yet. Max already offered exactly one start per
+day, so a customer picking "9:00 AM" was picking the only slot there was and
+being told a time nobody had agreed to.
+
+Coating packages are therefore booked by DATE. The customer picks a day, the
+shop calls to arrange the drop-off, and the date carries no capacity at all.
+
+- **`appointments.time_to_be_confirmed` is the whole mechanism.** A date-only
+  booking still stores `starts_at` — that day's opening time — so it sits on
+  the right calendar day for every "what is on today" query and every ordering.
+  That stored time is scaffolding, never a promise: the row holds no bay and no
+  staff member, `loadDayContext` skips it, and `appointment-time.ts` is the one
+  place that decides how a time is printed, so every surface says "Time to be
+  confirmed" instead. Reminders skip it too — there is nothing to remind anyone
+  of. Rescheduling it onto a real slot clears the flag, and it becomes an
+  ordinary appointment that holds the bay like any other.
+- **No ceiling on coatings per date.** This falls straight out of holding no
+  capacity: the shop can take as many coating dates as it is offered and
+  sequence them by hand. It also means a coating never blocks a detail from
+  being booked that morning, which the old model would have done for a slot the
+  coating was not actually using.
+- **The catalogue decides, not the form.** `priceBooking` now returns
+  `serviceSlugs`, and the booking transaction reads `isDateOnlyBookingSlug` from
+  the same rows the price came from. A customer booking a coating is date-only
+  whatever `startMs` the request carried, and a customer booking anything else
+  still owes a real slot — otherwise omitting the field would have been a way
+  past the availability check. Staff keep the choice, because staff ARE the
+  phone call that agrees the time.
+- **Notice is measured in days, not hours, for a date-only booking.** The
+  customer is not claiming a time, so checking "is the opening time 24 hours
+  away" would refuse dates the date picker itself offers. The rule is simply
+  that the day must still be ahead, must be a day the shop is open, and must
+  fall inside the booking window.
+- **Ceramic protection is unchanged** — it is a two-hour job that still fits an
+  ordinary slot, and blurring the two products is exactly what #25 forbids.
+
+**Revisit when:** a second service needs this. `isDateOnlyBookingSlug` is a
+predicate over slugs precisely so it can grow, but if the list stops being "the
+coating packages" it belongs in a `services` column the owner can tick in Admin.
+
+## 28. The home page names two products, not four packages
+The home page had grown to nine bands, and the top of it was a four-card price
+list — three detailing packages plus one coating package — followed by a
+separate ceramic protection band. It asked a first-time visitor to compare a
+$399 coating with a $150 interior clean before they knew the shop sold two
+different kinds of thing.
+
+- **Two cards: our detailing packages, and ceramic coating & protection.** Each
+  names the products inside it with a "from" price and links straight to them.
+  The standalone ceramic protection band is gone — it existed to surface a
+  product that is now named on the front of a card, and removing it is most of
+  the length the owner wanted back.
+- **`/services` groups the same way**, for the same reason: a "Popular packages"
+  section of the three detailing packages, then a short ceramic section holding
+  both ceramic products under one heading. Compare packages, the extras and the
+  complete menu are untouched.
+- **Both surfaces still resolve ceramic through `resolveCeramicMenu`**, so the
+  two-product presentation and every price on it stay defined in exactly one
+  place (#25), and the `$120` figure still cannot appear without the sentence
+  that qualifies it.
+
+**Revisit when:** the shop sells a third kind of thing — paint correction as a
+priced package, say. That is a third card, not a longer list inside one of these.

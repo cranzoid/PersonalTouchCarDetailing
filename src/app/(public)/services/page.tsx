@@ -39,7 +39,16 @@ export default async function ServicesPage() {
 
   const ceramicMenu = resolveCeramicMenu({ services, addons });
   const ceramicCategoryId = services.find((service) => isCeramicServiceSlug(service.slug))?.categoryId ?? null;
-  const popularServices = POPULAR_SERVICE_SLUGS.map((slug) => services.find((service) => service.slug === slug)).filter(Boolean);
+  // The menu leads with the two things the shop sells rather than one flat row
+  // of four packages: the detailing packages most drivers start with, then the
+  // ceramic products as their own short group. Ceramic is a different decision
+  // — protection for paint the customer already looks after — and mixing one
+  // coating package in among three details asked people to compare a $399
+  // coating with a $150 interior clean. Both groups grow by editing this list
+  // and the ceramic menu, not by re-laying-out the page.
+  const popularServices = POPULAR_SERVICE_SLUGS
+    .map((slug) => services.find((service) => service.slug === slug))
+    .filter(Boolean);
   const compareServices = ["complete-detail-engine", "the-works", "interior-detail"].map((slug) => services.find((service) => service.slug === slug)).filter(Boolean);
   const serviceById = new Map(services.map((service) => [service.id, service]));
 
@@ -53,7 +62,7 @@ export default async function ServicesPage() {
               as="h1"
               eyebrow="Service menu"
               title="A clearer way to choose your detail."
-              subtitle="Start with our four most requested services, compare what is included, then book with vehicle-size pricing shown before checkout."
+              subtitle="Start with our detailing packages or ceramic protection, compare what is included, then book with vehicle-size pricing shown before checkout."
             />
             <div className="lg:pb-2">
               <GoogleReviewStrip settings={settings} tone="dark" />
@@ -63,21 +72,20 @@ export default async function ServicesPage() {
         </Container>
       </section>
 
-      <section className="surface-light py-20 sm:py-28">
+      <section id="detailing-packages" className="surface-light scroll-mt-24 py-20 sm:py-28">
         <Container>
           <SectionHeading
             eyebrow="Popular packages"
-            title="The services most drivers start with."
-            subtitle="The essentials are easy to scan. Open a service for the complete checklist, vehicle-size pricing, FAQs and relevant extras."
+            title="Our detailing packages."
+            subtitle="The services most drivers start with. The essentials are easy to scan — open one for the complete checklist, vehicle-size pricing, FAQs and relevant extras."
             tone="light"
           />
-          <div className="grid gap-6 md:grid-cols-2">
+          {/* Three across on a wide screen: a two-column grid leaves the third
+              package sitting alone on its own row. */}
+          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {popularServices.map((service, index) => {
               if (!service) return null;
               const presentation = servicePresentation(service.slug);
-              const ceramic = service.slug === "ceramic-coating-crystal" ? ceramicMenu[0] : undefined;
-              const price = ceramic?.fromPriceCents ?? service.basePriceCents;
-              const href = ceramic?.href ?? `/services/${service.slug}`;
               return (
                 <article key={service.id} className="group overflow-hidden rounded-[1.5rem] border border-[#DED8CE] bg-[#FFFEFB] shadow-[0_18px_50px_rgba(11,42,74,0.085)]">
                   <ServiceImage slug={service.slug} name={presentation.publicName} className="aspect-[16/9]" />
@@ -88,12 +96,12 @@ export default async function ServicesPage() {
                         <h2 className="mt-3 font-display text-[2rem] leading-tight text-ink-900">{presentation.publicName}</h2>
                       </div>
                       <span className="rounded-full bg-ink-900 px-4 py-2 text-sm font-semibold text-white">
-                        {price !== null ? `From ${formatCents(price)}` : "By quote"}
+                        {service.basePriceCents !== null ? `From ${formatCents(service.basePriceCents)}` : "By quote"}
                       </span>
                     </div>
                     <div className="mt-6"><CheckList items={presentation.highlights} tone="light" /></div>
                     <div className="mt-7 flex flex-wrap gap-3 border-t border-[#E5E0D7] pt-5">
-                      <ButtonLink href={href}>See What&apos;s Included</ButtonLink>
+                      <ButtonLink href={`/services/${service.slug}`}>See What&apos;s Included</ButtonLink>
                       {service.bookingMode === "bookable" && <ButtonLink href={`/book?service=${service.slug}`} variant="ghost" className="!text-ink-900 hover:!text-accent-600">Book Now →</ButtonLink>}
                     </div>
                   </div>
@@ -103,6 +111,40 @@ export default async function ServicesPage() {
           </div>
         </Container>
       </section>
+
+      {ceramicMenu.length > 0 && (
+        <section id="ceramic" className="surface-light scroll-mt-24 pb-20 sm:pb-28">
+          <Container>
+            <SectionHeading
+              eyebrow="Paint protection"
+              title="Ceramic coating and ceramic protection."
+              subtitle="Two different products. The coating packages are the premium, long-term option; ceramic protection is a single layer, added to an Ultimate Detail or booked on its own."
+              tone="light"
+            />
+            <div className="grid gap-6 md:grid-cols-2">
+              {ceramicMenu.map((product) => (
+                <article key={product.key} className="flex flex-col rounded-[1.5rem] border border-[#DED8CE] bg-[#FFFEFB] p-6 shadow-[0_18px_50px_rgba(11,42,74,0.085)] sm:p-8">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <h2 className="font-display text-[2rem] leading-tight text-ink-900">{product.name}</h2>
+                    <span className="rounded-full bg-ink-900 px-4 py-2 text-sm font-semibold text-white">
+                      From {formatCents(product.fromPriceCents)}
+                      {product.priceNote && <span aria-hidden="true">*</span>}
+                    </span>
+                  </div>
+                  <p className="mt-4 text-base leading-7 text-slate-600">{product.shortDescription}</p>
+                  {/* The conditional price never travels without its condition. */}
+                  {product.priceNote && (
+                    <p className="mt-3 text-xs leading-5 text-slate-500">*{product.priceNote}</p>
+                  )}
+                  <div className="mt-auto flex flex-wrap gap-3 pt-7">
+                    <ButtonLink href={product.href}>See What&apos;s Included</ButtonLink>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </Container>
+        </section>
+      )}
 
       <section className="bg-[#F6F2EA] py-20 text-ink-900 sm:py-28">
         <Container>

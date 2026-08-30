@@ -534,6 +534,10 @@ export async function convertEstimateAction(
             depositRequiredCents: estimate.depositRequiredCents,
             durationMin: input.durationMin,
             requiredSkills,
+            // Staff are converting an estimate they have already discussed, so
+            // they are booking a real time; no slug here asks for the
+            // date-only path.
+            serviceSlugs: [],
           },
           dateISO: input.dateISO,
           startMs: input.startMs,

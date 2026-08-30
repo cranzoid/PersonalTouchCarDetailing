@@ -43,6 +43,7 @@ const pricing: BookingPricing = {
   depositRequiredCents: 0,
   durationMin: 60, // + 15 setup + 15 cleanup = 90 total
   requiredSkills: [],
+  serviceSlugs: ["test-detail"],
 };
 
 function request(n: number): BookingRequest {

@@ -65,7 +65,15 @@ export async function sendDueAppointmentReminders(): Promise<number> {
     .select({ appointment: schema.appointments, customer: schema.customers })
     .from(schema.appointments)
     .innerJoin(schema.customers, eq(schema.appointments.customerId, schema.customers.id))
-    .where(and(eq(schema.appointments.status, "confirmed"), isNull(schema.appointments.reminderSentAt), gt(schema.appointments.startsAt, now)));
+    .where(and(
+      eq(schema.appointments.status, "confirmed"),
+      // A booking whose time the shop has not agreed yet has nothing to remind
+      // anyone of — its stored time is that day's opening, not a promise. It
+      // becomes reminder-eligible the moment staff schedule it for real.
+      eq(schema.appointments.timeToBeConfirmed, false),
+      isNull(schema.appointments.reminderSentAt),
+      gt(schema.appointments.startsAt, now),
+    ));
 
   const due = candidates.filter(({ appointment }) => isAppointmentReminderDue(appointment, now, settings.reminderLeadHours));
   if (due.length === 0) return 0;

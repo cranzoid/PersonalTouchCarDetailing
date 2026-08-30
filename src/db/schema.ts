@@ -495,6 +495,19 @@ export const appointments = pgTable(
      * exactly what every row predating this column is.
      */
     originalSubtotalCents: integer("original_subtotal_cents"),
+    /**
+     * The customer booked a DATE and the shop still owes them a time.
+     *
+     * A ceramic coating occupies most of a working day, so the shop schedules
+     * it by hand with the customer rather than selling one of a handful of
+     * start times online. `starts_at` still holds that day's opening time, so
+     * every "which day is this on" query and ordering keeps working — but the
+     * appointment holds no bay and no staff member, is skipped by the
+     * availability engine, and every surface that would print a time prints
+     * "Time to be confirmed" instead. Cleared the moment staff reschedule it
+     * onto a real slot. See DECISIONS.md #27.
+     */
+    timeToBeConfirmed: boolean("time_to_be_confirmed").notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

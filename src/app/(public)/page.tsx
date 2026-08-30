@@ -3,7 +3,6 @@ import Link from "next/link";
 import { and, desc, inArray, isNotNull } from "drizzle-orm";
 import { Container, ButtonLink, SectionHeading } from "@/components/ui";
 import {
-  CheckList,
   GoogleReviewCarousel,
   GoogleReviewStrip,
   ServiceImage,
@@ -11,7 +10,7 @@ import {
 import { db, schema } from "@/db";
 import { formatCents } from "@/lib/money";
 import { getPublicHomeCatalog } from "@/lib/public-catalog";
-import { CERAMIC_PROTECTION_SLUG, ceramicMenuKeyFor } from "@/lib/ceramic";
+import { CERAMIC_COATING_HUB_PATH, CERAMIC_PROTECTION_PATH } from "@/lib/ceramic";
 import { POPULAR_SERVICE_SLUGS, servicePresentation } from "@/lib/public-content";
 import { hasPublishedResults } from "@/lib/results";
 import { getPublicSettings } from "@/lib/settings";
@@ -54,35 +53,34 @@ export default async function HomePage() {
     hasPublishedResults(),
   ]);
 
-  const popularCards = featured
-    .map((service) => {
-      const key = ceramicMenuKeyFor(service.slug);
-      const product = key ? ceramicMenu.find((entry) => entry.key === key) : undefined;
-      const presentation = servicePresentation(service.slug);
-      return {
-        id: service.id,
-        slug: service.slug,
-        name: presentation.publicName,
-        href: product?.href ?? `/services/${service.slug}`,
-        basePriceCents: product?.fromPriceCents ?? service.basePriceCents,
-        priceNote: product?.priceNote ?? null,
-        highlights: presentation.highlights,
-      };
-    })
+  // Two decisions, not four packages. The home page names what the shop sells
+  // — detailing, and ceramic — and each service page carries the detail; a
+  // four-card price list here made the page long without helping anyone
+  // choose. The ceramic half is the same two products `/services` shows,
+  // resolved by the one menu resolver so a price can never differ by page.
+  const detailingProducts = featured
     .sort((a, b) => {
       const aIndex = POPULAR_SERVICE_SLUGS.indexOf(a.slug as (typeof POPULAR_SERVICE_SLUGS)[number]);
       const bIndex = POPULAR_SERVICE_SLUGS.indexOf(b.slug as (typeof POPULAR_SERVICE_SLUGS)[number]);
       return aIndex - bIndex;
-    });
+    })
+    .map((service) => ({
+      key: service.id,
+      name: servicePresentation(service.slug).publicName,
+      href: `/services/${service.slug}`,
+      priceCents: service.basePriceCents,
+      priceNote: null,
+    }));
+
+  const ceramicProducts = ceramicMenu.map((product) => ({
+    key: product.key,
+    name: product.name,
+    href: product.href,
+    priceCents: product.fromPriceCents,
+    priceNote: product.priceNote,
+  }));
 
   const visibleCategories = categories.filter((category) => category.slug !== "window-tinting");
-  // Ceramic protection is the owner's easiest upsell and the hardest product to
-  // find — it is one row inside a category on /services. It gets its own band
-  // on the home page, priced from the same menu resolver as everywhere else so
-  // the figure and its condition can never drift apart.
-  const ceramicProtection = ceramicMenu.find(
-    (product) => product.key === ceramicMenuKeyFor(CERAMIC_PROTECTION_SLUG),
-  );
 
   return (
     <>
@@ -152,77 +150,32 @@ export default async function HomePage() {
         <Container>
           <SectionHeading
             eyebrow="Most requested"
-            title="Start with the service that fits your vehicle."
-            subtitle="Four clear choices lead the menu. Each shows the essentials first, with full inclusions and vehicle-size pricing one click away."
+            title="Detailing, and long-term paint protection."
+            subtitle="Two places to start. Open either one for the full checklist, vehicle-size pricing and online booking."
             tone="light"
           />
           <div className="grid gap-6 md:grid-cols-2">
-            {popularCards.map((service, index) => (
-              <article key={service.id} className="group overflow-hidden rounded-[1.5rem] border border-[#DED8CE] bg-[#FFFEFB] shadow-[0_18px_50px_rgba(11,42,74,0.085)]">
-                <ServiceImage slug={service.slug} name={service.name} className="aspect-[16/9]" />
-                <div className="p-6 sm:p-8">
-                  <div className="flex flex-wrap items-start justify-between gap-4">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-600">Popular service {String(index + 1).padStart(2, "0")}</p>
-                      <h2 className="mt-3 font-display text-[2rem] leading-tight text-[#1C2026]">{service.name}</h2>
-                    </div>
-                    <p className="rounded-full bg-ink-900 px-4 py-2 text-sm font-semibold text-white">
-                      {service.basePriceCents !== null
-                        ? `From ${formatCents(service.basePriceCents)}`
-                        : "By quote"}
-                      {service.priceNote && <span aria-hidden="true">*</span>}
-                    </p>
-                  </div>
-                  <div className="mt-6"><CheckList items={service.highlights} tone="light" /></div>
-                  {service.priceNote && <p className="mt-4 text-xs leading-5 text-slate-500">*{service.priceNote}</p>}
-                  <div className="mt-7 flex flex-wrap gap-3 border-t border-[#E5E0D7] pt-5">
-                    <ButtonLink href={service.href}>View Service</ButtonLink>
-                    <ButtonLink href={`/book?service=${service.slug}`} variant="ghost" className="!text-ink-900 hover:!text-accent-600">Book Now →</ButtonLink>
-                  </div>
-                </div>
-              </article>
-            ))}
-          </div>
-          <div className="mt-10 text-center">
-            <Link href="/services" className="inline-flex border-b border-ink-900 pb-1 text-base font-semibold text-ink-900 transition-colors hover:border-accent-500 hover:text-accent-600">
-              Compare every service <span className="ml-2" aria-hidden="true">→</span>
-            </Link>
+            <MenuCard
+              imageSlug="complete-detail-engine"
+              eyebrow="Cleaning & detailing"
+              title="Our Detailing Packages"
+              blurb="A complete inside-and-out reset, a hand-washed full detail, or a focused interior clean — each priced for your vehicle size."
+              products={detailingProducts}
+              primary={{ href: "/services", label: "Compare Packages" }}
+              secondary={{ href: "/book", label: "Book a Detail →" }}
+            />
+            <MenuCard
+              imageSlug="ceramic-coating-crystal"
+              eyebrow="Long-term protection"
+              title="Ceramic Coating & Protection"
+              blurb="Our coating packages — Crystal, Pro and Max, with warranty options — or a single layer of ceramic protection on its own."
+              products={ceramicProducts}
+              primary={{ href: CERAMIC_COATING_HUB_PATH, label: "Explore Ceramic Coating" }}
+              secondary={{ href: CERAMIC_PROTECTION_PATH, label: "Ceramic Protection →" }}
+            />
           </div>
         </Container>
       </section>
-
-      {ceramicProtection && (
-        <section className="surface-light pb-20 sm:pb-28">
-          <Container>
-            <div className="grid overflow-hidden rounded-[1.5rem] border border-accent-400/35 bg-ink-900 lg:grid-cols-[1.05fr_0.95fr]">
-              <div className="relative min-h-64 lg:min-h-full">
-                <Image src="/images/services/ceramic-coating.png" alt="Gloved hands applying a ceramic layer to prepared paint" fill sizes="(min-width: 1024px) 50vw, 100vw" className="object-cover" />
-                <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(6,26,44,0.35)_0%,rgba(6,26,44,0.9)_100%)] lg:bg-[linear-gradient(90deg,transparent_0%,rgba(11,42,74,0.85)_100%)]" />
-              </div>
-              <div className="flex flex-col justify-center p-8 sm:p-12">
-                <p className="text-xs font-semibold uppercase tracking-[0.22em] text-accent-300">Add protection to your detail</p>
-                <h2 className="mt-4 font-display text-[2.4rem] leading-tight text-white">{ceramicProtection.name}</h2>
-                <p className="mt-4 text-base leading-7 text-ink-300">{ceramicProtection.shortDescription}</p>
-                <p className="mt-6 flex flex-wrap items-baseline gap-3">
-                  <span className="font-display text-4xl text-white">
-                    From {formatCents(ceramicProtection.fromPriceCents)}
-                    {ceramicProtection.priceNote && <span aria-hidden="true" className="align-super text-xl text-accent-300">*</span>}
-                  </span>
-                  <span className="text-sm text-ink-400">plus {settings.taxLabel}</span>
-                </p>
-                {/* The conditional price never travels without its condition. */}
-                {ceramicProtection.priceNote && (
-                  <p className="mt-2 text-xs leading-5 text-ink-400">*{ceramicProtection.priceNote}</p>
-                )}
-                <div className="mt-7 flex flex-wrap gap-3">
-                  <ButtonLink href={ceramicProtection.href}>See Ceramic Protection</ButtonLink>
-                  <ButtonLink href={`/book?service=${CERAMIC_PROTECTION_SLUG}`} variant="outline">Book It</ButtonLink>
-                </div>
-              </div>
-            </div>
-          </Container>
-        </section>
-      )}
 
       <section className="relative overflow-hidden bg-ink-900 py-20 sm:py-28">
         <div className="pointer-events-none absolute -right-40 top-0 size-[32rem] rounded-full border border-accent-400/10" />
@@ -330,6 +283,76 @@ export default async function HomePage() {
         </Container>
       </section>
     </>
+  );
+}
+
+/**
+ * One half of the menu: what the group is, the products inside it, and the
+ * two ways in. Both cards render from this so the detailing half and the
+ * ceramic half cannot drift into looking like different kinds of offer.
+ */
+function MenuCard({
+  imageSlug,
+  eyebrow,
+  title,
+  blurb,
+  products,
+  primary,
+  secondary,
+}: {
+  imageSlug: string;
+  eyebrow: string;
+  title: string;
+  blurb: string;
+  products: {
+    key: string;
+    name: string;
+    href: string;
+    priceCents: number | null;
+    /** Condition the price depends on. Never rendered apart from the price. */
+    priceNote: string | null;
+  }[];
+  primary: { href: string; label: string };
+  secondary: { href: string; label: string };
+}) {
+  const notes = products.filter((product) => product.priceNote);
+  return (
+    <article className="group flex flex-col overflow-hidden rounded-[1.5rem] border border-[#DED8CE] bg-[#FFFEFB] shadow-[0_18px_50px_rgba(11,42,74,0.085)]">
+      <ServiceImage slug={imageSlug} name={title} className="aspect-[16/9]" />
+      <div className="flex flex-1 flex-col p-6 sm:p-8">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-600">{eyebrow}</p>
+        <h2 className="mt-3 font-display text-[2rem] leading-tight text-[#1C2026]">{title}</h2>
+        <p className="mt-4 text-base leading-7 text-slate-600">{blurb}</p>
+        <ul className="mt-6 divide-y divide-[#ECE7DE] border-y border-[#ECE7DE]">
+          {products.map((product) => (
+            <li key={product.key}>
+              <Link
+                href={product.href}
+                className="flex items-center justify-between gap-4 py-3.5 transition-colors hover:text-accent-600"
+              >
+                <span className="font-semibold text-ink-900">{product.name}</span>
+                <span className="shrink-0 text-sm font-semibold text-slate-600">
+                  {product.priceCents !== null ? `From ${formatCents(product.priceCents)}` : "By quote"}
+                  {product.priceNote && <span aria-hidden="true">*</span>}
+                </span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+        {/* A conditional price never appears without the condition beside it. */}
+        {notes.map((product) => (
+          <p key={product.key} className="mt-4 text-xs leading-5 text-slate-500">
+            *{product.priceNote}
+          </p>
+        ))}
+        <div className="mt-auto flex flex-wrap gap-3 pt-7">
+          <ButtonLink href={primary.href}>{primary.label}</ButtonLink>
+          <ButtonLink href={secondary.href} variant="ghost" className="!text-ink-900 hover:!text-accent-600">
+            {secondary.label}
+          </ButtonLink>
+        </div>
+      </div>
+    </article>
   );
 }
 

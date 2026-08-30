@@ -7,6 +7,7 @@ import { priceBooking, PricingError } from "@/lib/pricing";
 import { isFirstTimeDetailCustomer, resolveActivePromotion } from "@/lib/promotions";
 import { getAvailableSlots } from "@/lib/booking/availability";
 import { createAppointment, BookingError, OfferChangedError } from "@/lib/booking/create";
+import { appointmentWhenLabel } from "@/lib/appointment-time";
 import { sendMessageTemplate } from "@/lib/messaging";
 import { formatCents } from "@/lib/money";
 import { formatInZone } from "@/lib/tz";
@@ -98,7 +99,12 @@ const bookingInputSchema = z.object({
   addonIds: z.array(z.string()).max(10),
   vehicleCategory: z.enum(VEHICLE_CATEGORIES),
   dateISO: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  startMs: z.number().int().positive(),
+  /**
+   * Absent for a service the shop schedules by hand — the customer picked a
+   * date and we will call them about the time. Present or not, the server
+   * decides: a coating booked with a start time is still booked date-only.
+   */
+  startMs: z.number().int().positive().optional(),
   customer: z.object({
     firstName: z.string().trim().min(1).max(100),
     lastName: z.string().trim().min(1).max(100),
@@ -131,6 +137,8 @@ export type BookingResult =
       appointmentId: string;
       status: string;
       whenLabel: string;
+      /** The customer booked a date and the shop owes them a time. */
+      timeToBeConfirmed: boolean;
       totalLabel: string;
       depositLabel: string | null;
       depositUrl: string | null;
@@ -209,7 +217,7 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
       vehicle: input.vehicle,
       pricing,
       dateISO: input.dateISO,
-      startMs: input.startMs,
+      startMs: input.startMs ?? null,
       customerNotes: input.customerNotes,
       attribution: promo
         ? {
@@ -227,13 +235,12 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
       promo,
     });
 
-    const whenLabel = formatInZone(new Date(input.startMs), settings.timezone, {
-      weekday: "long",
-      month: "long",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-    });
+    // Formatted from what was stored, not from what was submitted: a coating
+    // is booked date-only whatever start time the request carried, and the
+    // customer must be told the same thing the appointment record says.
+    const dateLabelOptions = { weekday: "long", month: "long", day: "numeric" } as const;
+    const whenLabel = appointmentWhenLabel(result, settings.timezone, dateLabelOptions);
+    const dateLabel = formatInZone(result.startsAt, settings.timezone, dateLabelOptions);
 
     let depositUrl: string | null = null;
     let delivery: "email" | "sms" | null = null;
@@ -256,8 +263,11 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
           variables: {
             businessName: settings.businessName,
             firstName: input.customer.firstName,
-            date: whenLabel,
-            time: "",
+            // The template reads "on {{date}} at {{time}}". A timed booking has
+            // always carried the whole thing in {{date}}; a date-only one puts
+            // the promise to call where the time would have been.
+            date: result.timeToBeConfirmed ? dateLabel : whenLabel,
+            time: result.timeToBeConfirmed ? "a time we will confirm with you" : "",
             services: pricing.lines.map((l) => l.description).join(", "),
             vehicle: `${input.vehicle.make} ${input.vehicle.model}`,
             // Empty when no offer applied, so the template renders cleanly
@@ -292,6 +302,7 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
       appointmentId: result.appointmentId,
       status: result.status,
       whenLabel,
+      timeToBeConfirmed: result.timeToBeConfirmed,
       totalLabel: formatCents(pricing.totalCents),
       depositLabel:
         pricing.depositRequiredCents > 0 ? formatCents(pricing.depositRequiredCents) : null,

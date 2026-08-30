@@ -7,6 +7,7 @@ import { roleHas } from "@/lib/auth/permissions";
 import { getAttentionQueue } from "@/lib/attention";
 import { getBooksSnapshot, listUnconfirmedBills } from "@/lib/books";
 import { getSettings } from "@/lib/settings";
+import { appointmentTimeLabel } from "@/lib/appointment-time";
 import { formatCents } from "@/lib/money";
 import { formatInZone, zonedToUtc } from "@/lib/tz";
 import type { StaffRole } from "@/lib/types";
@@ -198,7 +199,7 @@ export default async function AdminDashboard() {
                 return (
                   <tr key={a.id} className="border-t border-ink-800 hover:bg-ink-900/40">
                     <td className="px-4 py-3 text-white">
-                      {formatInZone(a.startsAt, tz, { hour: "numeric", minute: "2-digit" })}
+                      {appointmentTimeLabel(a, tz)}
                     </td>
                     <td className="px-4 py-3">
                       <Link href={`/admin/appointments/${a.id}`} className="text-accent-300 hover:underline">

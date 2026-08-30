@@ -15,7 +15,7 @@ async function loadPublicHomeCatalog() {
         inArray(schema.services.slug, [...POPULAR_SERVICE_SLUGS]),
       ))
       .orderBy(asc(schema.services.sort))
-      .limit(4),
+      .limit(POPULAR_SERVICE_SLUGS.length),
     db()
       .select()
       .from(schema.serviceCategories)

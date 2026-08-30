@@ -1,8 +1,15 @@
+/**
+ * The detailing packages the public pages lead with, in the order they appear.
+ *
+ * Ceramic is deliberately absent: it is presented as its own group of two
+ * products by `resolveCeramicMenu`, on the home page and on `/services` alike
+ * (DECISIONS.md #28), so a coating package listed here would appear twice and
+ * under the wrong name.
+ */
 export const POPULAR_SERVICE_SLUGS = [
   "complete-detail-engine",
   "the-works",
   "interior-detail",
-  "ceramic-coating-crystal",
 ] as const;
 
 export type ServicePresentation = {

@@ -58,6 +58,29 @@ export function isCeramicCoatingSlug(slug: string): slug is CeramicCoatingSlug {
 }
 
 /**
+ * Services the customer books by DATE only, with the shop arranging the time.
+ *
+ * A coating occupies most of a working day and the real start depends on how
+ * the paint looks once it is in the bay, so the honest answer to "what time?"
+ * is a phone call, not a slot picker. Booking one therefore reserves nothing:
+ * the shop can take as many coating dates as it wants and sequence them by
+ * hand, and a coating never blocks a detail from being booked that morning.
+ * Enforced server-side (`createAppointmentInTransaction`), not in the wizard.
+ */
+export function isDateOnlyBookingSlug(slug: string): boolean {
+  return isCeramicCoatingSlug(slug);
+}
+
+/** Shown on the booking step that asks a date-only service for its date. */
+export const DATE_ONLY_BOOKING_NOTICE =
+  "Choose the day that suits you. A ceramic coating takes most of a working day, so we arrange the " +
+  "drop-off time with you directly — we will contact you to confirm it once your booking comes through.";
+
+/** The same promise, one line, for the summary and the confirmation screen. */
+export const DATE_ONLY_BOOKING_NOTICE_SHORT =
+  "We will contact you to arrange the drop-off time for this date.";
+
+/**
  * Shown wherever a ceramic price is quoted before the paint has been seen.
  *
  * Paint correction is NEVER folded into a coating price. If enhancement or
