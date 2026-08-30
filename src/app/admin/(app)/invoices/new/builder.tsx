@@ -26,7 +26,14 @@ type ServiceOption = {
   priceDeltaByCategory: Record<string, number>;
   addonIds: string[];
 };
-type AddonOption = { id: string; name: string; priceCents: number; active: boolean };
+type AddonOption = {
+  id: string;
+  name: string;
+  priceCents: number;
+  active: boolean;
+  /** Per-vehicle-category deltas, same meaning as a service's. */
+  priceDeltaByCategory: Record<string, number>;
+};
 
 /** A selected catalog item; `override` is a staff-entered price in dollars. */
 type Picked = { quantity: number; override: string };
@@ -100,6 +107,18 @@ export function NewInvoiceBuilder({
     return service.basePriceCents + delta;
   }
 
+  /**
+   * The same rule for an add-on. This has to exist: the server prices add-ons
+   * for the vehicle when it builds the invoice, so quoting the base price in
+   * the grid meant the figure staff read here disagreed with the invoice they
+   * were about to create — and inviting them to "correct" it with an override
+   * would have locked in the wrong price for real.
+   */
+  function addonPrice(addon: AddonOption): number {
+    const delta = vehicleCategory ? (addon.priceDeltaByCategory[vehicleCategory] ?? 0) : 0;
+    return addon.priceCents + delta;
+  }
+
   // Only add-ons linked to a chosen service can be billed — same rule the
   // booking flow enforces server-side.
   const eligibleAddons = useMemo(() => {
@@ -131,7 +150,7 @@ export function NewInvoiceBuilder({
     for (const [id, picked] of Object.entries(pickedAddons)) {
       const addon = addons.find((a) => a.id === id);
       if (!addon) continue;
-      const unit = picked.override.trim() ? toCents(picked.override) : addon.priceCents;
+      const unit = picked.override.trim() ? toCents(picked.override) : addonPrice(addon);
       subtotal += unit * picked.quantity;
     }
     for (const line of customLines) {
@@ -445,7 +464,7 @@ export function NewInvoiceBuilder({
                         className="accent-accent-400"
                       />
                       {addon.name}
-                      <span className="ml-auto text-ink-400">+{money(addon.priceCents)}</span>
+                      <span className="ml-auto text-ink-400">+{money(addonPrice(addon))}</span>
                     </label>
                     {picked && (
                       <div className="mt-3 flex items-end gap-2">
@@ -468,7 +487,7 @@ export function NewInvoiceBuilder({
                           <input
                             className={inputClass}
                             inputMode="decimal"
-                            placeholder={(addon.priceCents / 100).toFixed(2)}
+                            placeholder={(addonPrice(addon) / 100).toFixed(2)}
                             value={picked.override}
                             onChange={(e) =>
                               setPickedAddons((prev) => ({

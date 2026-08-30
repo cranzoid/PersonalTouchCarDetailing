@@ -85,7 +85,7 @@ const CATALOG: { category: string; slug: string; description: string; services: 
       // The three ceramic coating packages. Durations fit inside the 9-5 day
       // once the 15+15 setup/cleanup buffers are added — over that, the slot
       // engine can never offer an appointment at all.
-      { name: "Ceramic Coating - Crystal", slug: "ceramic-coating-crystal", short: "Vehicle wash, paint preparation and ceramic coating application.", priceCents: 39900, durationMin: 300, mode: "bookable", featured: true, largeVehicleDeltaCents: 2000, largeVehicleDeltaMin: 30 },
+      { name: "Ceramic Coating - Crystal", slug: "ceramic-coating-crystal", short: "Vehicle wash, paint preparation and ceramic coating application.", priceCents: 39900, durationMin: 300, mode: "bookable", featured: true, largeVehicleDeltaCents: 10000, largeVehicleDeltaMin: 30 },
       { name: "Ceramic Coating - Pro", slug: "ceramic-coating-pro", short: "A higher-grade ceramic coating with a six-year warranty.", priceCents: 99900, durationMin: 420, mode: "bookable", largeVehicleDeltaCents: 10000 },
       { name: "Ceramic Coating - Max", slug: "ceramic-coating-max", short: "Our longest-lasting ceramic coating, with a premium top layer and a ten-year warranty.", priceCents: 139900, durationMin: 450, mode: "bookable", largeVehicleDeltaCents: 10000 },
       { name: "Paint Protection Film", slug: "paint-protection-film", short: "Self-healing film for high-impact areas or full panels.", priceCents: null, durationMin: 480, mode: "inspection_required", photosRequired: true },

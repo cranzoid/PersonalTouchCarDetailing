@@ -53,7 +53,7 @@ async function seed() {
     { id: PROTECTION, categoryId: "cat_test_ceramic", name: "Ceramic Protection - Standalone", slug: CERAMIC_PROTECTION_SLUG, basePriceCents: 19900, baseDurationMin: 120, bookingMode: "bookable" },
   ]);
   await db().insert(schema.serviceVehicleAdjustments).values([
-    { id: "adj_test_crystal", serviceId: CRYSTAL, vehicleCategory: "suv_large", priceDeltaCents: 2000, durationDeltaMin: 30 },
+    { id: "adj_test_crystal", serviceId: CRYSTAL, vehicleCategory: "suv_large", priceDeltaCents: 10000, durationDeltaMin: 30 },
     { id: "adj_test_protection", serviceId: PROTECTION, vehicleCategory: "suv_large", priceDeltaCents: 10000, durationDeltaMin: 30 },
   ]);
   await db().insert(schema.addons).values([
@@ -191,7 +191,7 @@ describe("ceramic coating packages", () => {
       settings,
     });
     expect(sedan.subtotalCents).toBe(39900);
-    expect(suv.subtotalCents).toBe(41900);
+    expect(suv.subtotalCents).toBe(49900);
     expect(suv.durationMin).toBe(330);
   });
 
@@ -302,5 +302,45 @@ describe("public menu presentation", () => {
     }
     expect(ceramicMenuLinkFor(CERAMIC_PROTECTION_SLUG)?.name).toBe("Ceramic Protection");
     expect(ceramicMenuLinkFor(ULTIMATE_DETAIL_SLUG)).toBeUndefined();
+  });
+});
+
+describe("invoice pricing agrees with what staff are shown", () => {
+  beforeEach(seed);
+
+  /**
+   * The invoice builder quotes a price in the grid and the server resolves one
+   * when the invoice is saved. When those disagreed, staff read $120 for an
+   * SUV, saved, and got $199 — and the obvious "fix" was to type 120 into the
+   * override, which would have made the under-charge real.
+   *
+   * This asserts the server side of that contract. The grid computes
+   * base + priceDeltaByCategory, which is the same arithmetic.
+   */
+  it("resolves the add-on for the invoice's vehicle, not the base price", async () => {
+    const sedan = await resolveCatalogPrices({
+      serviceIds: [ULTIMATE],
+      addonIds: [CERAMIC_ADDON],
+      vehicleCategory: "sedan",
+    });
+    const suv = await resolveCatalogPrices({
+      serviceIds: [ULTIMATE],
+      addonIds: [CERAMIC_ADDON],
+      vehicleCategory: "suv_large",
+    });
+    expect(sedan.addons.get(CERAMIC_ADDON)?.priceCents).toBe(12000);
+    expect(suv.addons.get(CERAMIC_ADDON)?.priceCents).toBe(19900);
+    // The service on the same invoice already moved; the add-on must too, or
+    // one line on the document follows the vehicle and the other does not.
+    expect(sedan.services.get(ULTIMATE)?.priceCents).toBe(20000);
+  });
+
+  it("prices Crystal at the owner-confirmed large-vehicle figure", async () => {
+    const suv = await resolveCatalogPrices({
+      serviceIds: [CRYSTAL],
+      addonIds: [],
+      vehicleCategory: "suv_large",
+    });
+    expect(suv.services.get(CRYSTAL)?.priceCents).toBe(49900);
   });
 });

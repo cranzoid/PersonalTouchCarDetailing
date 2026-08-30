@@ -16,7 +16,8 @@ export default async function NewInvoicePage({
   // server so the client never needs a Suspense boundary for useSearchParams.
   const { customerId, vehicleId } = await searchParams;
   const settings = await getSettings();
-  const [customers, vehicles, categories, services, adjustments, addonLinks, addons] = await Promise.all([
+  const [customers, vehicles, categories, services, adjustments, addonLinks, addons, addonAdjustments] =
+    await Promise.all([
     db()
       .select()
       .from(schema.customers)
@@ -30,6 +31,7 @@ export default async function NewInvoicePage({
     db().select().from(schema.serviceVehicleAdjustments),
     db().select().from(schema.serviceAddons),
     db().select().from(schema.addons).orderBy(asc(schema.addons.sort)),
+    db().select().from(schema.addonVehicleAdjustments),
   ]);
 
   const categoryNames = new Map(categories.map((c) => [c.id, c.name]));
@@ -76,6 +78,14 @@ export default async function NewInvoicePage({
           name: a.name,
           priceCents: a.priceCents,
           active: a.active,
+          // Add-ons take a vehicle-size delta exactly as services do above.
+          // Without this the grid quoted the sedan price for every vehicle,
+          // while the invoice the server built used the real one.
+          priceDeltaByCategory: Object.fromEntries(
+            addonAdjustments
+              .filter((adj) => adj.addonId === a.id)
+              .map((adj) => [adj.vehicleCategory, adj.priceDeltaCents]),
+          ),
         }))}
         taxRateBp={settings.taxRateBp}
         taxLabel={settings.taxLabel}
