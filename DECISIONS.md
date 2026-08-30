@@ -765,8 +765,11 @@ scaffolding for content that does not exist yet.
   only closes when you click the summary a second time, so the panel followed
   the customer around the page. It is now a small client component that closes
   on pointer leave, outside click, Escape, blur-out and navigation.
-- **Saturday closes at 6pm**, corrected by migration for open Saturdays only, so
-  a shop that has since closed Saturdays in Admin stays closed.
+- **Saturday is 9am–6pm**, corrected by migration for open Saturdays only, so a
+  shop that has since closed Saturdays in Admin stays closed. Both ends are set
+  rather than the one that looked wrong in the seed: the live row had already
+  been edited in Admin, so a migration written against the seed's values moved
+  nothing. Check the row, not the seed, before writing a data migration.
 
 **Revisit when:** the shop starts quoting commercial work from a rate card. That
 is a second price list keyed by vehicle class, not a delta on the sedan price.

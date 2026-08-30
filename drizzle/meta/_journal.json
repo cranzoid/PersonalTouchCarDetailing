@@ -127,6 +127,13 @@
       "when": 1788225373197,
       "tag": "0017_protection_delta_and_saturday_hours",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788228973197,
+      "tag": "0018_saturday_opens_at_nine",
+      "breakpoints": true
     }
   ]
 }
