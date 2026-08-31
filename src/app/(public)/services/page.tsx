@@ -122,7 +122,10 @@ export default async function ServicesPage() {
               tone="light"
             />
             <div className="grid gap-6 md:grid-cols-2">
-              {ceramicMenu.map((product) => (
+              {/* Protection first, then coating: this section leads with protection
+                  even though the shared ceramic menu (home page included) leads
+                  with coating. Order is local to this card grid only. */}
+              {[...ceramicMenu].sort((a, b) => Number(a.key === "ceramic-coating") - Number(b.key === "ceramic-coating")).map((product) => (
                 <article key={product.key} className="flex flex-col rounded-[1.5rem] border border-[#DED8CE] bg-[#FFFEFB] p-6 shadow-[0_18px_50px_rgba(11,42,74,0.085)] sm:p-8">
                   <div className="flex flex-wrap items-start justify-between gap-4">
                     <h2 className="font-display text-[2rem] leading-tight text-ink-900">{product.name}</h2>
