@@ -7,6 +7,15 @@ import { useEffect, useRef, useState } from "react";
 export type ServiceNavItem = { href: string; label: string; detail: string };
 
 /**
+ * A named group of services inside the menu — "Detailing", "Ceramic Coating".
+ *
+ * The menu used to be one flat list of five links, which asked a visitor to
+ * work out for themselves that an interior clean and a ceramic coating are
+ * different kinds of purchase. Grouping them says it before they read a word.
+ */
+export type ServiceNavGroup = { label: string; items: readonly ServiceNavItem[] };
+
+/**
  * The desktop Services dropdown.
  *
  * It used to be a bare `<details>`, which only closes when you click the
@@ -19,7 +28,14 @@ export type ServiceNavItem = { href: string; label: string; detail: string };
  * service and a hover-only menu is unusable on a trackpad-less setup. Keyboard
  * users get the same behaviour from the button.
  */
-export function ServicesMenu({ items }: { items: readonly ServiceNavItem[] }) {
+export function ServicesMenu({
+  overview,
+  groups,
+}: {
+  /** The "All services" row, pinned above the groups. */
+  overview: ServiceNavItem;
+  groups: readonly ServiceNavGroup[];
+}) {
   const [open, setOpen] = useState(false);
   const wrapper = useRef<HTMLDivElement>(null);
   const pathname = usePathname();
@@ -71,20 +87,37 @@ export function ServicesMenu({ items }: { items: readonly ServiceNavItem[] }) {
         </span>
       </button>
       {open && (
-        <div className="absolute left-0 top-12 w-80 overflow-hidden rounded-2xl border border-[#D8D1C4] bg-[#FFFEFB] p-2 shadow-[0_22px_60px_rgba(3,15,27,0.2)]">
-          {items.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              onClick={() => setOpen(false)}
-              className="block rounded-xl px-4 py-3 transition hover:bg-[#F2EDE3]"
-            >
-              <span className="block text-sm font-semibold text-[#0B2A4A]">{item.label}</span>
-              <span className="mt-0.5 block text-xs text-[#6B7280]">{item.detail}</span>
-            </Link>
-          ))}
+        <div className="absolute left-0 top-12 w-[36rem] overflow-hidden rounded-2xl border border-[#D8D1C4] bg-[#FFFEFB] p-2 shadow-[0_22px_60px_rgba(3,15,27,0.2)]">
+          <MenuLink item={overview} onNavigate={() => setOpen(false)} />
+          {/* The two groups sit side by side: stacked, the second heading falls
+              below the fold of a laptop screen and is never seen. */}
+          <div className="mt-1 grid grid-cols-2 gap-1 border-t border-[#E5E0D7] pt-2">
+            {groups.map((group) => (
+              <div key={group.label}>
+                <p className="px-4 pb-1 pt-2 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-[#8A93A0]">
+                  {group.label}
+                </p>
+                {group.items.map((item) => (
+                  <MenuLink key={item.href} item={item} onNavigate={() => setOpen(false)} />
+                ))}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
+  );
+}
+
+function MenuLink({ item, onNavigate }: { item: ServiceNavItem; onNavigate: () => void }) {
+  return (
+    <Link
+      href={item.href}
+      onClick={onNavigate}
+      className="block rounded-xl px-4 py-2.5 transition hover:bg-[#F2EDE3]"
+    >
+      <span className="block text-sm font-semibold text-[#0B2A4A]">{item.label}</span>
+      <span className="mt-0.5 block text-xs text-[#6B7280]">{item.detail}</span>
+    </Link>
   );
 }

@@ -38,6 +38,12 @@ export type WizardService = {
    * slug; the wizard only decides what to render, never what is allowed.
    */
   dateOnly: boolean;
+  /**
+   * Suppresses the "approx. Xh of work" line in the estimate. A coating is
+   * sequenced by hand across the day, so its hours describe the shop's
+   * schedule, not a collection time the customer can plan around.
+   */
+  hideDuration: boolean;
 };
 
 export type WizardAddon = {
@@ -159,6 +165,24 @@ export function BookingWizard({
     () => (service ? addons.filter((a) => service.addonIds.includes(a.id)) : []),
     [service, addons],
   );
+  /**
+   * The service list, cut into its catalogue categories.
+   *
+   * The step used to be one undifferentiated stack of nine cards in catalogue
+   * order, so a $399 coating sat between two detailing packages and the
+   * customer had to read every card to find the group they came for. The
+   * server hands the services over already sorted by category, so consecutive
+   * runs are the groups — no second source of ordering to keep in step.
+   */
+  const serviceGroups = useMemo(() => {
+    const groups: { name: string; services: WizardService[] }[] = [];
+    for (const s of services) {
+      const current = groups[groups.length - 1];
+      if (current && current.name === s.categoryName) current.services.push(s);
+      else groups.push({ name: s.categoryName, services: [s] });
+    }
+    return groups;
+  }, [services]);
 
   /** Advisory preview only — the server recomputes authoritative pricing. */
   const preview = useMemo(() => {
@@ -326,47 +350,57 @@ export function BookingWizard({
         </ol>
 
         {step === 0 && (
-          <div className="space-y-3">
-            <h2 id={`${idPrefix}-booking-step`} className="mb-5 text-xl font-semibold text-white">Choose your service</h2>
-            {services.map((s) => (
-              <button
-                type="button"
-                key={s.id}
-                aria-pressed={serviceId === s.id}
-                onClick={() => {
-                  setServiceId(s.id);
-                  // Carry over only what this service actually offers. The
-                  // discounted ceramic protection price is linked to one
-                  // package, so switching away from it must remove — and say
-                  // that it removed — the selection rather than reprice it
-                  // silently.
-                  const kept = selectedAddons.filter((id) => s.addonIds.includes(id));
-                  setDroppedAddons(
-                    selectedAddons
-                      .filter((id) => !s.addonIds.includes(id))
-                      .map((id) => addons.find((a) => a.id === id)?.name)
-                      .filter((name): name is string => !!name),
-                  );
-                  setSelectedAddons(kept);
-                  setSlots(null);
-                  setStartMs(null);
-                  setStep(1);
-                }}
-                className={`min-h-11 w-full rounded-2xl border p-5 text-left transition-all ${focusRing} ${
-                  serviceId === s.id
-                    ? "border-accent-400 bg-[#0B2A4A]/80 shadow-lg shadow-black/20"
-                    : "border-ink-700 bg-ink-950/45 hover:-translate-y-0.5 hover:border-accent-500/60 hover:bg-[#0B2A4A]/35"
-                }`}
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-xs uppercase tracking-wider text-ink-500">{s.categoryName}</p>
-                    <p className="font-semibold text-white">{s.name}</p>
-                    <p className="mt-1 text-sm text-ink-400">{s.shortDescription}</p>
-                  </div>
-                  <span className="shrink-0 text-accent-300">From {formatCents(s.basePriceCents)}</span>
-                </div>
-              </button>
+          <div className="space-y-8">
+            <h2 id={`${idPrefix}-booking-step`} className="text-xl font-semibold text-white">Choose your service</h2>
+            {serviceGroups.map((group) => (
+              <section key={group.name} aria-label={group.name || undefined} className="space-y-3">
+                {group.name && (
+                  <h3 className="text-xs font-semibold uppercase tracking-[0.18em] text-accent-300">
+                    {group.name}
+                  </h3>
+                )}
+                {group.services.map((s) => (
+                  <button
+                    type="button"
+                    key={s.id}
+                    aria-pressed={serviceId === s.id}
+                    onClick={() => {
+                      setServiceId(s.id);
+                      // Carry over only what this service actually offers. The
+                      // discounted ceramic protection price is linked to one
+                      // package, so switching away from it must remove — and say
+                      // that it removed — the selection rather than reprice it
+                      // silently.
+                      const kept = selectedAddons.filter((id) => s.addonIds.includes(id));
+                      setDroppedAddons(
+                        selectedAddons
+                          .filter((id) => !s.addonIds.includes(id))
+                          .map((id) => addons.find((a) => a.id === id)?.name)
+                          .filter((name): name is string => !!name),
+                      );
+                      setSelectedAddons(kept);
+                      setSlots(null);
+                      setStartMs(null);
+                      setStep(1);
+                    }}
+                    className={`min-h-11 w-full rounded-2xl border p-5 text-left transition-all ${focusRing} ${
+                      serviceId === s.id
+                        ? "border-accent-400 bg-[#0B2A4A]/80 shadow-lg shadow-black/20"
+                        : "border-ink-700 bg-ink-950/45 hover:-translate-y-0.5 hover:border-accent-500/60 hover:bg-[#0B2A4A]/35"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between gap-4">
+                      {/* The category is the group heading now, so the card carries
+                          the service and nothing that repeats above it. */}
+                      <div>
+                        <p className="font-semibold text-white">{s.name}</p>
+                        <p className="mt-1 text-sm text-ink-400">{s.shortDescription}</p>
+                      </div>
+                      <span className="shrink-0 text-accent-300">From {formatCents(s.basePriceCents)}</span>
+                    </div>
+                  </button>
+                ))}
+              </section>
             ))}
           </div>
         )}
@@ -681,12 +715,14 @@ export function BookingWizard({
                   {service.conditionNotice}
                 </p>
               )}
+              {/* Hours of work read like a collection time, which is a promise
+                  a hand-sequenced coating day cannot keep — so a coating shows
+                  the price line alone and the arrangement promise below it. */}
               <p className="pt-2 text-xs text-ink-500">
-                Approx. {Math.floor(preview.duration / 60)}h{preview.duration % 60 ? ` ${preview.duration % 60}m` : ""} of work.
+                {!service.hideDuration &&
+                  `Approx. ${Math.floor(preview.duration / 60)}h${preview.duration % 60 ? ` ${preview.duration % 60}m` : ""} of work. `}
                 Final price confirmed at drop-off.
               </p>
-              {/* The estimate shows hours of work, which reads like a start
-                  time unless the promise to arrange one sits beside it. */}
               {dateOnly && (
                 <p className="text-xs text-ink-500">{DATE_ONLY_BOOKING_NOTICE_SHORT}</p>
               )}

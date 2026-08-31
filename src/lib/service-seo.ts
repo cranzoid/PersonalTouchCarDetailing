@@ -78,7 +78,7 @@ export const SERVICE_SEO: Record<string, ServiceSeoContent> = {
       { question: "Does ceramic coating stop scratches or stone chips?", answer: "No. A coating helps with contamination and maintenance but is not a substitute for paint protection film against physical impacts." },
       { question: "Is paint correction included in the package price?", answer: "No. The package price covers the coating service for your vehicle category. If your paint needs enhancement or correction we quote it separately and wait for your approval before starting it." },
       { question: "Which package comes with a warranty?", answer: "Pro carries a six-year coating warranty and Max carries a ten-year coating warranty. Crystal is offered without a warranty." },
-      { question: "How long does the vehicle need to stay with you?", answer: "Crystal is booked as a five-hour appointment, Pro as seven hours and Max as seven and a half. The booking flow shows the exact time for your vehicle before you confirm." },
+      { question: "How long does the vehicle need to stay with you?", answer: "A coating takes most of a working day, so you book the date rather than a time slot and we contact you to arrange the drop-off. We confirm the collection time with you once we have seen the paint." },
     ],
     relatedServices: [
       { slug: "ceramic-protection", label: "Ceramic protection" },

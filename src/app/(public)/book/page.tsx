@@ -9,6 +9,7 @@ import {
   CERAMIC_CONDITION_DISCLAIMER_SHORT,
   CERAMIC_PROTECTION_ADDON_QUALIFIER,
   CERAMIC_PROTECTION_ADDON_SLUG,
+  hidesWorkDuration,
   isCeramicServiceSlug,
   isDateOnlyBookingSlug,
 } from "@/lib/ceramic";
@@ -53,9 +54,20 @@ export default async function BookPage({
     .orderBy(asc(schema.addons.sort));
 
   const categoryName = new Map(categories.map((c) => [c.id, c.name]));
+  // `services.sort` orders services WITHIN a category, so ordering by it alone
+  // interleaved the catalogue: ceramic protection, then Ultimate Detail, then
+  // a coating package, then Signature Detail. Sorting by the category first
+  // keeps each category's services together, which is what lets the wizard
+  // render them under one heading.
+  const categorySort = new Map(categories.map((c, index) => [c.id, index]));
 
   const wizardServices: WizardService[] = services
     .filter((s) => s.bookingMode === "bookable" && s.basePriceCents !== null)
+    .sort(
+      (a, b) =>
+        (categorySort.get(a.categoryId) ?? Number.MAX_SAFE_INTEGER) -
+          (categorySort.get(b.categoryId) ?? Number.MAX_SAFE_INTEGER) || a.sort - b.sort,
+    )
     .map((s) => ({
       id: s.id,
       slug: s.slug,
@@ -76,6 +88,9 @@ export default async function BookPage({
       // Same answer the booking transaction reaches from the same slug, so the
       // step the customer sees and the record that gets written cannot differ.
       dateOnly: isDateOnlyBookingSlug(s.slug),
+      // A coating's hours are a scheduling fact, not a promise to the
+      // customer — the same reason the booking is date-only.
+      hideDuration: hidesWorkDuration(s.slug),
     }));
 
   const wizardAddons: WizardAddon[] = addons.map((a) => ({

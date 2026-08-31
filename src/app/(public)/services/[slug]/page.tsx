@@ -18,6 +18,7 @@ import {
   CERAMIC_COATING_HUB_PATH,
   ceramicMenuLinkFor,
   coatingPackage,
+  hidesWorkDuration,
   isCeramicServiceSlug,
   warrantyLabel,
 } from "@/lib/ceramic";
@@ -378,9 +379,14 @@ export default async function ServiceDetailPage({
                 {warrantyLabel(coating.warrantyYears)}
               </p>
             )}
-            <p className="mt-1 text-sm text-ink-400">
-              Approx. {formatDuration(svc.baseDurationMin)} for a standard vehicle
-            </p>
+            {/* A coating never quotes hours: it is booked by date and the shop
+                arranges the drop-off, so the figure reads as a promise about
+                collection time that the day cannot keep. */}
+            {!hidesWorkDuration(svc.slug) && (
+              <p className="mt-1 text-sm text-ink-400">
+                Approx. {formatDuration(svc.baseDurationMin)} for a standard vehicle
+              </p>
+            )}
             <div className="mt-6 flex flex-col gap-2">
               {bookable ? (
                 <>

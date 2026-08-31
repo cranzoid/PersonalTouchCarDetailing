@@ -213,8 +213,11 @@ export default async function CeramicCoatingPage() {
                 <p className="mt-5 font-display text-4xl text-white">
                   {formatCents(service.basePriceCents!)}
                 </p>
+                {/* No duration: a coating is booked by date and sequenced by
+                    hand, so "approx. 5h" answered a question the customer was
+                    not being asked and read as a collection time. */}
                 <p className="mt-1 text-xs text-ink-500">
-                  for a coupe or sedan, before {settings.taxLabel} · approx. {formatDuration(service.baseDurationMin)}
+                  for a coupe or sedan, before {settings.taxLabel}
                 </p>
                 <ul className="mt-5 flex-1 space-y-2 text-sm leading-6 text-ink-300">
                   {content.includes.map((item) => <li key={item}>• {item}</li>)}
@@ -345,10 +348,4 @@ export default async function CeramicCoatingPage() {
       </Container>
     </>
   );
-}
-
-function formatDuration(minutes: number): string {
-  const hours = Math.floor(minutes / 60);
-  const remaining = minutes % 60;
-  return [hours ? `${hours}h` : "", remaining ? `${remaining}m` : ""].filter(Boolean).join(" ");
 }

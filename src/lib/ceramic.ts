@@ -71,6 +71,19 @@ export function isDateOnlyBookingSlug(slug: string): boolean {
   return isCeramicCoatingSlug(slug);
 }
 
+/**
+ * Services that never quote a working duration to a customer.
+ *
+ * The same fact that makes a coating date-only makes "approx. 7h of work" a
+ * misleading thing to print: the shop sequences coatings by hand across the
+ * day, cure time is not work time, and the figure was being read as "drop off
+ * at nine, collect at four". The duration column still drives scheduling and
+ * staffing internally — this hides it on customer-facing surfaces only.
+ */
+export function hidesWorkDuration(slug: string): boolean {
+  return isCeramicCoatingSlug(slug);
+}
+
 /** Shown on the booking step that asks a date-only service for its date. */
 export const DATE_ONLY_BOOKING_NOTICE =
   "Choose the day that suits you. A ceramic coating takes most of a working day, so we arrange the " +

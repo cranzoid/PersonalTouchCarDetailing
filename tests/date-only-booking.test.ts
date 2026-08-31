@@ -13,7 +13,7 @@ import {
   appointmentWhenLabel,
   TIME_TO_BE_CONFIRMED_LABEL,
 } from "../src/lib/appointment-time";
-import { isDateOnlyBookingSlug } from "../src/lib/ceramic";
+import { hidesWorkDuration, isDateOnlyBookingSlug } from "../src/lib/ceramic";
 
 /**
  * Ceramic coating is booked by DATE; the shop rings the customer to agree the
@@ -128,6 +128,17 @@ describe("date-only booking", () => {
     // Ceramic protection is a two-hour job that still fits an ordinary slot.
     expect(isDateOnlyBookingSlug("ceramic-protection")).toBe(false);
     expect(isDateOnlyBookingSlug("complete-detail-engine")).toBe(false);
+  });
+
+  it("quotes no working duration for a coating, and still quotes one elsewhere", () => {
+    // The hours behind a coating are a scheduling fact: the day is sequenced
+    // by hand, so printing "approx. 7h of work" beside the price reads as a
+    // collection time nobody promised.
+    for (const slug of ["ceramic-coating-crystal", "ceramic-coating-pro", "ceramic-coating-max"]) {
+      expect(hidesWorkDuration(slug)).toBe(true);
+    }
+    expect(hidesWorkDuration("ceramic-protection")).toBe(false);
+    expect(hidesWorkDuration("complete-detail-engine")).toBe(false);
   });
 
   it("books a coating against the date, holding no bay and no time", async () => {

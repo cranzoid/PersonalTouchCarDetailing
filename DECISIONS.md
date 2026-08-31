@@ -842,3 +842,37 @@ different kinds of thing.
 
 **Revisit when:** the shop sells a third kind of thing — paint correction as a
 priced package, say. That is a third card, not a longer list inside one of these.
+
+## 29. Two menus, one grouping — and a coating never quotes hours
+Three surfaces were listing services as one flat run and letting the catalogue's
+own ordering decide what a customer saw first.
+
+- **The Services dropdown is two groups behind one overview link.** "All
+  services" stays pinned at the top; below it sit "Detailing" and "Ceramic
+  Coating", side by side. The ceramic group names the two PRODUCTS (#25) —
+  ceramic coating and ceramic protection — never Crystal, Pro and Max: a
+  customer chooses between the products here and picks a package on the coating
+  page. The mobile menu renders the same two groups from the same constants.
+- **The booking step groups by catalogue category.** `services.sort` orders
+  services *within* a category, so ordering by it alone interleaved the
+  catalogue — ceramic protection, Ultimate Detail, a coating package, Signature
+  Detail — and asked the customer to read all nine cards to find the two they
+  came for. `/book` now sorts by category first and the wizard cuts consecutive
+  runs into sections, so the grouping has one source of ordering (the server)
+  rather than a second list to keep in step. The category moves off each card,
+  where it was only repeating its own heading.
+- **Ceramic coating quotes no working duration** — not on the packages page, not
+  on a package's own page, not in the booking estimate, and not in the SEO FAQ
+  that used to name five, seven and seven and a half hours. This follows from
+  #27: a coating is booked by date and sequenced by hand, so its hours describe
+  the shop's schedule, and printed beside a price they read as a collection time
+  nobody promised. `hidesWorkDuration` is the one predicate, sitting beside
+  `isDateOnlyBookingSlug` for the same set of slugs and the same reason. The
+  duration column is untouched — scheduling and staffing still need it.
+- **Ceramic protection still quotes its hours.** It is a two-hour job booked
+  into an ordinary slot, and blurring the two products is what #25 forbids.
+
+**Revisit when:** the nav groups stop matching the catalogue's own categories.
+The dropdown's two groups are hand-written because they are an editorial
+shortlist, not the whole menu; if the owner starts expecting Admin → Services to
+move them, they need to come from the category rows like the booking step does.

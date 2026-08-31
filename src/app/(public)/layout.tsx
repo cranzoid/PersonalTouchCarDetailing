@@ -33,12 +33,36 @@ const SECONDARY_NAV = [
   { href: "/faq", label: "FAQ" },
 ];
 
-const SERVICE_NAV = [
-  { href: "/services", label: "All services", detail: "Compare the complete menu" },
-  { href: "/services/complete-detail-engine", label: "Ultimate Detail", detail: "Our complete inside-and-out package" },
-  { href: "/services/the-works", label: "Signature Detail", detail: "Interior and exterior deep clean" },
-  { href: "/services/interior-detail", label: "Interior Detail", detail: "Deep cabin cleaning" },
-  { href: "/services/ceramic-coating", label: "Ceramic Coating", detail: "Crystal, Pro and Max" },
+// The Services menu is two groups behind one overview link. Detailing and
+// ceramic are different purchases — a cabin clean and a multi-year coating —
+// and a flat list of five asked the visitor to sort that out themselves. The
+// ceramic group names the two products (#25), never the coating packages: a
+// customer chooses between coating and protection here and picks Crystal, Pro
+// or Max on the coating page.
+const SERVICE_NAV_OVERVIEW = {
+  href: "/services",
+  label: "All services",
+  detail: "Compare the complete menu",
+};
+
+const SERVICE_NAV_GROUPS = [
+  {
+    label: "Detailing",
+    items: [
+      { href: "/services/complete-detail-engine", label: "Ultimate Detail", detail: "Inside, out and engine bay" },
+      { href: "/services/the-works", label: "Signature Detail", detail: "Interior and exterior deep clean" },
+      { href: "/services/interior-detail", label: "Interior Detail", detail: "Deep cabin cleaning" },
+      { href: "/services/wash-interior-refresh", label: "Wash & Interior Refresh", detail: "Our maintenance combo" },
+      { href: "/services/basic-car-wash", label: "Basic Car Wash", detail: "Hand wash, dry and mats" },
+    ],
+  },
+  {
+    label: "Ceramic Coating",
+    items: [
+      { href: "/services/ceramic-coating", label: "Ceramic Coating", detail: "Crystal, Pro and Max packages" },
+      { href: "/services/ceramic-protection", label: "Ceramic Protection", detail: "A single layer of protection" },
+    ],
+  },
 ];
 
 function BrandLogo({ footer = false }: { footer?: boolean }) {
@@ -121,7 +145,7 @@ export default async function PublicLayout({ children }: { children: ReactNode }
           </Link>
 
           <nav aria-label="Primary navigation" className="hidden items-center gap-1 lg:flex">
-            <ServicesMenu items={SERVICE_NAV} />
+            <ServicesMenu overview={SERVICE_NAV_OVERVIEW} groups={SERVICE_NAV_GROUPS} />
             {primaryNav.filter((item) => item.href !== "/services").map((item) => (
               <Link
                 key={item.href}
@@ -152,10 +176,20 @@ export default async function PublicLayout({ children }: { children: ReactNode }
                       Services <span aria-hidden="true" className="text-xs transition group-open:rotate-180">▾</span>
                     </summary>
                     <div className="mb-2 ml-3 border-l border-white/10 pl-2">
-                      {SERVICE_NAV.map((item) => (
-                        <Link key={item.href} href={item.href} className="block rounded-lg px-3 py-2 text-sm text-ink-300 hover:bg-white/5 hover:text-accent-300">
-                          {item.label}
-                        </Link>
+                      <Link href={SERVICE_NAV_OVERVIEW.href} className="block rounded-lg px-3 py-2 text-sm text-ink-300 hover:bg-white/5 hover:text-accent-300">
+                        {SERVICE_NAV_OVERVIEW.label}
+                      </Link>
+                      {SERVICE_NAV_GROUPS.map((group) => (
+                        <div key={group.label} className="mt-1">
+                          <p className="px-3 pb-1 pt-2 text-[0.68rem] font-semibold uppercase tracking-[0.16em] text-ink-500">
+                            {group.label}
+                          </p>
+                          {group.items.map((item) => (
+                            <Link key={item.href} href={item.href} className="block rounded-lg px-3 py-2 text-sm text-ink-300 hover:bg-white/5 hover:text-accent-300">
+                              {item.label}
+                            </Link>
+                          ))}
+                        </div>
                       ))}
                     </div>
                   </details>
