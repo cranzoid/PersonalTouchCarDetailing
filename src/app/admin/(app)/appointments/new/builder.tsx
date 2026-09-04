@@ -5,10 +5,12 @@ import { useRouter } from "next/navigation";
 import { formatCents } from "@/lib/money";
 import { localDateISO } from "@/lib/tz";
 import { VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
+import { SearchSelect } from "@/components/search-select";
 import { createManualAppointmentAction, getManualAppointmentSlotsAction } from "../actions";
 
-type CustomerOption = { id: string; label: string; contact: string };
-type VehicleOption = { id: string; customerId: string; label: string; category: string };
+/** `searchText` carries terms worth matching but not worth showing. */
+type CustomerOption = { id: string; label: string; contact: string; searchText?: string };
+type VehicleOption = { id: string; customerId: string; label: string; category: string; searchText?: string };
 type ServiceOption = { id: string; name: string; categoryName: string; basePriceCents: number; addonIds: string[] };
 type AddonOption = { id: string; name: string; priceCents: number };
 /** Dollars/minutes as typed; converted on submit so a half-typed price is not a crash. */
@@ -161,18 +163,29 @@ export function NewAppointmentBuilder({
         <section className="rounded-xl border border-ink-800 p-5">
           <h2 className="font-semibold text-white">1. Customer and vehicle</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <label className="text-sm text-ink-300">Customer
-              <select value={customerId} onChange={(event) => { setCustomerId(event.target.value); setVehicleId(""); resetAvailability(); }} className={`${inputClass} mt-1`}>
-                <option value="">Select customer…</option>
-                {customers.map((customer) => <option key={customer.id} value={customer.id}>{customer.label} · {customer.contact}</option>)}
-              </select>
-            </label>
-            <label className="text-sm text-ink-300">Vehicle
-              <select value={vehicleId} disabled={!customerId} onChange={(event) => { setVehicleId(event.target.value); resetAvailability(); }} className={`${inputClass} mt-1 disabled:opacity-50`}>
-                <option value="">Select vehicle…</option>
-                {customerVehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{vehicle.label}</option>)}
-              </select>
-            </label>
+            <div className="text-sm text-ink-300">Customer
+              <SearchSelect
+                label="Customer"
+                className="mt-1"
+                options={customers.map((customer) => ({ value: customer.id, label: customer.label, hint: customer.contact, searchText: customer.searchText }))}
+                value={customerId}
+                onChange={(next) => { setCustomerId(next); setVehicleId(""); resetAvailability(); }}
+                placeholder="Select customer…"
+                searchPlaceholder="Search name, company, email or phone"
+              />
+            </div>
+            <div className="text-sm text-ink-300">Vehicle
+              <SearchSelect
+                label="Vehicle"
+                className="mt-1"
+                options={customerVehicles.map((vehicle) => ({ value: vehicle.id, label: vehicle.label, searchText: vehicle.searchText }))}
+                value={vehicleId}
+                disabled={!customerId}
+                onChange={(next) => { setVehicleId(next); resetAvailability(); }}
+                placeholder="Select vehicle…"
+                searchPlaceholder="Search make, model, year or plate"
+              />
+            </div>
           </div>
           {customerId && customerVehicles.length === 0 && <p className="mt-3 text-sm text-amber-300">This customer has no vehicle. Add one from their customer record first.</p>}
           {selectedVehicle && <p className="mt-3 text-sm text-ink-400">Pricing category: <span className="text-white">{VEHICLE_CATEGORY_LABELS[selectedVehicle.category as VehicleCategory] ?? selectedVehicle.category}</span></p>}

@@ -12,11 +12,19 @@ import {
   vehiclePayload,
   type VehicleFormValues,
 } from "@/components/vehicle-dialog";
+import { SearchSelect } from "@/components/search-select";
 import { addCustomerVehicleAction } from "../../customers/actions";
 import { createManualInvoiceAction } from "../actions";
 
-type CustomerOption = { id: string; label: string; contact: string };
-type VehicleOption = { id: string; customerId: string; category: string; label: string };
+/** `searchText` carries terms worth matching but not worth showing. */
+type CustomerOption = { id: string; label: string; contact: string; searchText?: string };
+type VehicleOption = {
+  id: string;
+  customerId: string;
+  category: string;
+  label: string;
+  searchText?: string;
+};
 type ServiceOption = {
   id: string;
   name: string;
@@ -96,6 +104,18 @@ export function NewInvoiceBuilder({
   const knownVehicles = [...vehicles, ...addedVehicles];
   const customerVehicles = knownVehicles.filter((v) => v.customerId === customerId);
   const selectedVehicle = knownVehicles.find((v) => v.id === vehicleId);
+
+  const customerOptions = useMemo(
+    () => customers.map((c) => ({ value: c.id, label: c.label, hint: c.contact, searchText: c.searchText })),
+    [customers],
+  );
+  // Not memoised: this is one customer's vehicles, and `knownVehicles` is a
+  // fresh array every render anyway, so a memo would only ever miss.
+  const vehicleOptions = customerVehicles.map((v) => ({
+    value: v.id,
+    label: v.label,
+    searchText: v.searchText,
+  }));
   const vehicleCategory = selectedVehicle?.category ?? null;
 
   const money = (cents: number) => formatCents(cents, currency);
@@ -274,42 +294,31 @@ export function NewInvoiceBuilder({
         <section className="rounded-xl border border-ink-800 p-5">
           <h2 className="font-semibold text-white">1. Customer and vehicle</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <label className="block">
+            <div>
               <span className={labelClass}>Customer</span>
-              <select
-                className={inputClass}
+              <SearchSelect
+                label="Customer"
+                options={customerOptions}
                 value={customerId}
-                onChange={(e) => {
-                  setCustomerId(e.target.value);
+                onChange={(next) => {
+                  setCustomerId(next);
                   setVehicleId("");
                 }}
-                required
-              >
-                <option value="">Select customer…</option>
-                {customers.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.label} — {c.contact}
-                  </option>
-                ))}
-              </select>
-            </label>
+                placeholder="Select customer…"
+                searchPlaceholder="Search name, company, email or phone"
+              />
+            </div>
             <div>
-              <label className="block">
-                <span className={labelClass}>Vehicle (sets package pricing)</span>
-                <select
-                  className={inputClass}
-                  value={vehicleId}
-                  onChange={(e) => setVehicleId(e.target.value)}
-                  disabled={!customerId}
-                >
-                  <option value="">No vehicle</option>
-                  {customerVehicles.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              <span className={labelClass}>Vehicle (sets package pricing)</span>
+              <SearchSelect
+                label="Vehicle"
+                options={vehicleOptions}
+                value={vehicleId}
+                onChange={setVehicleId}
+                disabled={!customerId}
+                emptyOptionLabel="No vehicle"
+                searchPlaceholder="Search make, model, year or plate"
+              />
               <button
                 type="button"
                 onClick={() => {
