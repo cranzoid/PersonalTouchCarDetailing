@@ -3,7 +3,7 @@ import { db, schema } from "@/db";
 import { Container, SectionHeading } from "@/components/ui";
 import { getSettings } from "@/lib/settings";
 import { activePromotion } from "@/lib/promotions";
-import { BookingWizard, type WizardAddon, type WizardService } from "./wizard";
+import { BookingWizard, type WizardAddon, type WizardBundleOffer, type WizardService } from "./wizard";
 import { pageMetadata, SEO_PAGES } from "@/lib/seo";
 import {
   CERAMIC_CONDITION_DISCLAIMER_SHORT,
@@ -25,9 +25,9 @@ export default async function BookPage({
   // It is only a suggestion: priceBooking still refuses any add-on that is not
   // linked to the chosen service, so a stale ad URL cannot buy the discounted
   // price without the qualifying package.
-  searchParams: Promise<{ service?: string; offer?: string; addon?: string }>;
+  searchParams: Promise<{ service?: string; offer?: string; addon?: string; bundle?: string }>;
 }) {
-  const { service: preselectSlug, offer, addon: preselectAddonSlug } = await searchParams;
+  const { service: preselectSlug, offer, addon: preselectAddonSlug, bundle: preselectBundleSlug } = await searchParams;
   const settings = await getSettings();
   // Resolved server-side so the page can never advertise something the server
   // would refuse to honour. The wizard decides whether this visitor *claims*
@@ -47,6 +47,10 @@ export default async function BookPage({
   const adjustments = await db().select().from(schema.serviceVehicleAdjustments);
   const addonAdjustments = await db().select().from(schema.addonVehicleAdjustments);
   const addonLinks = await db().select().from(schema.serviceAddons);
+  const bundleOfferRows = await db()
+    .select()
+    .from(schema.serviceBundleOffers)
+    .where(eq(schema.serviceBundleOffers.active, true));
   const addons = await db()
     .select()
     .from(schema.addons)
@@ -75,6 +79,7 @@ export default async function BookPage({
       categoryName: categoryName.get(s.categoryId) ?? "",
       shortDescription: s.shortDescription ?? "",
       basePriceCents: s.basePriceCents!,
+      compareAtPriceCents: s.compareAtPriceCents,
       baseDurationMin: s.baseDurationMin,
       adjustments: Object.fromEntries(
         adjustments
@@ -110,6 +115,13 @@ export default async function BookPage({
     qualifier: a.slug === CERAMIC_PROTECTION_ADDON_SLUG ? CERAMIC_PROTECTION_ADDON_QUALIFIER : null,
   }));
 
+  const wizardBundleOffers: WizardBundleOffer[] = bundleOfferRows.map((offer) => ({
+    primaryServiceId: offer.primaryServiceId,
+    bundledServiceId: offer.bundledServiceId,
+    discountPercentBp: offer.discountPercentBp,
+    label: offer.label,
+  }));
+
   return (
     <Container className="py-12 sm:py-16">
       <SectionHeading
@@ -136,8 +148,10 @@ export default async function BookPage({
               }
             : null
         }
+        bundleOffers={wizardBundleOffers}
         offerFromUrl={offer}
         preselectAddonSlug={preselectAddonSlug}
+        preselectBundleSlug={preselectBundleSlug}
       />
     </Container>
   );

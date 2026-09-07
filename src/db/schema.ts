@@ -274,6 +274,13 @@ export const services = pgTable(
     longDescription: text("long_description"),
     /** Null when price is quote-only. */
     basePriceCents: integer("base_price_cents"),
+    /**
+     * Optional former/list price shown with a strike-through beside the current
+     * base price. It is display context only; every booking is charged from
+     * `base_price_cents`, so the customer can never be billed the crossed-out
+     * amount.
+     */
+    compareAtPriceCents: integer("compare_at_price_cents"),
     baseDurationMin: integer("base_duration_min").notNull().default(60),
     bookingMode: text("booking_mode").notNull().default("bookable"), // bookable | quote_required | inspection_required | approval_required | contact_only
     depositType: text("deposit_type").notNull().default("none"), // none | fixed | percent
@@ -365,6 +372,36 @@ export const serviceAddons = pgTable(
       .references(() => addons.id),
   },
   (t) => [uniqueIndex("service_addons_unique").on(t.serviceId, t.addonId)],
+);
+
+/**
+ * A discount unlocked only when both catalogue services are booked together.
+ *
+ * Keeping the relationship in the catalogue means the booking UI, server-side
+ * price authority and future staff tools all read the same rule. If more than
+ * one active offer targets the same bundled service, pricing uses the highest
+ * percentage rather than stacking them.
+ */
+export const serviceBundleOffers = pgTable(
+  "service_bundle_offers",
+  {
+    id: id(),
+    primaryServiceId: text("primary_service_id")
+      .notNull()
+      .references(() => services.id),
+    bundledServiceId: text("bundled_service_id")
+      .notNull()
+      .references(() => services.id),
+    discountPercentBp: integer("discount_percent_bp").notNull(),
+    label: text("label").notNull(),
+    active: boolean("active").notNull().default(true),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("service_bundle_offers_pair_uq").on(t.primaryServiceId, t.bundledServiceId),
+    index("service_bundle_offers_primary_idx").on(t.primaryServiceId, t.active),
+  ],
 );
 
 /* ------------------------------------------------------------------ */
@@ -777,6 +814,34 @@ export const caseStudyMedia = pgTable(
   (t) => [
     uniqueIndex("case_study_media_case_file_unique").on(t.caseStudyId, t.fileId),
     index("case_study_media_case_sort_idx").on(t.caseStudyId, t.sort),
+  ],
+);
+
+/**
+ * Staff-authored educational articles. Drafts remain private and public pages
+ * query published rows only. The body is trusted plain text rendered as safe
+ * paragraphs/headings by the application; staff cannot inject HTML.
+ */
+export const blogPosts = pgTable(
+  "blog_posts",
+  {
+    id: id(),
+    slug: text("slug").notNull().unique(),
+    title: text("title").notNull(),
+    excerpt: text("excerpt").notNull().default(""),
+    content: text("content").notNull().default(""),
+    seoTitle: text("seo_title"),
+    seoDescription: text("seo_description"),
+    status: text("status").notNull().default("draft"), // draft | published
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    createdByStaffId: text("created_by_staff_id").notNull().references(() => staffUsers.id),
+    updatedByStaffId: text("updated_by_staff_id").notNull().references(() => staffUsers.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("blog_posts_status_idx").on(t.status, t.publishedAt),
+    index("blog_posts_updated_idx").on(t.updatedAt),
   ],
 );
 

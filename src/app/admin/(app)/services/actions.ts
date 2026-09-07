@@ -11,18 +11,39 @@ import { invalidatePublicCatalogCache } from "@/lib/public-catalog";
 import { BOOKING_MODES } from "@/lib/types";
 import { VEHICLE_CATEGORIES } from "@/lib/types";
 
-const updateServiceInput = z.object({
-  serviceId: z.string().min(1),
+const serviceInputShape = {
   name: z.string().trim().min(1).max(200),
   shortDescription: z.string().trim().max(500).optional(),
   basePriceCents: z.number().int().min(0).nullable(),
+  compareAtPriceCents: z.number().int().min(0).nullable().optional().default(null),
   baseDurationMin: z.number().int().min(5).max(24 * 60 * 7),
   bookingMode: z.enum(BOOKING_MODES),
   active: z.boolean(),
   featured: z.boolean(),
   depositType: z.enum(["none", "fixed", "percent"]),
   depositValue: z.number().int().min(0),
-});
+} as const;
+
+function validateFormerPrice(
+  input: { basePriceCents: number | null; compareAtPriceCents: number | null },
+  ctx: z.RefinementCtx,
+) {
+  if (
+    input.compareAtPriceCents !== null &&
+    (input.basePriceCents === null || input.compareAtPriceCents <= input.basePriceCents)
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["compareAtPriceCents"],
+      message: "The former price must be higher than the current price",
+    });
+  }
+}
+
+const updateServiceInput = z.object({
+  serviceId: z.string().min(1),
+  ...serviceInputShape,
+}).superRefine(validateFormerPrice);
 
 const updateAddonInput = z.object({
   addonId: z.string().min(1),
@@ -45,9 +66,10 @@ const updateAddonVehicleAdjustmentInput = updateVehicleAdjustmentInput;
 export type ActionResult = { ok: true } | { ok: false; error: string };
 export type CreateResult = { ok: true; id: string } | { ok: false; error: string };
 
-const createServiceInput = updateServiceInput.omit({ serviceId: true }).extend({
+const createServiceInput = z.object({
+  ...serviceInputShape,
   categoryId: z.string().min(1),
-});
+}).superRefine(validateFormerPrice);
 
 const createAddonInput = updateAddonInput.omit({ addonId: true });
 
@@ -117,6 +139,7 @@ export async function createServiceAction(raw: unknown): Promise<CreateResult> {
         slug: await uniqueSlug(tx, schema.services, slugify(input.name)),
         shortDescription: input.shortDescription ?? null,
         basePriceCents: input.basePriceCents,
+        compareAtPriceCents: input.compareAtPriceCents,
         baseDurationMin: input.baseDurationMin,
         bookingMode: input.bookingMode,
         active: input.active,
@@ -134,6 +157,7 @@ export async function createServiceAction(raw: unknown): Promise<CreateResult> {
           name: input.name,
           categoryId: input.categoryId,
           basePriceCents: input.basePriceCents,
+          compareAtPriceCents: input.compareAtPriceCents,
           baseDurationMin: input.baseDurationMin,
           bookingMode: input.bookingMode,
           active: input.active,
@@ -275,6 +299,7 @@ export async function updateServiceAction(raw: unknown): Promise<ActionResult> {
           name: input.name,
           shortDescription: input.shortDescription ?? null,
           basePriceCents: input.basePriceCents,
+          compareAtPriceCents: input.compareAtPriceCents,
           baseDurationMin: input.baseDurationMin,
           bookingMode: input.bookingMode,
           active: input.active,
@@ -295,6 +320,7 @@ export async function updateServiceAction(raw: unknown): Promise<ActionResult> {
         before: {
           name: before.name,
           basePriceCents: before.basePriceCents,
+          compareAtPriceCents: before.compareAtPriceCents,
           baseDurationMin: before.baseDurationMin,
           bookingMode: before.bookingMode,
           active: before.active,
@@ -304,6 +330,7 @@ export async function updateServiceAction(raw: unknown): Promise<ActionResult> {
         after: {
           name: input.name,
           basePriceCents: input.basePriceCents,
+          compareAtPriceCents: input.compareAtPriceCents,
           baseDurationMin: input.baseDurationMin,
           bookingMode: input.bookingMode,
           active: input.active,

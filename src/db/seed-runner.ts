@@ -27,6 +27,7 @@ type SvcSeed = {
   slug: string;
   short: string;
   priceCents: number | null;
+  compareAtPriceCents?: number;
   durationMin: number;
   mode: string;
   featured?: boolean;
@@ -88,8 +89,8 @@ const CATALOG: { category: string; slug: string; description: string; services: 
       // once the 15+15 setup/cleanup buffers are added — over that, the slot
       // engine can never offer an appointment at all.
       { name: "Ceramic Coating - Crystal", slug: "ceramic-coating-crystal", short: "Vehicle wash, paint preparation and ceramic coating application.", priceCents: 39900, durationMin: 300, mode: "bookable", featured: true, largeVehicleDeltaCents: 10000, largeVehicleDeltaMin: 30 },
-      { name: "Ceramic Coating - Pro", slug: "ceramic-coating-pro", short: "A higher-grade ceramic coating with a six-year warranty.", priceCents: 99900, durationMin: 420, mode: "bookable", largeVehicleDeltaCents: 10000 },
-      { name: "Ceramic Coating - Max", slug: "ceramic-coating-max", short: "Our longest-lasting ceramic coating, with a premium top layer and a ten-year warranty.", priceCents: 139900, durationMin: 450, mode: "bookable", largeVehicleDeltaCents: 10000 },
+      { name: "Ceramic Coating - Pro", slug: "ceramic-coating-pro", short: "A higher-grade ceramic coating with a six-year warranty.", priceCents: 89900, compareAtPriceCents: 99900, durationMin: 420, mode: "bookable", largeVehicleDeltaCents: 10000 },
+      { name: "Ceramic Coating - Max", slug: "ceramic-coating-max", short: "Our longest-lasting ceramic coating, with a premium top layer and a ten-year warranty.", priceCents: 124900, compareAtPriceCents: 139900, durationMin: 450, mode: "bookable", largeVehicleDeltaCents: 10000 },
       { name: "Paint Protection Film", slug: "paint-protection-film", short: "Self-healing film for high-impact areas or full panels.", priceCents: null, durationMin: 480, mode: "inspection_required", photosRequired: true },
       { name: "Wax & Sealant", slug: "wax-sealant", short: "Premium carnauba wax or synthetic sealant application.", priceCents: null, durationMin: 90, mode: "quote_required" },
     ],
@@ -336,6 +337,7 @@ export async function runSeed() {
           slug: svc.slug,
           shortDescription: svc.short,
           basePriceCents: svc.priceCents,
+          compareAtPriceCents: svc.compareAtPriceCents ?? null,
           baseDurationMin: svc.durationMin,
           bookingMode: svc.mode,
           featured: svc.featured ?? false,
@@ -364,6 +366,36 @@ export async function runSeed() {
       }
     }
     console.log("Seeded service catalog (owner-confirmed flyer prices and durations).");
+  }
+
+  // --- ceramic + detail bundle offers ----------------------------------
+  // Inserted after the catalogue so this works on both a new database and an
+  // existing one upgraded by migrations. The unique pair makes the seed safe
+  // to run repeatedly.
+  const bundleServiceRows = await db
+    .select({ id: schema.services.id, slug: schema.services.slug })
+    .from(schema.services);
+  const bundleServiceId = new Map(bundleServiceRows.map((service) => [service.slug, service.id]));
+  const bundleRules = [
+    { primary: "ceramic-coating-crystal", discountPercentBp: 1500, label: "Crystal detailing bundle — 15% off" },
+    { primary: "ceramic-coating-pro", discountPercentBp: 5000, label: "Pro detailing bundle — 50% off" },
+    { primary: "ceramic-coating-max", discountPercentBp: 5000, label: "Max detailing bundle — 50% off" },
+  ];
+  const bundledDetails = ["complete-detail-engine", "the-works", "interior-detail"];
+  for (const rule of bundleRules) {
+    const primaryServiceId = bundleServiceId.get(rule.primary);
+    if (!primaryServiceId) continue;
+    for (const detailSlug of bundledDetails) {
+      const bundledServiceId = bundleServiceId.get(detailSlug);
+      if (!bundledServiceId) continue;
+      await db.insert(schema.serviceBundleOffers).values({
+        id: newId("bof"),
+        primaryServiceId,
+        bundledServiceId,
+        discountPercentBp: rule.discountPercentBp,
+        label: rule.label,
+      }).onConflictDoNothing();
+    }
   }
 
   // --- expense categories & recurring bills -------------------------------

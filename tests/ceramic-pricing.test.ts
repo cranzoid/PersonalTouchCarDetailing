@@ -33,6 +33,8 @@ const settings: BusinessSettings = { ...SETTINGS_DEFAULTS };
 const ULTIMATE = "svc_test_ultimate";
 const INTERIOR = "svc_test_interior";
 const CRYSTAL = "svc_test_crystal";
+const PRO = "svc_test_pro";
+const MAX = "svc_test_max";
 const PROTECTION = "svc_test_protection";
 const CERAMIC_ADDON = "add_test_ceramic";
 const PET_HAIR_ADDON = "add_test_pethair";
@@ -52,6 +54,8 @@ async function seed() {
     { id: ULTIMATE, categoryId: "cat_test_ceramic", name: "Ultimate Detail", slug: ULTIMATE_DETAIL_SLUG, basePriceCents: 20000, baseDurationMin: 150, bookingMode: "bookable" },
     { id: INTERIOR, categoryId: "cat_test_ceramic", name: "Interior Detail", slug: "interior-detail", basePriceCents: 15000, baseDurationMin: 90, bookingMode: "bookable" },
     { id: CRYSTAL, categoryId: "cat_test_ceramic", name: "Ceramic Coating - Crystal", slug: "ceramic-coating-crystal", basePriceCents: 39900, baseDurationMin: 300, bookingMode: "bookable" },
+    { id: PRO, categoryId: "cat_test_ceramic", name: "Ceramic Coating - Pro", slug: "ceramic-coating-pro", basePriceCents: 89900, compareAtPriceCents: 99900, baseDurationMin: 420, bookingMode: "bookable" },
+    { id: MAX, categoryId: "cat_test_ceramic", name: "Ceramic Coating - Max", slug: "ceramic-coating-max", basePriceCents: 124900, compareAtPriceCents: 139900, baseDurationMin: 450, bookingMode: "bookable" },
     { id: PROTECTION, categoryId: "cat_test_ceramic", name: "Ceramic Protection - Standalone", slug: CERAMIC_PROTECTION_SLUG, basePriceCents: 19900, baseDurationMin: 120, bookingMode: "bookable" },
   ]);
   await db().insert(schema.serviceVehicleAdjustments).values([
@@ -75,6 +79,11 @@ async function seed() {
     { id: "lnk_test_ceramic", serviceId: ULTIMATE, addonId: CERAMIC_ADDON },
     { id: "lnk_test_pethair_u", serviceId: ULTIMATE, addonId: PET_HAIR_ADDON },
     { id: "lnk_test_pethair_i", serviceId: INTERIOR, addonId: PET_HAIR_ADDON },
+  ]);
+  await db().insert(schema.serviceBundleOffers).values([
+    { id: "bof_test_crystal_ultimate", primaryServiceId: CRYSTAL, bundledServiceId: ULTIMATE, discountPercentBp: 1500, label: "Crystal detailing bundle — 15% off" },
+    { id: "bof_test_pro_ultimate", primaryServiceId: PRO, bundledServiceId: ULTIMATE, discountPercentBp: 5000, label: "Pro detailing bundle — 50% off" },
+    { id: "bof_test_max_ultimate", primaryServiceId: MAX, bundledServiceId: ULTIMATE, discountPercentBp: 5000, label: "Max detailing bundle — 50% off" },
   ]);
 }
 
@@ -223,6 +232,67 @@ describe("ceramic coating packages", () => {
         settings,
       }),
     ).rejects.toBeInstanceOf(PricingError);
+  });
+
+  it("charges the reduced Pro and Max prices while retaining the former prices", async () => {
+    const rows = await db().select().from(schema.services);
+    const pro = rows.find((service) => service.id === PRO)!;
+    const max = rows.find((service) => service.id === MAX)!;
+    expect([pro.basePriceCents, pro.compareAtPriceCents]).toEqual([89900, 99900]);
+    expect([max.basePriceCents, max.compareAtPriceCents]).toEqual([124900, 139900]);
+  });
+
+  it("applies 15% to a detailing package bundled with Crystal", async () => {
+    const pricing = await priceBooking({
+      serviceIds: [CRYSTAL, ULTIMATE],
+      addonIds: [],
+      vehicleCategory: "sedan",
+      settings,
+    });
+    expect(pricing.subtotalCents).toBe(39900 + 20000);
+    expect(pricing.discountCents).toBe(3000);
+    expect(pricing.promoLabel).toBe("Crystal detailing bundle — 15% off");
+  });
+
+  it("applies 50% to a detailing package bundled with Pro", async () => {
+    const pricing = await priceBooking({
+      serviceIds: [PRO, ULTIMATE],
+      addonIds: [],
+      vehicleCategory: "sedan",
+      settings,
+    });
+    expect(pricing.subtotalCents).toBe(89900 + 20000);
+    expect(pricing.discountCents).toBe(10000);
+    expect(pricing.promoLabel).toBe("Pro detailing bundle — 50% off");
+  });
+
+  it("does not discount a detail unless the paired coating is selected", async () => {
+    const pricing = await priceBooking({
+      serviceIds: [ULTIMATE],
+      addonIds: [],
+      vehicleCategory: "sedan",
+      settings,
+    });
+    expect(pricing.discountCents).toBe(0);
+  });
+
+  it("uses the better bundle saving instead of stacking a campaign percentage", async () => {
+    const pricing = await priceBooking({
+      serviceIds: [PRO, ULTIMATE],
+      addonIds: [],
+      vehicleCategory: "sedan",
+      settings,
+      promo: {
+        code: "FIRST10",
+        label: "First detail offer",
+        percentOffBp: 1000,
+        firstTimeOnly: true,
+        eligibleServiceIds: [ULTIMATE],
+      },
+    });
+    expect(pricing.discountCents).toBe(10000);
+    expect(pricing.promoCode).toBeNull();
+    expect(pricing.promoLabel).toBe("Pro detailing bundle — 50% off");
   });
 });
 

@@ -42,6 +42,15 @@ export type CeramicCoatingSlug = (typeof CERAMIC_COATING_SLUGS)[number];
 /** Hub page for the three coating packages. Not a catalogue service. */
 export const CERAMIC_COATING_HUB_PATH = "/services/ceramic-coating";
 export const CERAMIC_PROTECTION_PATH = "/services/ceramic-protection";
+/** Campaign landing page that explains every current ceramic coating offer. */
+export const CERAMIC_OFFER_PATH = "/offers/ceramic-coating";
+
+/** The only detailing packages eligible for a ceramic coating bundle. */
+export const CERAMIC_BUNDLE_DETAIL_SLUGS = [
+  "complete-detail-engine",
+  "the-works",
+  "interior-detail",
+] as const;
 
 /** Every ceramic slug that is a bookable catalogue service. */
 export const CERAMIC_SERVICE_SLUGS: readonly string[] = [

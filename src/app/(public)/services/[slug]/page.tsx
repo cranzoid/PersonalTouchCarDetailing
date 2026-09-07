@@ -16,6 +16,7 @@ import { VEHICLE_CATEGORY_LABELS, isQuoteOnlyVehicleCategory, type VehicleCatego
 import {
   CERAMIC_CONDITION_DISCLAIMER,
   CERAMIC_COATING_HUB_PATH,
+  CERAMIC_OFFER_PATH,
   ceramicMenuLinkFor,
   coatingPackage,
   hidesWorkDuration,
@@ -97,6 +98,18 @@ export default async function ServiceDetailPage({
   const quotePath = svc.bookingMode === "contact_only" ? "/contact" : `/quote?service=${svc.slug}`;
   const isCoating = isCeramicServiceSlug(svc.slug);
   const coating = coatingPackage(svc.slug);
+  const bundleOffers = coating
+    ? await db()
+        .select({ discountPercentBp: schema.serviceBundleOffers.discountPercentBp })
+        .from(schema.serviceBundleOffers)
+        .where(and(
+          eq(schema.serviceBundleOffers.primaryServiceId, svc.id),
+          eq(schema.serviceBundleOffers.active, true),
+        ))
+    : [];
+  const bundlePercentBp = bundleOffers.length > 0
+    ? Math.max(...bundleOffers.map((offer) => offer.discountPercentBp))
+    : null;
 
   const canonicalPath = `/services/${svc.slug}`;
   const serviceSchema = {
@@ -220,6 +233,7 @@ export default async function ServiceDetailPage({
                     <tr className="border-b border-white/10">
                       <td className="py-2 text-ink-300">Coupe / Sedan</td>
                       <td className="py-2 text-right text-accent-300">
+                        {svc.compareAtPriceCents !== null && <span className="mr-2 text-xs text-ink-500 line-through">{formatCents(svc.compareAtPriceCents)}</span>}
                         {formatCents(svc.basePriceCents!)}
                       </td>
                     </tr>
@@ -234,7 +248,10 @@ export default async function ServiceDetailPage({
                               sedan plus a delta. */}
                           {isQuoteOnlyVehicleCategory(adj.vehicleCategory)
                             ? <span className="text-ink-400">By quote</span>
-                            : formatCents(svc.basePriceCents! + adj.priceDeltaCents)}
+                            : <span>
+                                {svc.compareAtPriceCents !== null && <span className="mr-2 text-xs text-ink-500 line-through">{formatCents(svc.compareAtPriceCents + adj.priceDeltaCents)}</span>}
+                                {formatCents(svc.basePriceCents! + adj.priceDeltaCents)}
+                              </span>}
                         </td>
                       </tr>
                     ))}
@@ -269,6 +286,15 @@ export default async function ServiceDetailPage({
                 </Link>
               </Card>
             </div>
+          )}
+
+          {coating && bundlePercentBp !== null && (
+            <Link href={CERAMIC_OFFER_PATH} className="mt-6 block rounded-2xl border border-accent-400/40 bg-accent-400/[0.08] p-6 transition hover:border-accent-300">
+              <span className="text-xs font-bold uppercase tracking-[0.18em] text-accent-300">Bundle offer</span>
+              <span className="mt-2 block font-display text-2xl text-white">Add a detail and save {bundlePercentBp / 100}% on it.</span>
+              <span className="mt-2 block text-sm leading-6 text-ink-300">Choose Ultimate Detail, Signature Detail or Interior Detail in the booking flow. Your saving appears instantly and is stored with your booking.</span>
+              <span className="mt-4 inline-flex text-sm font-semibold text-accent-200">See full offer details →</span>
+            </Link>
           )}
 
           {isCoating && (
@@ -370,9 +396,17 @@ export default async function ServiceDetailPage({
             <p className="text-sm uppercase tracking-wider text-ink-400">
               {bookable ? "Starting at" : "Pricing"}
             </p>
-            <p className="mt-2 font-display text-4xl text-white">
+            {bookable && svc.compareAtPriceCents !== null && (
+              <p className="mt-3 text-lg text-ink-500 line-through">{formatCents(svc.compareAtPriceCents)}</p>
+            )}
+            <p className={`${bookable && svc.compareAtPriceCents !== null ? "mt-0" : "mt-2"} font-display text-4xl text-white`}>
               {bookable ? formatCents(svc.basePriceCents!) : "By quote"}
             </p>
+            {bookable && svc.compareAtPriceCents !== null && (
+              <p className="mt-2 inline-flex rounded-full border border-emerald-400/30 bg-emerald-950/30 px-3 py-1 text-xs font-bold text-emerald-200">
+                Save {formatCents(svc.compareAtPriceCents - svc.basePriceCents!)}
+              </p>
+            )}
             {bookable && <p className="mt-1 text-sm text-ink-400">for a coupe or sedan, before {settings.taxLabel}.</p>}
             {coating && (
               <p className="mt-3 inline-flex rounded-full border border-accent-400/30 bg-accent-400/10 px-3 py-1 text-xs font-semibold text-accent-200">

@@ -219,7 +219,7 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
       dateISO: input.dateISO,
       startMs: input.startMs ?? null,
       customerNotes: input.customerNotes,
-      attribution: promo
+      attribution: pricing.promoCode && promo
         ? {
             ...input.attribution,
             promo: {
@@ -232,7 +232,7 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
         : input.attribution,
       policiesAccepted: input.policiesAccepted,
       settings,
-      promo,
+      promo: pricing.promoCode ? promo : null,
     });
 
     // Formatted from what was stored, not from what was submitted: a coating

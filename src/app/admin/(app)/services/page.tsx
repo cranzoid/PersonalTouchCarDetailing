@@ -46,6 +46,7 @@ export default async function ServicesAdminPage() {
                       name: s.name,
                       shortDescription: s.shortDescription ?? "",
                       basePriceCents: s.basePriceCents,
+                      compareAtPriceCents: s.compareAtPriceCents,
                       baseDurationMin: s.baseDurationMin,
                       bookingMode: s.bookingMode,
                       active: s.active,

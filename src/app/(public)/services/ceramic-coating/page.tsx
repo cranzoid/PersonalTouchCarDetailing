@@ -19,6 +19,7 @@ import {
 import {
   CERAMIC_COATING_SLUGS,
   CERAMIC_CONDITION_DISCLAIMER,
+  CERAMIC_OFFER_PATH,
   CERAMIC_PROTECTION_PATH,
   COATING_PACKAGES,
   warrantyLabel,
@@ -52,10 +53,19 @@ export default async function CeramicCoatingPage() {
   // there is then nothing to compare — 404 rather than show an empty page.
   if (services.length === 0) notFound();
 
-  const adjustments = await db()
-    .select()
-    .from(schema.serviceVehicleAdjustments)
-    .where(inArray(schema.serviceVehicleAdjustments.serviceId, services.map((s) => s.id)));
+  const [adjustments, bundleOffers] = await Promise.all([
+    db()
+      .select()
+      .from(schema.serviceVehicleAdjustments)
+      .where(inArray(schema.serviceVehicleAdjustments.serviceId, services.map((s) => s.id))),
+    db()
+      .select()
+      .from(schema.serviceBundleOffers)
+      .where(and(
+        eq(schema.serviceBundleOffers.active, true),
+        inArray(schema.serviceBundleOffers.primaryServiceId, services.map((s) => s.id)),
+      )),
+  ]);
 
   /** Packages in Crystal → Pro → Max order, each with its catalogue row. */
   const packages = COATING_PACKAGES.flatMap((content) => {
@@ -73,6 +83,13 @@ export default async function CeramicCoatingPage() {
     if (isQuoteOnlyVehicleCategory(category)) return null;
     const adj = adjustments.find((a) => a.serviceId === serviceId && a.vehicleCategory === category);
     return base + (adj?.priceDeltaCents ?? 0);
+  }
+
+  function bundlePercent(serviceId: string): number | null {
+    const rates = bundleOffers
+      .filter((offer) => offer.primaryServiceId === serviceId)
+      .map((offer) => offer.discountPercentBp);
+    return rates.length > 0 ? Math.max(...rates) : null;
   }
 
   /**
@@ -158,6 +175,18 @@ export default async function CeramicCoatingPage() {
         </div>
         <GoogleReviewStrip settings={settings} tone="dark" className="mt-5 max-w-5xl" />
 
+        <Link
+          href={CERAMIC_OFFER_PATH}
+          className="mt-8 grid max-w-5xl gap-5 overflow-hidden rounded-[1.5rem] border border-accent-400/45 bg-[linear-gradient(120deg,rgba(224,169,59,0.18),rgba(11,42,74,0.78))] p-6 shadow-[0_20px_60px_rgba(224,169,59,0.12)] transition hover:border-accent-300 sm:grid-cols-[1fr_auto] sm:items-center sm:p-8"
+        >
+          <span>
+            <span className="text-xs font-bold uppercase tracking-[0.2em] text-accent-300">Current ceramic offer</span>
+            <span className="mt-2 block font-display text-2xl text-white sm:text-3xl">Save on the coating. Save again on a detail.</span>
+            <span className="mt-2 block text-sm leading-6 text-ink-200">Pro is $100 off, Max is $150 off, and a detailing package added to Pro or Max is 50% off. Crystal unlocks 15% off a detail.</span>
+          </span>
+          <span className="font-semibold text-accent-200">See the offer →</span>
+        </Link>
+
         {/* Ceramic protection is a different product at a very different
             price. Saying so up front is the whole reason this sits above the
             packages rather than in the FAQ. */}
@@ -197,6 +226,11 @@ export default async function CeramicCoatingPage() {
                     Most popular
                   </span>
                 )}
+                {service.compareAtPriceCents !== null && (
+                  <span className="mb-3 inline-flex w-fit rounded-full border border-emerald-400/30 bg-emerald-950/30 px-3 py-1 text-xs font-bold text-emerald-200">
+                    Save {formatCents(service.compareAtPriceCents - service.basePriceCents!)}
+                  </span>
+                )}
                 <div className={`flex items-start justify-between gap-3 ${content.mostPopular ? "mt-3" : ""}`}>
                   <h3 className="font-display text-2xl text-white">{content.tier}</h3>
                   <span
@@ -210,8 +244,11 @@ export default async function CeramicCoatingPage() {
                   </span>
                 </div>
                 <p className="mt-3 text-sm leading-6 text-ink-300">{content.tagline}</p>
-                <p className="mt-5 font-display text-4xl text-white">
-                  {formatCents(service.basePriceCents!)}
+                <p className="mt-5 flex flex-wrap items-end gap-x-3 gap-y-1">
+                  {service.compareAtPriceCents !== null && (
+                    <span className="pb-1 text-lg text-ink-500 line-through">{formatCents(service.compareAtPriceCents)}</span>
+                  )}
+                  <span className="font-display text-4xl text-white">{formatCents(service.basePriceCents!)}</span>
                 </p>
                 {/* No duration: a coating is booked by date and sequenced by
                     hand, so "approx. 5h" answered a question the customer was
@@ -219,6 +256,11 @@ export default async function CeramicCoatingPage() {
                 <p className="mt-1 text-xs text-ink-500">
                   for a coupe or sedan, before {settings.taxLabel}
                 </p>
+                {bundlePercent(service.id) !== null && (
+                  <p className="mt-4 rounded-xl border border-accent-400/25 bg-accent-400/[0.07] px-3 py-2 text-sm font-semibold text-accent-200">
+                    Add Ultimate, Signature or Interior Detail — save {bundlePercent(service.id)! / 100}% on the detail.
+                  </p>
+                )}
                 <ul className="mt-5 flex-1 space-y-2 text-sm leading-6 text-ink-300">
                   {content.includes.map((item) => <li key={item}>• {item}</li>)}
                 </ul>
@@ -256,7 +298,12 @@ export default async function CeramicCoatingPage() {
                       <td key={content.slug} className="py-2 text-right text-accent-300">
                         {(() => {
                           const price = priceFor(service.id, service.basePriceCents!, row.category);
-                          return price === null ? <span className="text-ink-400">By quote</span> : formatCents(price);
+                          const compare = service.compareAtPriceCents === null
+                            ? null
+                            : priceFor(service.id, service.compareAtPriceCents, row.category);
+                          return price === null
+                            ? <span className="text-ink-400">By quote</span>
+                            : <span>{compare !== null && <span className="mr-2 text-xs text-ink-500 line-through">{formatCents(compare)}</span>}{formatCents(price)}</span>;
                         })()}
                       </td>
                     ))}

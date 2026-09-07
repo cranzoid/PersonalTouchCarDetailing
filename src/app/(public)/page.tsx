@@ -1,6 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
-import { and, desc, inArray, isNotNull } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
 import { Container, ButtonLink, SectionHeading } from "@/components/ui";
 import {
   GoogleReviewCarousel,
@@ -10,7 +10,7 @@ import {
 import { db, schema } from "@/db";
 import { formatCents } from "@/lib/money";
 import { getPublicHomeCatalog } from "@/lib/public-catalog";
-import { CERAMIC_COATING_HUB_PATH, CERAMIC_PROTECTION_PATH } from "@/lib/ceramic";
+import { CERAMIC_COATING_HUB_PATH, CERAMIC_OFFER_PATH, CERAMIC_PROTECTION_PATH } from "@/lib/ceramic";
 import { POPULAR_SERVICE_SLUGS, servicePresentation } from "@/lib/public-content";
 import { hasPublishedResults } from "@/lib/results";
 import { getPublicSettings } from "@/lib/settings";
@@ -37,7 +37,7 @@ const EXPERIENCE_POINTS = [
 ];
 
 export default async function HomePage() {
-  const [{ featured, categories, ceramicMenu }, settings, proofPhotos, resultsPublished] = await Promise.all([
+  const [{ featured, categories, ceramicMenu }, settings, proofPhotos, resultsPublished, latestPosts] = await Promise.all([
     getPublicHomeCatalog(),
     getPublicSettings(),
     db()
@@ -51,6 +51,19 @@ export default async function HomePage() {
       .orderBy(desc(schema.files.createdAt))
       .limit(3),
     hasPublishedResults(),
+    db()
+      .select({
+        id: schema.blogPosts.id,
+        slug: schema.blogPosts.slug,
+        title: schema.blogPosts.title,
+        excerpt: schema.blogPosts.excerpt,
+        publishedAt: schema.blogPosts.publishedAt,
+        updatedAt: schema.blogPosts.updatedAt,
+      })
+      .from(schema.blogPosts)
+      .where(eq(schema.blogPosts.status, "published"))
+      .orderBy(desc(schema.blogPosts.publishedAt))
+      .limit(3),
   ]);
 
   // Two decisions, not four packages. The home page names what the shop sells
@@ -84,6 +97,20 @@ export default async function HomePage() {
 
   return (
     <>
+      <Link
+        href={CERAMIC_OFFER_PATH}
+        className="group block border-b border-accent-300/30 bg-accent-400 text-ink-950"
+        aria-label="See the current ceramic coating offer"
+      >
+        <Container className="flex min-h-14 flex-col justify-center gap-1 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+          <span className="text-sm font-bold sm:text-base">
+            Ceramic offer: $100 off Pro · $150 off Max · up to 50% off an added detail
+          </span>
+          <span className="shrink-0 text-sm font-bold underline decoration-ink-950/35 underline-offset-4 transition group-hover:decoration-ink-950">
+            Explore the offer →
+          </span>
+        </Container>
+      </Link>
       <section className="relative isolate min-h-[calc(100svh-5rem)] overflow-hidden bg-ink-950">
         <Image
           src="/images/detailing-studio-hero.png"
@@ -253,6 +280,27 @@ export default async function HomePage() {
           </div>
         </Container>
       </section>
+
+      {latestPosts.length > 0 && (
+        <section className="surface-light pb-20 text-ink-900 sm:pb-28">
+          <Container>
+            <div className="flex flex-wrap items-end justify-between gap-5">
+              <SectionHeading eyebrow="From the detailing bay" title="Practical car-care guides." subtitle="Straightforward advice on detailing, interiors, paint care and ceramic coating." tone="light" />
+              <Link href="/blog" className="mb-12 inline-flex border-b border-[#0B2A4A] pb-1 text-sm font-bold text-[#0B2A4A] hover:border-accent-500 hover:text-accent-600">View all guides →</Link>
+            </div>
+            <div className="grid gap-5 md:grid-cols-3">
+              {latestPosts.map((post) => (
+                <article key={post.id} className="group flex flex-col rounded-[1.25rem] border border-[#DED8CE] bg-white p-6 shadow-[0_14px_38px_rgba(11,42,74,0.06)]">
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-accent-600">{(post.publishedAt ?? post.updatedAt).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric", timeZone: "America/Toronto" })}</p>
+                  <h3 className="mt-3 font-display text-2xl leading-tight text-[#0B2A4A]"><Link href={`/blog/${post.slug}`} className="transition group-hover:text-accent-600">{post.title}</Link></h3>
+                  <p className="mt-3 line-clamp-3 text-sm leading-6 text-slate-600">{post.excerpt}</p>
+                  <Link href={`/blog/${post.slug}`} className="mt-auto pt-6 text-sm font-bold text-[#0B2A4A] group-hover:text-accent-600">Read the guide →</Link>
+                </article>
+              ))}
+            </div>
+          </Container>
+        </section>
+      )}
 
       <section className="surface-light pb-20 sm:pb-28">
         <Container>

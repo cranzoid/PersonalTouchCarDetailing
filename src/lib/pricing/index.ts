@@ -9,6 +9,7 @@ import {
 } from "@/lib/promotions";
 import type { BusinessSettings } from "@/lib/settings";
 import type { VehicleCategory } from "@/lib/types";
+import { bestAllocation, bundleDiscountAllocations } from "@/lib/bundle-offers";
 
 export type PricedLine = {
   serviceId?: string;
@@ -111,6 +112,10 @@ export async function priceBooking(input: {
   if (services.length !== serviceIds.length) {
     throw new PricingError("One or more services are unavailable");
   }
+
+  // Database result order is not guaranteed. Keep quote lines aligned with the
+  // customer's selection so the primary service always remains first.
+  services.sort((left, right) => serviceIds.indexOf(left.id) - serviceIds.indexOf(right.id));
   for (const svc of services) {
     if (svc.bookingMode !== "bookable" || svc.basePriceCents === null) {
       throw new PricingError(`"${svc.name}" requires a quote and cannot be booked directly`);
@@ -204,15 +209,44 @@ export async function priceBooking(input: {
     });
   }
 
-  // The discount is computed once, over the eligible slice of the cart, and
-  // then apportioned back onto those lines purely so percentage deposits can
-  // be charged on what the customer actually owes.
-  const discountCents = promo
+  // Campaign-code discount: computed over its eligible portion of the cart,
+  // then apportioned for percentage-deposit math.
+  const campaignDiscountCents = promo
     ? promotionDiscountCents(eligibleBaseCents(lines, promo.eligibleServiceIds), promo.percentOffBp)
     : 0;
-  const allocation = promo
-    ? allocateDiscount(lines, promo.eligibleServiceIds, discountCents)
+  const campaignAllocation = promo
+    ? allocateDiscount(lines, promo.eligibleServiceIds, campaignDiscountCents)
     : new Array(lines.length).fill(0);
+
+  // Automatic bundle offers are catalogue relationships, not browser claims.
+  // Load only relationships whose two services are actually selected.
+  const bundleRows = serviceIds.length > 1
+    ? await db()
+        .select({
+          primaryServiceId: schema.serviceBundleOffers.primaryServiceId,
+          bundledServiceId: schema.serviceBundleOffers.bundledServiceId,
+          discountPercentBp: schema.serviceBundleOffers.discountPercentBp,
+          label: schema.serviceBundleOffers.label,
+        })
+        .from(schema.serviceBundleOffers)
+        .where(and(
+          eq(schema.serviceBundleOffers.active, true),
+          inArray(schema.serviceBundleOffers.primaryServiceId, serviceIds),
+          inArray(schema.serviceBundleOffers.bundledServiceId, serviceIds),
+        ))
+    : [];
+  const bundle = bundleDiscountAllocations(lines, bundleRows);
+  const resolved = bestAllocation(bundle.allocation, campaignAllocation);
+  const allocation = resolved.allocation;
+  const discountCents = allocation.reduce((sum, cents) => sum + cents, 0);
+
+  const contributingLabels = [
+    ...(resolved.bundleContributes ? bundle.labels : []),
+    ...(resolved.campaignContributes && promo ? [promo.label] : []),
+  ];
+  const discountLabel = contributingLabels.length > 1
+    ? "Best available offers"
+    : contributingLabels[0] ?? null;
 
   let depositRequiredCents = 0;
   for (let i = 0; i < serviceLineCount; i++) {
@@ -229,8 +263,11 @@ export async function priceBooking(input: {
   return {
     ...computeTotals(lines, settings.taxRateBp, depositRequiredCents, {
       cents: discountCents,
-      code: promo?.code ?? null,
-      label: promo?.label ?? null,
+      // A campaign code is recorded only if it contributed money. In the
+      // common ceramic bundle case the larger bundle percentage wins, so a
+      // returning customer is not incorrectly subjected to first-time checks.
+      code: resolved.campaignContributes ? (promo?.code ?? null) : null,
+      label: discountLabel,
     }),
     requiredSkills: [...new Set(services.flatMap((service) => service.requiredSkills.map(normalizeSkill)).filter(Boolean))],
     serviceSlugs: services.map((service) => service.slug),

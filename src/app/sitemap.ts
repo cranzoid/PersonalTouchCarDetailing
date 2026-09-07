@@ -16,6 +16,8 @@ const PUBLIC_ROUTES = [
   // returned; /services/ceramic-coating has no catalogue row behind it.
   "/services/ceramic-coating",
   "/services/ceramic-protection",
+  "/offers/ceramic-coating",
+  "/blog",
   "/book",
   "/quote",
   "/gallery",
@@ -30,7 +32,7 @@ const PUBLIC_ROUTES = [
 ];
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  const [services, caseStudies] = await Promise.all([
+  const [services, caseStudies, blogPosts] = await Promise.all([
     db()
       .select({ slug: schema.services.slug, updatedAt: schema.services.updatedAt })
       .from(schema.services)
@@ -41,6 +43,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       .from(schema.caseStudies)
       .where(eq(schema.caseStudies.status, "published"))
       .orderBy(desc(schema.caseStudies.publishedAt)),
+    db()
+      .select({ slug: schema.blogPosts.slug, updatedAt: schema.blogPosts.updatedAt })
+      .from(schema.blogPosts)
+      .where(eq(schema.blogPosts.status, "published"))
+      .orderBy(desc(schema.blogPosts.publishedAt)),
   ]);
 
   const entries = [
@@ -57,6 +64,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     ...caseStudies.map((story) => ({
       url: `${PUBLIC_SITE_URL}/results/${story.slug}`,
       lastModified: story.updatedAt,
+    })),
+    ...blogPosts.map((post) => ({
+      url: `${PUBLIC_SITE_URL}/blog/${post.slug}`,
+      lastModified: post.updatedAt,
     })),
   ];
 

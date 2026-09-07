@@ -22,6 +22,7 @@ type EditableService = {
   name: string;
   shortDescription: string;
   basePriceCents: number | null;
+  compareAtPriceCents: number | null;
   baseDurationMin: number;
   bookingMode: string;
   active: boolean;
@@ -46,6 +47,7 @@ export function ServiceEditor({
     name: service.name,
     shortDescription: service.shortDescription,
     price: service.basePriceCents !== null ? (service.basePriceCents / 100).toFixed(2) : "",
+    compareAtPrice: service.compareAtPriceCents !== null ? (service.compareAtPriceCents / 100).toFixed(2) : "",
     duration: String(service.baseDurationMin),
     bookingMode: service.bookingMode,
     active: service.active,
@@ -63,6 +65,7 @@ export function ServiceEditor({
       name: form.name,
       shortDescription: form.shortDescription || undefined,
       basePriceCents: form.price.trim() === "" ? null : Math.round(Number(form.price) * 100),
+      compareAtPriceCents: form.compareAtPrice.trim() === "" ? null : Math.round(Number(form.compareAtPrice) * 100),
       baseDurationMin: Number(form.duration),
       bookingMode: form.bookingMode,
       active: form.active,
@@ -114,6 +117,10 @@ export function ServiceEditor({
             <label className="block">
               <span className="mb-1 block text-xs text-ink-400">Base price (CAD, blank = quote only)</span>
               <input className={input} value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="e.g. 189.00" />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-xs text-ink-400">Former price (CAD, optional)</span>
+              <input className={input} value={form.compareAtPrice} onChange={(e) => setForm({ ...form, compareAtPrice: e.target.value })} placeholder="Shown crossed out" />
             </label>
             <label className="block">
               <span className="mb-1 block text-xs text-ink-400">Duration (minutes)</span>

@@ -15,6 +15,7 @@ export type AdminNavIcon =
   | "reports"
   | "expenses"
   | "messages"
+  | "blog"
   | "services"
   | "staff"
   | "settings";
@@ -92,6 +93,8 @@ function AdminIcon({ name }: { name: AdminNavIcon }) {
       return <svg {...common}><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20"/><path d="M6 15h4"/><path d="M18 3H8a2 2 0 0 0-2 2v1"/></svg>;
     case "messages":
       return <svg {...common}><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/><path d="M8 9h8M8 13h5"/></svg>;
+    case "blog":
+      return <svg {...common}><path d="M5 3h11l3 3v15H5z"/><path d="M14 3v5h5M8 12h8M8 16h8M8 8h2"/></svg>;
     case "services":
       return <svg {...common}><path d="M14.7 6.3a4 4 0 0 0-5 5L3 18v3h3l6.7-6.7a4 4 0 0 0 5-5l-3 3-3-3z"/></svg>;
     case "staff":

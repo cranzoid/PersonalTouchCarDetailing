@@ -23,6 +23,7 @@ export const dynamic = "force-dynamic";
 const PRIMARY_NAV = [
   { href: "/services", label: "Services" },
   { href: "/results", label: "Results" },
+  { href: "/blog", label: "Blog" },
   { href: "/fleet", label: "Commercial" },
   { href: "/about", label: "About" },
   { href: "/contact", label: "Contact" },
@@ -242,6 +243,7 @@ export default async function PublicLayout({ children }: { children: ReactNode }
               <ul className="space-y-3 text-sm text-[#5C6876]">
                 <li><Link href="/book" className="transition-colors hover:text-accent-600">Book online</Link></li>
                 <li><Link href="/quote" className="transition-colors hover:text-accent-600">Request a quote</Link></li>
+                <li><Link href="/offers/ceramic-coating" className="transition-colors hover:text-accent-600">Ceramic coating offer</Link></li>
                 <li><Link href="/gallery" className="transition-colors hover:text-accent-600">Photo gallery</Link></li>
                 <li><Link href="/portal" className="transition-colors hover:text-accent-600">Customer access</Link></li>
                 <li><Link href="/reviews" className="transition-colors hover:text-accent-600">Customer reviews</Link></li>

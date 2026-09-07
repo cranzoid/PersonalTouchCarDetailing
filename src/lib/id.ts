@@ -19,6 +19,7 @@ export type IdPrefix =
   | "lead"
   | "cat" // service category
   | "svc" // service
+  | "bof" // service bundle offer
   | "adj" // service vehicle adjustment
   | "aja" // addon vehicle adjustment
   | "add" // addon
@@ -34,6 +35,7 @@ export type IdPrefix =
   | "find" // inspection finding
   | "file"
   | "case" // published marketing case study
+  | "blg" // public blog post
   | "csm" // case study media link
   | "awr" // additional work request
   | "qc"

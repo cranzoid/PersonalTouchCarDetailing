@@ -1,13 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { getStoredAttribution } from "@/components/attribution";
 import { trackMetaLead } from "@/components/meta-pixel";
 import { trackBookAppointmentConversion } from "@/components/google-tag";
 import { DATE_ONLY_BOOKING_NOTICE, DATE_ONLY_BOOKING_NOTICE_SHORT } from "@/lib/ceramic";
 import { formatCents } from "@/lib/money";
 import { localDateISO } from "@/lib/tz";
+import { SERVICE_PRESENTATION } from "@/lib/public-content";
+import { bestAllocation, bundleDiscountAllocations } from "@/lib/bundle-offers";
 import {
   VEHICLE_CATEGORIES,
   VEHICLE_CATEGORY_LABELS,
@@ -23,6 +25,7 @@ export type WizardService = {
   categoryName: string;
   shortDescription: string;
   basePriceCents: number;
+  compareAtPriceCents: number | null;
   baseDurationMin: number;
   adjustments: Record<string, { priceDeltaCents: number; durationDeltaMin: number }>;
   addonIds: string[];
@@ -79,9 +82,16 @@ export type WizardPromo = {
   eligibleServiceIds: string[];
 };
 
-const STEPS = ["Service", "Vehicle", "Add-ons", "Time", "Details"] as const;
+export type WizardBundleOffer = {
+  primaryServiceId: string;
+  bundledServiceId: string;
+  discountPercentBp: number;
+  label: string;
+};
+
+const STEPS = ["Service", "Vehicle", "Package", "Time", "Details"] as const;
 /** Same five steps; the fourth asks for a date alone. */
-const DATE_ONLY_STEPS = ["Service", "Vehicle", "Add-ons", "Date", "Details"] as const;
+const DATE_ONLY_STEPS = ["Service", "Vehicle", "Package", "Date", "Details"] as const;
 const focusRing = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 focus-visible:ring-offset-ink-950";
 
 export function BookingWizard({
@@ -93,8 +103,10 @@ export function BookingWizard({
   maxBookingWindowDays,
   timezone,
   promo = null,
+  bundleOffers,
   offerFromUrl,
   preselectAddonSlug,
+  preselectBundleSlug,
 }: {
   services: WizardService[];
   addons: WizardAddon[];
@@ -105,20 +117,35 @@ export function BookingWizard({
   timezone: string;
   /** The offer currently running, resolved server-side. */
   promo?: WizardPromo | null;
+  /** Server-authored relationships that unlock an automatic service discount. */
+  bundleOffers: WizardBundleOffer[];
   offerFromUrl?: string;
   /** Add-on an ad asked to preselect. Honoured only if the chosen service offers it. */
   preselectAddonSlug?: string;
+  /** Optional detailing package to add to an ad-driven ceramic cart. */
+  preselectBundleSlug?: string;
 }) {
   const idPrefix = useId();
   const preselected = services.find((s) => s.slug === preselectSlug);
   // A campaign can arrive with both halves of the cart. The add-on is applied
   // only when the preselected service actually offers it, so a stale ad URL
   // lands on a valid cart instead of one the server would reject.
+  const preselectedBundle = services.find((candidate) =>
+    !!preselected &&
+    candidate.slug === preselectBundleSlug &&
+    bundleOffers.some((offer) =>
+      offer.primaryServiceId === preselected.id && offer.bundledServiceId === candidate.id,
+    ),
+  );
   const preselectedAddon = addons.find(
-    (a) => !!preselectAddonSlug && a.slug === preselectAddonSlug && !!preselected?.addonIds.includes(a.id),
+    (a) =>
+      !!preselectAddonSlug &&
+      a.slug === preselectAddonSlug &&
+      [preselected, preselectedBundle].some((candidate) => candidate?.addonIds.includes(a.id)),
   );
   const [step, setStep] = useState(preselected ? 1 : 0);
   const [serviceId, setServiceId] = useState<string | null>(preselected?.id ?? null);
+  const [bundleServiceId, setBundleServiceId] = useState<string | null>(preselectedBundle?.id ?? null);
   const [vehicleCategory, setVehicleCategory] = useState<VehicleCategory>("sedan");
   const [vehicle, setVehicle] = useState({ year: "", make: "", model: "", colour: "" });
   const [selectedAddons, setSelectedAddons] = useState<string[]>(
@@ -150,6 +177,7 @@ export function BookingWizard({
   }, [claimedCode]);
 
   const service = services.find((s) => s.id === serviceId) ?? null;
+  const bundleService = services.find((s) => s.id === bundleServiceId) ?? null;
   // Commercial vehicles are quoted, never priced from the catalogue — the
   // public price tables say so, and the booking flow has to agree rather than
   // quietly charging a sedan price plus a delta.
@@ -160,10 +188,20 @@ export function BookingWizard({
   // A claim is worth something only against the offer the server is running.
   const claimsOffer =
     !!promo && !!claimedCode && claimedCode.trim().toUpperCase() === promo.code && !offerWithdrawn;
-  const serviceQualifies = !!service && !!promo && promo.eligibleServiceIds.includes(service.id);
+  const selectedServiceIds = useMemo(
+    () => service ? [service.id, ...(bundleService ? [bundleService.id] : [])] : [],
+    [service, bundleService],
+  );
+  const serviceQualifies = !!promo && selectedServiceIds.some((id) => promo.eligibleServiceIds.includes(id));
+  const eligibleBundleOffers = useMemo(
+    () => service ? bundleOffers.filter((offer) => offer.primaryServiceId === service.id) : [],
+    [service, bundleOffers],
+  );
   const eligibleAddons = useMemo(
-    () => (service ? addons.filter((a) => service.addonIds.includes(a.id)) : []),
-    [service, addons],
+    () => addons.filter((addon) =>
+      [service, bundleService].some((candidate) => candidate?.addonIds.includes(addon.id)),
+    ),
+    [service, bundleService, addons],
   );
   /**
    * The service list, cut into its catalogue categories.
@@ -187,10 +225,17 @@ export function BookingWizard({
   /** Advisory preview only — the server recomputes authoritative pricing. */
   const preview = useMemo(() => {
     if (!service || isQuoteOnlyVehicleCategory(vehicleCategory)) return null;
-    const adj = service.adjustments[vehicleCategory];
-    const servicePrice = service.basePriceCents + (adj?.priceDeltaCents ?? 0);
-    let subtotal = servicePrice;
-    let duration = service.baseDurationMin + (adj?.durationDeltaMin ?? 0);
+    const selectedServices = [service, bundleService].filter((item): item is WizardService => !!item);
+    const serviceLines = selectedServices.map((item) => {
+      const adj = item.adjustments[vehicleCategory];
+      return {
+        serviceId: item.id,
+        priceCents: item.basePriceCents + (adj?.priceDeltaCents ?? 0),
+        durationMin: item.baseDurationMin + (adj?.durationDeltaMin ?? 0),
+      };
+    });
+    let subtotal = serviceLines.reduce((sum, line) => sum + line.priceCents, 0);
+    let duration = serviceLines.reduce((sum, line) => sum + line.durationMin, 0);
     for (const id of selectedAddons) {
       const a = addons.find((x) => x.id === id);
       if (a) {
@@ -199,17 +244,25 @@ export function BookingWizard({
         duration += priced.durationMin;
       }
     }
-    // Mirrors the server: the offer applies to the eligible service line only,
-    // never to add-ons, and comes off before tax. Math.round matches
-    // percentCents/taxCents so the two arrive at the same cent.
-    const discount =
-      claimsOffer && serviceQualifies
-        ? Math.min(Math.round((servicePrice * promo!.percentOffBp) / 10000), servicePrice)
-        : 0;
+    // Mirrors the server: an automatic bundle and a claimed campaign promotion
+    // never stack on the same line. The larger saving wins, before tax.
+    const bundle = bundleDiscountAllocations(serviceLines, bundleOffers);
+    const campaignAllocation = serviceLines.map((line) =>
+      claimsOffer && promo!.eligibleServiceIds.includes(line.serviceId)
+        ? Math.min(line.priceCents, Math.round((line.priceCents * promo!.percentOffBp) / 10000))
+        : 0,
+    );
+    const resolved = bestAllocation(bundle.allocation, campaignAllocation);
+    const discount = resolved.allocation.reduce((sum, cents) => sum + cents, 0);
+    const discountLabel = resolved.bundleContributes
+      ? bundle.labels[0]
+      : resolved.campaignContributes
+        ? promo?.label
+        : null;
     const taxable = subtotal - discount;
     const tax = Math.round((taxable * taxRateBp) / 10000);
-    return { subtotal, discount, tax, total: taxable + tax, duration };
-  }, [service, vehicleCategory, selectedAddons, addons, taxRateBp, claimsOffer, serviceQualifies, promo]);
+    return { subtotal, discount, discountLabel, bundleApplied: resolved.bundleContributes, tax, total: taxable + tax, duration, serviceLines };
+  }, [service, bundleService, vehicleCategory, selectedAddons, addons, taxRateBp, claimsOffer, promo, bundleOffers]);
 
   async function loadSlots(date: string) {
     if (!service || !date) return;
@@ -219,7 +272,7 @@ export function BookingWizard({
     setStartMs(null);
     const res = await getSlotsAction({
       dateISO: date,
-      serviceIds: [service.id],
+      serviceIds: selectedServiceIds,
       addonIds: selectedAddons,
       vehicleCategory,
     });
@@ -232,7 +285,7 @@ export function BookingWizard({
     if (!service || !dateISO || (!dateOnly && !startMs)) return;
     setSubmitting(true);
     const res = await submitBookingAction({
-      serviceIds: [service.id],
+      serviceIds: selectedServiceIds,
       addonIds: selectedAddons,
       vehicleCategory,
       dateISO,
@@ -371,13 +424,23 @@ export function BookingWizard({
                       // package, so switching away from it must remove — and say
                       // that it removed — the selection rather than reprice it
                       // silently.
-                      const kept = selectedAddons.filter((id) => s.addonIds.includes(id));
-                      setDroppedAddons(
-                        selectedAddons
-                          .filter((id) => !s.addonIds.includes(id))
+                      const keepsBundle = !!bundleService && bundleOffers.some((offer) =>
+                        offer.primaryServiceId === s.id && offer.bundledServiceId === bundleService.id,
+                      );
+                      const nextBundle = keepsBundle ? bundleService : null;
+                      const allowedAddonIds = new Set([
+                        ...s.addonIds,
+                        ...(nextBundle?.addonIds ?? []),
+                      ]);
+                      const kept = selectedAddons.filter((id) => allowedAddonIds.has(id));
+                      setDroppedAddons([
+                        ...selectedAddons
+                          .filter((id) => !allowedAddonIds.has(id))
                           .map((id) => addons.find((a) => a.id === id)?.name)
                           .filter((name): name is string => !!name),
-                      );
+                        ...(!keepsBundle && bundleService ? [bundleService.name] : []),
+                      ]);
+                      setBundleServiceId(nextBundle?.id ?? null);
                       setSelectedAddons(kept);
                       setSlots(null);
                       setStartMs(null);
@@ -396,7 +459,12 @@ export function BookingWizard({
                         <p className="font-semibold text-white">{s.name}</p>
                         <p className="mt-1 text-sm text-ink-400">{s.shortDescription}</p>
                       </div>
-                      <span className="shrink-0 text-accent-300">From {formatCents(s.basePriceCents)}</span>
+                      <span className="shrink-0 text-right text-accent-300">
+                        {s.compareAtPriceCents !== null && (
+                          <span className="mr-2 text-xs text-ink-500 line-through">{formatCents(s.compareAtPriceCents)}</span>
+                        )}
+                        From {formatCents(s.basePriceCents)}
+                      </span>
                     </div>
                   </button>
                 ))}
@@ -458,10 +526,80 @@ export function BookingWizard({
 
         {step === 2 && (
           <div className="max-w-lg space-y-3">
-            <h2 id={`${idPrefix}-booking-step`} className="mb-5 text-xl font-semibold text-white">Customize your service</h2>
-            {eligibleAddons.length === 0 && (
+            <h2 id={`${idPrefix}-booking-step`} className="mb-5 text-xl font-semibold text-white">Complete your package</h2>
+            {eligibleBundleOffers.length > 0 && (
+              <section className="mb-6 rounded-2xl border border-accent-400/40 bg-accent-400/[0.07] p-4" aria-labelledby={`${idPrefix}-bundle-heading`}>
+                <p className="text-[0.68rem] font-bold uppercase tracking-[0.18em] text-accent-300">Package-only saving</p>
+                <h3 id={`${idPrefix}-bundle-heading`} className="mt-2 text-lg font-semibold text-white">
+                  Add one detailing package and save {eligibleBundleOffers[0].discountPercentBp / 100}%
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-ink-300">
+                  Choose Ultimate Detail, Signature Detail or Interior Detail. The saving is applied automatically below.
+                </p>
+                <div className="mt-4 space-y-2">
+                  {eligibleBundleOffers.map((offer) => {
+                    const option = services.find((candidate) => candidate.id === offer.bundledServiceId);
+                    if (!option) return null;
+                    const adj = option.adjustments[vehicleCategory];
+                    const fullPrice = option.basePriceCents + (adj?.priceDeltaCents ?? 0);
+                    const saving = Math.round((fullPrice * offer.discountPercentBp) / 10000);
+                    const checked = bundleServiceId === option.id;
+                    return (
+                      <button
+                        type="button"
+                        key={offer.bundledServiceId}
+                        aria-pressed={checked}
+                        onClick={() => {
+                          const nextId = checked ? null : option.id;
+                          setBundleServiceId(nextId);
+                          const nextService = checked ? null : option;
+                          const allowed = new Set([
+                            ...(service?.addonIds ?? []),
+                            ...(nextService?.addonIds ?? []),
+                          ]);
+                          const removed = selectedAddons.filter((id) => !allowed.has(id));
+                          setSelectedAddons(selectedAddons.filter((id) => allowed.has(id)));
+                          setDroppedAddons(removed.map((id) => addons.find((addon) => addon.id === id)?.name).filter((name): name is string => !!name));
+                          setSlots(null);
+                          setStartMs(null);
+                        }}
+                        className={`flex min-h-11 w-full items-center justify-between gap-4 rounded-xl border px-4 py-3 text-left transition ${focusRing} ${
+                          checked ? "border-accent-400 bg-[#0B2A4A]" : "border-white/10 bg-ink-950/35 hover:border-accent-400/60"
+                        }`}
+                      >
+                        <span>
+                          <span className="block font-medium text-white">{publicServiceName(option)}</span>
+                          <span className="mt-0.5 block text-xs text-ink-400">{option.shortDescription}</span>
+                        </span>
+                        <span className="shrink-0 text-right">
+                          <span className="block text-xs text-ink-500 line-through">{formatCents(fullPrice)}</span>
+                          <span className="block font-semibold text-emerald-300">{formatCents(fullPrice - saving)}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {bundleService && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBundleServiceId(null);
+                      const allowed = new Set(service?.addonIds ?? []);
+                      setSelectedAddons(selectedAddons.filter((id) => allowed.has(id)));
+                      setSlots(null);
+                      setStartMs(null);
+                    }}
+                    className="mt-3 text-xs font-semibold text-ink-300 underline hover:text-white"
+                  >
+                    Remove detailing package
+                  </button>
+                )}
+              </section>
+            )}
+            {eligibleAddons.length === 0 && eligibleBundleOffers.length === 0 && (
               <p className="text-ink-400">No add-ons available for this service.</p>
             )}
+            {eligibleAddons.length > 0 && <h3 className="pb-1 text-sm font-semibold text-white">Optional extras</h3>}
             {eligibleAddons.map((a) => {
               const checked = selectedAddons.includes(a.id);
               const priced = addonFor(a, vehicleCategory);
@@ -638,14 +776,19 @@ export function BookingWizard({
           <h3 className="mt-2 text-xl font-semibold text-white">Your booking</h3>
           {claimsOffer && serviceQualifies && (
             <p className="mt-3 rounded-xl border border-emerald-400/30 bg-emerald-950/25 px-3 py-2 text-xs font-medium text-emerald-200">
-              {promo!.percentOffBp / 100}% off applied automatically — no code needed.
+              Your {promo!.percentOffBp / 100}% campaign offer is active. We always apply the better saving if a bundle offer also qualifies.
+            </p>
+          )}
+          {bundleService && preview?.bundleApplied && (
+            <p className="mt-3 rounded-xl border border-accent-400/35 bg-accent-400/10 px-3 py-2 text-xs font-semibold text-accent-200">
+              {preview.discountLabel} applied automatically.
             </p>
           )}
           {droppedAddons.length > 0 && (
             <p role="status" className="mt-3 rounded-xl border border-amber-400/30 bg-amber-950/20 px-3 py-2 text-xs text-amber-200">
-              {droppedAddons.join(", ")} {droppedAddons.length === 1 ? "was" : "were"} removed, because
-              {droppedAddons.length === 1 ? " it is" : " they are"} only available with the service you
-              had selected. Nothing has been booked — the total below is up to date.
+              {droppedAddons.join(", ")} {droppedAddons.length === 1 ? "was" : "were"} removed because
+              {droppedAddons.length === 1 ? " it is" : " they are"} tied to your previous selection.
+              Nothing has been booked — the total below is up to date.
             </p>
           )}
           {!service && <p className="mt-3 text-sm text-ink-500">Select a service to begin.</p>}
@@ -656,14 +799,25 @@ export function BookingWizard({
           )}
           {service && preview && (
             <div className="mt-4 space-y-2 text-sm">
-              <Row label={service.name} value={formatCents(service.basePriceCents)} />
-              {service.adjustments[vehicleCategory] &&
-                service.adjustments[vehicleCategory].priceDeltaCents !== 0 && (
-                  <Row
-                    label={`${VEHICLE_CATEGORY_LABELS[vehicleCategory]} adjustment`}
-                    value={`+${formatCents(service.adjustments[vehicleCategory].priceDeltaCents)}`}
+              <Row
+                label={service.name}
+                value={
+                  <PricePair
+                    currentCents={preview.serviceLines[0].priceCents}
+                    compareAtCents={
+                      service.compareAtPriceCents === null
+                        ? null
+                        : service.compareAtPriceCents + (service.adjustments[vehicleCategory]?.priceDeltaCents ?? 0)
+                    }
                   />
-                )}
+                }
+              />
+              {bundleService && preview.serviceLines[1] && (
+                <Row
+                  label={publicServiceName(bundleService)}
+                  value={formatCents(preview.serviceLines[1].priceCents)}
+                />
+              )}
               {selectedAddons.map((id) => {
                 const a = addons.find((x) => x.id === id);
                 if (!a) return null;
@@ -679,7 +833,7 @@ export function BookingWizard({
               <Row label="Subtotal" value={formatCents(preview.subtotal)} />
               {preview.discount > 0 && (
                 <Row
-                  label={`${promo!.label} (${service.name})`}
+                  label={preview.discountLabel ?? "Offer saving"}
                   value={`−${formatCents(preview.discount)}`}
                   tone="saving"
                 />
@@ -805,7 +959,7 @@ function Row({
   tone = "default",
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   tone?: "default" | "saving";
 }) {
   return (
@@ -814,4 +968,24 @@ function Row({
       <span>{value}</span>
     </div>
   );
+}
+
+function PricePair({ currentCents, compareAtCents }: { currentCents: number; compareAtCents: number | null }) {
+  return (
+    <span className="text-right">
+      {compareAtCents !== null && (
+        <span className="mr-2 text-xs text-ink-500 line-through">{formatCents(compareAtCents)}</span>
+      )}
+      <span>{formatCents(currentCents)}</span>
+    </span>
+  );
+}
+
+/**
+ * The same customer-facing name the rest of the public site uses, so a bundle
+ * option is never labelled differently here than it is on /services. Falls
+ * back to the catalogue row, which the owners edit in Admin.
+ */
+function publicServiceName(service: WizardService): string {
+  return SERVICE_PRESENTATION[service.slug]?.publicName ?? service.name;
 }
