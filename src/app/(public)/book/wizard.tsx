@@ -193,9 +193,19 @@ export function BookingWizard({
     [service, bundleService],
   );
   const serviceQualifies = !!promo && selectedServiceIds.some((id) => promo.eligibleServiceIds.includes(id));
+  // Ordered by the catalogue, like the service list above it: the offer rows
+  // come back in whatever order the database holds them, which put the
+  // cheapest package first and contradicted the copy naming them #1 to #3.
   const eligibleBundleOffers = useMemo(
-    () => service ? bundleOffers.filter((offer) => offer.primaryServiceId === service.id) : [],
-    [service, bundleOffers],
+    () => service
+      ? bundleOffers
+          .filter((offer) => offer.primaryServiceId === service.id)
+          .sort((left, right) =>
+            services.findIndex((s) => s.id === left.bundledServiceId) -
+            services.findIndex((s) => s.id === right.bundledServiceId),
+          )
+      : [],
+    [service, bundleOffers, services],
   );
   const eligibleAddons = useMemo(
     () => addons.filter((addon) =>
