@@ -9,7 +9,7 @@ import {
 } from "@/lib/promotions";
 import type { BusinessSettings } from "@/lib/settings";
 import type { VehicleCategory } from "@/lib/types";
-import { bestAllocation, bundleDiscountAllocations } from "@/lib/bundle-offers";
+import { bestAllocation, bundleDiscountAllocations, bundlePerkFor } from "@/lib/bundle-offers";
 
 export type PricedLine = {
   serviceId?: string;
@@ -93,6 +93,12 @@ export async function priceBooking(input: {
    * restricting these to staff; the public booking actions never pass them.
    */
   customLines?: CustomBookingLine[];
+  /**
+   * The customer asked for the extra their bundle unlocks. Honoured only if
+   * the catalogue actually attaches one to the pairing they selected, so a
+   * hand-built request cannot add a free line to any booking it likes.
+   */
+  perkOptIn?: boolean;
 }): Promise<BookingPricing> {
   const { serviceIds, addonIds, vehicleCategory, settings, promo } = input;
   const customLines = input.customLines ?? [];
@@ -227,6 +233,8 @@ export async function priceBooking(input: {
           bundledServiceId: schema.serviceBundleOffers.bundledServiceId,
           discountPercentBp: schema.serviceBundleOffers.discountPercentBp,
           label: schema.serviceBundleOffers.label,
+          perkLabel: schema.serviceBundleOffers.perkLabel,
+          perkNote: schema.serviceBundleOffers.perkNote,
         })
         .from(schema.serviceBundleOffers)
         .where(and(
@@ -258,6 +266,15 @@ export async function priceBooking(input: {
     } else if (svc.depositType === "percent") {
       depositRequiredCents += percentCents(lines[i].priceCents - allocation[i], svc.depositValue);
     }
+  }
+
+  // Appended after the discount allocation and the deposit maths, both of
+  // which index `lines` positionally. It is free and takes no scheduled time,
+  // so it changes no total — it exists so the customer sees what they asked
+  // for and the shop has it on the booking.
+  const perk = input.perkOptIn ? bundlePerkFor(serviceIds, bundleRows) : null;
+  if (perk) {
+    lines.push({ description: perk.label, priceCents: 0, durationMin: 0 });
   }
 
   return {

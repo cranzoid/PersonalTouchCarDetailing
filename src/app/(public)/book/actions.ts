@@ -53,6 +53,7 @@ const slotsInputSchema = z.object({
   serviceIds: z.array(z.string()).min(1).max(5),
   addonIds: z.array(z.string()).max(10),
   vehicleCategory: z.enum(VEHICLE_CATEGORIES),
+  perkOptIn: z.boolean().optional(),
 });
 
 export type SlotsResult =
@@ -129,6 +130,8 @@ const bookingInputSchema = z.object({
    * booking is refused rather than silently repriced.
    */
   expectedDiscountCents: z.number().int().min(0).max(10_000_000).optional(),
+  /** The customer ticked the extra their bundle unlocks. Re-checked server-side. */
+  perkOptIn: z.boolean().optional(),
 });
 
 export type BookingResult =
@@ -186,6 +189,7 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
       vehicleCategory: input.vehicleCategory,
       settings,
       promo,
+      perkOptIn: input.perkOptIn,
     });
 
     // The customer must never be charged a total they were not shown. If the
@@ -321,6 +325,7 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
           addonIds: input.addonIds,
           vehicleCategory: input.vehicleCategory,
           settings,
+          perkOptIn: input.perkOptIn,
         });
         return {
           ok: false,

@@ -148,6 +148,13 @@
       "when": 1788820030975,
       "tag": "0020_lovely_alex_wilder",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788826686818,
+      "tag": "0021_bundle_offer_perks",
+      "breakpoints": true
     }
   ]
 }

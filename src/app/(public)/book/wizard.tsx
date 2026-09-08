@@ -9,7 +9,7 @@ import { DATE_ONLY_BOOKING_NOTICE, DATE_ONLY_BOOKING_NOTICE_SHORT } from "@/lib/
 import { formatCents } from "@/lib/money";
 import { localDateISO } from "@/lib/tz";
 import { SERVICE_PRESENTATION } from "@/lib/public-content";
-import { bestAllocation, bundleDiscountAllocations } from "@/lib/bundle-offers";
+import { bestAllocation, bundleDiscountAllocations, bundlePerkFor } from "@/lib/bundle-offers";
 import {
   VEHICLE_CATEGORIES,
   VEHICLE_CATEGORY_LABELS,
@@ -87,6 +87,9 @@ export type WizardBundleOffer = {
   bundledServiceId: string;
   discountPercentBp: number;
   label: string;
+  /** Zero-priced extra this pairing unlocks. Opt-in; the server re-checks it. */
+  perkLabel: string | null;
+  perkNote: string | null;
 };
 
 const STEPS = ["Service", "Vehicle", "Package", "Time", "Details"] as const;
@@ -146,6 +149,9 @@ export function BookingWizard({
   const [step, setStep] = useState(preselected ? 1 : 0);
   const [serviceId, setServiceId] = useState<string | null>(preselected?.id ?? null);
   const [bundleServiceId, setBundleServiceId] = useState<string | null>(preselectedBundle?.id ?? null);
+  // The bundle extra is something the customer asks for, not something we add
+  // for them — it costs them nothing but it commits them to bringing a pen.
+  const [perkOptIn, setPerkOptIn] = useState(false);
   const [vehicleCategory, setVehicleCategory] = useState<VehicleCategory>("sedan");
   const [vehicle, setVehicle] = useState({ year: "", make: "", model: "", colour: "" });
   const [selectedAddons, setSelectedAddons] = useState<string[]>(
@@ -193,6 +199,17 @@ export function BookingWizard({
     [service, bundleService],
   );
   const serviceQualifies = !!promo && selectedServiceIds.some((id) => promo.eligibleServiceIds.includes(id));
+  // Same rule the server applies, so the wizard can never offer an extra the
+  // booking would refuse to honour.
+  const availablePerk = useMemo(
+    () => bundlePerkFor(selectedServiceIds, bundleOffers),
+    [selectedServiceIds, bundleOffers],
+  );
+  // A perk that stops being available takes its opt-in with it, so a stale
+  // tick cannot travel to the server with a cart that no longer earns it.
+  useEffect(() => {
+    if (!availablePerk && perkOptIn) setPerkOptIn(false);
+  }, [availablePerk, perkOptIn]);
   // Ordered by the catalogue, like the service list above it: the offer rows
   // come back in whatever order the database holds them, which put the
   // cheapest package first and contradicted the copy naming them #1 to #3.
@@ -298,6 +315,7 @@ export function BookingWizard({
       serviceIds: selectedServiceIds,
       addonIds: selectedAddons,
       vehicleCategory,
+      perkOptIn: perkOptIn && !!availablePerk,
       dateISO,
       // Omitted for a date-only service. The server does not take the wizard's
       // word for it either way — it re-reads the catalogue.
@@ -589,6 +607,33 @@ export function BookingWizard({
                     );
                   })}
                 </div>
+                {availablePerk && (
+                  <button
+                    type="button"
+                    aria-pressed={perkOptIn}
+                    onClick={() => setPerkOptIn(!perkOptIn)}
+                    className={`mt-4 flex w-full items-start gap-3 rounded-xl border px-4 py-3 text-left transition ${focusRing} ${
+                      perkOptIn ? "border-emerald-400/60 bg-emerald-950/25" : "border-white/10 bg-ink-950/35 hover:border-emerald-400/50"
+                    }`}
+                  >
+                    <span
+                      aria-hidden="true"
+                      className={`mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-md border text-xs font-bold ${
+                        perkOptIn ? "border-emerald-400 bg-emerald-400 text-ink-950" : "border-ink-600 text-transparent"
+                      }`}
+                    >
+                      ✓
+                    </span>
+                    <span>
+                      <span className="block text-sm font-semibold text-white">
+                        {availablePerk.label} — <span className="text-emerald-300">included free</span>
+                      </span>
+                      {availablePerk.note && (
+                        <span className="mt-0.5 block text-xs leading-5 text-ink-400">{availablePerk.note}</span>
+                      )}
+                    </span>
+                  </button>
+                )}
                 {bundleService && (
                   <button
                     type="button"
@@ -641,7 +686,14 @@ export function BookingWizard({
                 </button>
               );
             })}
-            <StepNav onBack={() => setStep(1)} onNext={() => setStep(3)} />
+            {/* Nothing on this step is required. "Continue" beside an empty
+                selection read as though one had to be made, so the button
+                says what it will actually do until something is chosen. */}
+            <StepNav
+              onBack={() => setStep(1)}
+              onNext={() => setStep(3)}
+              nextLabel={bundleServiceId || selectedAddons.length > 0 ? "Continue" : "Skip"}
+            />
           </div>
         )}
 
@@ -840,6 +892,9 @@ export function BookingWizard({
                 );
               })}
               <div className="my-2 border-t border-ink-700" />
+              {perkOptIn && availablePerk && (
+                <Row label={availablePerk.label} value="Included" tone="saving" />
+              )}
               <Row label="Subtotal" value={formatCents(preview.subtotal)} />
               {preview.discount > 0 && (
                 <Row
@@ -941,10 +996,13 @@ function StepNav({
   onBack,
   onNext,
   nextDisabled,
+  nextLabel = "Continue",
 }: {
   onBack: () => void;
   onNext: () => void;
   nextDisabled?: boolean;
+  /** "Continue" everywhere the step is required; see the optional package step. */
+  nextLabel?: string;
 }) {
   return (
     <div className="flex flex-col gap-3 pt-3 sm:flex-row">
@@ -957,7 +1015,7 @@ function StepNav({
         disabled={nextDisabled}
         className={`min-h-11 rounded-xl bg-accent-400 px-6 py-3 text-sm font-semibold text-ink-950 shadow-lg shadow-accent-500/15 hover:bg-accent-300 disabled:cursor-not-allowed disabled:opacity-40 ${focusRing}`}
       >
-        Continue
+        {nextLabel}
       </button>
     </div>
   );

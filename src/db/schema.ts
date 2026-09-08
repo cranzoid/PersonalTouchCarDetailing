@@ -394,6 +394,13 @@ export const serviceBundleOffers = pgTable(
       .references(() => services.id),
     discountPercentBp: integer("discount_percent_bp").notNull(),
     label: text("label").notNull(),
+    /**
+     * An extra the customer may CHOOSE when this pairing is booked, priced at
+     * zero. Null on offers that carry no extra. It is opt-in rather than
+     * automatic, so `perkNote` carries what the customer has to do for it.
+     */
+    perkLabel: text("perk_label"),
+    perkNote: text("perk_note"),
     active: boolean("active").notNull().default(true),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

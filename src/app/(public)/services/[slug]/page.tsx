@@ -100,7 +100,11 @@ export default async function ServiceDetailPage({
   const coating = coatingPackage(svc.slug);
   const bundleOffers = coating
     ? await db()
-        .select({ discountPercentBp: schema.serviceBundleOffers.discountPercentBp })
+        .select({
+          discountPercentBp: schema.serviceBundleOffers.discountPercentBp,
+          perkLabel: schema.serviceBundleOffers.perkLabel,
+          perkNote: schema.serviceBundleOffers.perkNote,
+        })
         .from(schema.serviceBundleOffers)
         .where(and(
           eq(schema.serviceBundleOffers.primaryServiceId, svc.id),
@@ -110,6 +114,7 @@ export default async function ServiceDetailPage({
   const bundlePercentBp = bundleOffers.length > 0
     ? Math.max(...bundleOffers.map((offer) => offer.discountPercentBp))
     : null;
+  const bundlePerk = bundleOffers.find((offer) => offer.perkLabel) ?? null;
 
   const canonicalPath = `/services/${svc.slug}`;
   const serviceSchema = {
@@ -293,6 +298,12 @@ export default async function ServiceDetailPage({
               <span className="text-xs font-bold uppercase tracking-[0.18em] text-accent-300">Bundle offer</span>
               <span className="mt-2 block font-display text-2xl text-white">Add a detail and save {bundlePercentBp / 100}% on it.</span>
               <span className="mt-2 block text-sm leading-6 text-ink-300">Choose Ultimate Detail, Signature Detail or Interior Detail in the booking flow. Your saving appears instantly and is stored with your booking.</span>
+              {bundlePerk && (
+                <span className="mt-4 block rounded-xl border border-emerald-400/25 bg-emerald-950/25 px-4 py-3 text-sm text-emerald-200">
+                  <span className="font-semibold">{bundlePerk.perkLabel}, if you want it.</span>
+                  {bundlePerk.perkNote && <span className="mt-0.5 block text-xs leading-5 text-emerald-200/80">{bundlePerk.perkNote}</span>}
+                </span>
+              )}
               <span className="mt-4 inline-flex text-sm font-semibold text-accent-200">See full offer details →</span>
             </Link>
           )}

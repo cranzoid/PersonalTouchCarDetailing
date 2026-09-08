@@ -120,6 +120,8 @@ export default async function BookPage({
     bundledServiceId: offer.bundledServiceId,
     discountPercentBp: offer.discountPercentBp,
     label: offer.label,
+    perkLabel: offer.perkLabel,
+    perkNote: offer.perkNote,
   }));
 
   return (

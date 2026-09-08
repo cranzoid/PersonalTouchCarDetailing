@@ -82,8 +82,8 @@ async function seed() {
   ]);
   await db().insert(schema.serviceBundleOffers).values([
     { id: "bof_test_crystal_ultimate", primaryServiceId: CRYSTAL, bundledServiceId: ULTIMATE, discountPercentBp: 1500, label: "Crystal detailing bundle — 15% off" },
-    { id: "bof_test_pro_ultimate", primaryServiceId: PRO, bundledServiceId: ULTIMATE, discountPercentBp: 5000, label: "Pro detailing bundle — 50% off" },
-    { id: "bof_test_max_ultimate", primaryServiceId: MAX, bundledServiceId: ULTIMATE, discountPercentBp: 5000, label: "Max detailing bundle — 50% off" },
+    { id: "bof_test_pro_ultimate", primaryServiceId: PRO, bundledServiceId: ULTIMATE, discountPercentBp: 5000, label: "Pro detailing bundle — 50% off", perkLabel: "Free paint chip touch-up", perkNote: "Bring your own colour-matched paint pen." },
+    { id: "bof_test_max_ultimate", primaryServiceId: MAX, bundledServiceId: ULTIMATE, discountPercentBp: 5000, label: "Max detailing bundle — 50% off", perkLabel: "Free paint chip touch-up", perkNote: "Bring your own colour-matched paint pen." },
   ]);
 }
 
@@ -274,6 +274,53 @@ describe("ceramic coating packages", () => {
       settings,
     });
     expect(pricing.discountCents).toBe(0);
+  });
+
+  it("adds the touch-up as a free line only when the customer asks for it", async () => {
+    const without = await priceBooking({
+      serviceIds: [PRO, ULTIMATE],
+      addonIds: [],
+      vehicleCategory: "sedan",
+      settings,
+    });
+    expect(without.lines.some((line) => line.description === "Free paint chip touch-up")).toBe(false);
+
+    const withPerk = await priceBooking({
+      serviceIds: [PRO, ULTIMATE],
+      addonIds: [],
+      vehicleCategory: "sedan",
+      settings,
+      perkOptIn: true,
+    });
+    const perkLine = withPerk.lines.find((line) => line.description === "Free paint chip touch-up");
+    expect(perkLine).toBeDefined();
+    expect([perkLine!.priceCents, perkLine!.durationMin]).toEqual([0, 0]);
+    // Free means free: it moves no total and books no extra time.
+    expect(withPerk.subtotalCents).toBe(without.subtotalCents);
+    expect(withPerk.totalCents).toBe(without.totalCents);
+    expect(withPerk.durationMin).toBe(without.durationMin);
+  });
+
+  it("refuses the touch-up on a pairing the catalogue does not attach it to", async () => {
+    const crystal = await priceBooking({
+      serviceIds: [CRYSTAL, ULTIMATE],
+      addonIds: [],
+      vehicleCategory: "sedan",
+      settings,
+      perkOptIn: true,
+    });
+    expect(crystal.lines.some((line) => line.description === "Free paint chip touch-up")).toBe(false);
+  });
+
+  it("refuses the touch-up when the coating is booked without a detailing package", async () => {
+    const alone = await priceBooking({
+      serviceIds: [PRO],
+      addonIds: [],
+      vehicleCategory: "sedan",
+      settings,
+      perkOptIn: true,
+    });
+    expect(alone.lines.some((line) => line.description === "Free paint chip touch-up")).toBe(false);
   });
 
   it("uses the better bundle saving instead of stacking a campaign percentage", async () => {

@@ -376,10 +376,15 @@ export async function runSeed() {
     .select({ id: schema.services.id, slug: schema.services.slug })
     .from(schema.services);
   const bundleServiceId = new Map(bundleServiceRows.map((service) => [service.slug, service.id]));
+  // Only the two 50% pairings carry the opt-in touch-up; Crystal's 15% does not.
+  const TOUCH_UP_PERK = {
+    perkLabel: "Free paint chip touch-up",
+    perkNote: "Bring your own colour-matched paint pen and we will apply it during the visit.",
+  };
   const bundleRules = [
-    { primary: "ceramic-coating-crystal", discountPercentBp: 1500, label: "Crystal detailing bundle — 15% off" },
-    { primary: "ceramic-coating-pro", discountPercentBp: 5000, label: "Pro detailing bundle — 50% off" },
-    { primary: "ceramic-coating-max", discountPercentBp: 5000, label: "Max detailing bundle — 50% off" },
+    { primary: "ceramic-coating-crystal", discountPercentBp: 1500, label: "Crystal detailing bundle — 15% off", perkLabel: null, perkNote: null },
+    { primary: "ceramic-coating-pro", discountPercentBp: 5000, label: "Pro detailing bundle — 50% off", ...TOUCH_UP_PERK },
+    { primary: "ceramic-coating-max", discountPercentBp: 5000, label: "Max detailing bundle — 50% off", ...TOUCH_UP_PERK },
   ];
   const bundledDetails = ["complete-detail-engine", "the-works", "interior-detail"];
   for (const rule of bundleRules) {
@@ -394,6 +399,8 @@ export async function runSeed() {
         bundledServiceId,
         discountPercentBp: rule.discountPercentBp,
         label: rule.label,
+        perkLabel: rule.perkLabel,
+        perkNote: rule.perkNote,
       }).onConflictDoNothing();
     }
   }

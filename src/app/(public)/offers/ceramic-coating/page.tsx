@@ -56,6 +56,10 @@ export default async function CeramicCoatingOfferPage() {
     const rates = offerRows.filter((row) => row.primaryServiceId === serviceId).map((row) => row.discountPercentBp);
     return rates.length > 0 ? Math.max(...rates) : 0;
   };
+  /** The opt-in extra this coating's bundle unlocks, straight from the rule. */
+  const bundlePerk = (serviceId: string) =>
+    offerRows.find((row) => row.primaryServiceId === serviceId && row.perkLabel)?.perkLabel ?? null;
+  const perkNote = offerRows.find((row) => row.perkNote)?.perkNote ?? null;
 
   const structuredData = {
     "@context": "https://schema.org",
@@ -121,6 +125,11 @@ export default async function CeramicCoatingOfferPage() {
                       <p className="text-xs font-bold uppercase tracking-wider text-[#775A1C]">Detailing bundle</p>
                       <p className="mt-1 text-lg font-bold text-[#0B2A4A]">{percentBp / 100}% off an eligible detail</p>
                       <p className="mt-1 text-xs leading-5 text-slate-600">Ultimate, Signature or Interior Detail</p>
+                      {bundlePerk(service.id) && (
+                        <p className="mt-3 border-t border-[#E3D8BF] pt-3 text-sm font-bold text-emerald-700">
+                          + {bundlePerk(service.id)}, if you want it
+                        </p>
+                      )}
                     </div>
                   )}
                   <div className="mt-auto pt-7"><ButtonLink href={`/book?service=${service.slug}`} className="w-full">Choose {content.tier}</ButtonLink></div>
@@ -175,6 +184,7 @@ export default async function CeramicCoatingOfferPage() {
               <li>• One eligible detailing package can be added in the online booking flow.</li>
               <li>• Eligible details are Ultimate Detail, Signature Detail and Interior Detail.</li>
               <li>• Offers do not stack on the same service; the better eligible saving is used.</li>
+              {perkNote && <li>• Paint chip touch-up is optional and free with Pro or Max plus a detail. {perkNote}</li>}
               <li>• Prices are before {settings.taxLabel}; commercial vehicles are quoted individually.</li>
               <li>• Condition-dependent paint correction or preparation is discussed and approved separately.</li>
             </ul>

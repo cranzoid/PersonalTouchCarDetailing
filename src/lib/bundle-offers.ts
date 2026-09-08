@@ -5,7 +5,12 @@ export type BundleOfferRule = {
   bundledServiceId: string;
   discountPercentBp: number;
   label: string;
+  /** A zero-priced extra this pairing unlocks, if any. Opt-in, never automatic. */
+  perkLabel?: string | null;
+  perkNote?: string | null;
 };
+
+export type BundlePerk = { label: string; note: string | null };
 
 type DiscountLine = { serviceId?: string; priceCents: number };
 
@@ -62,4 +67,24 @@ export function bestAllocation(
     return campaignCents;
   });
   return { allocation, bundleContributes, campaignContributes };
+}
+
+/**
+ * The opt-in extra the selected pairing unlocks, if any.
+ *
+ * Deliberately independent of which discount ended up winning the line: the
+ * extra is attached to the combination the customer bought, so a campaign code
+ * that happens to beat the bundle percentage must not also take the extra away.
+ */
+export function bundlePerkFor(
+  serviceIds: readonly string[],
+  offers: readonly BundleOfferRule[],
+): BundlePerk | null {
+  const selected = new Set(serviceIds);
+  const offer = offers.find((candidate) =>
+    !!candidate.perkLabel &&
+    selected.has(candidate.primaryServiceId) &&
+    selected.has(candidate.bundledServiceId),
+  );
+  return offer ? { label: offer.perkLabel!, note: offer.perkNote ?? null } : null;
 }
