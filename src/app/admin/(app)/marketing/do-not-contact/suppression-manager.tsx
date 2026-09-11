@@ -125,7 +125,7 @@ export function SuppressionManager({ entries }: { entries: Entry[] }) {
                             type="button"
                             disabled={busy}
                             onClick={() => lift(entry)}
-                            className="rounded-lg bg-[#8B3F3F] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+                            className="rounded-lg bg-[#8B3F3F] px-3 py-1.5 text-xs font-semibold text-white admin-on-dark disabled:opacity-40"
                           >
                             Yes, remove
                           </button>

@@ -29,16 +29,16 @@ export default async function CaseStudiesAdminPage() {
         <div>
           <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#8A681F]">Local proof</p>
           <h1 className="mt-1 text-2xl font-bold text-[#0B2A4A]">Case studies</h1>
-          <p className="mt-1 max-w-2xl text-sm text-[#687B8E]">Draft and publish customer-approved Hamilton job stories. Every published story must pass consent, privacy and completeness checks.</p>
+          <p className="mt-1 max-w-2xl text-sm text-[#5A6B7D]">Draft and publish customer-approved Hamilton job stories. Every published story must pass consent, privacy and completeness checks.</p>
         </div>
-        <Link href="/admin/results/new" className="inline-flex min-h-11 items-center rounded-xl bg-[#0B2A4A] px-4 text-sm font-bold text-white shadow-sm">New case study</Link>
+        <Link href="/admin/results/new" className="inline-flex min-h-11 items-center rounded-xl bg-[#0B2A4A] px-4 text-sm font-bold text-white admin-on-dark shadow-sm">New case study</Link>
       </header>
 
       <section className="mt-6 rounded-2xl border border-[#DDE4EC] bg-white p-5 shadow-sm">
         {stories.length === 0 ? (
           <div className="rounded-xl bg-[#F5F7FA] px-5 py-12 text-center">
             <h2 className="font-bold text-[#0B2A4A]">No case studies yet</h2>
-            <p className="mt-2 text-sm text-[#687B8E]">Start with a completed job that has explicit photo consent and a result you can document accurately.</p>
+            <p className="mt-2 text-sm text-[#5A6B7D]">Start with a completed job that has explicit photo consent and a result you can document accurately.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">

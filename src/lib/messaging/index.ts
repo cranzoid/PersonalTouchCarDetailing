@@ -38,6 +38,13 @@ export type OutboundMessage = {
   cc?: string[];
   subject?: string;
   body: string;
+  /**
+   * HTML alternative for an email. When present the message goes out multipart
+   * — `body` is still sent as the plain-text part, because an HTML-only email
+   * is both worse for deliverability and unreadable to a client that blocks
+   * HTML. Ignored for SMS, which has no such concept.
+   */
+  html?: string;
   relatedEntityType?: string;
   relatedEntityId?: string;
 };
@@ -296,6 +303,7 @@ async function sendWithResend(msg: OutboundMessage, cc: readonly string[]): Prom
       ...(cc.length > 0 ? { cc: [...cc] } : {}),
       subject: msg.subject ?? "Message from Personal Touch Car Detailing",
       text: msg.body,
+      ...(msg.html ? { html: msg.html } : {}),
     }),
     signal: AbortSignal.timeout(10_000),
   });

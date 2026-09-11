@@ -75,7 +75,7 @@ export function BlogEditor({ initial }: { initial: BlogDraft }) {
               <span className={label}>URL slug</span>
               <input className={field} value={post.slug} onChange={(event) => update("slug", slugify(event.target.value))} placeholder="maintain-ceramic-coated-vehicle" />
             </label>
-            <div className="rounded-xl bg-[#F5F7FA] p-4 text-xs leading-5 text-[#687B8E]">
+            <div className="rounded-xl bg-[#F5F7FA] p-4 text-xs leading-5 text-[#5A6B7D]">
               Public URL<br /><span className="font-mono text-[#0B2A4A]">/blog/{post.slug || "article-slug"}</span>
             </div>
             <label className="sm:col-span-2">
@@ -88,7 +88,7 @@ export function BlogEditor({ initial }: { initial: BlogDraft }) {
 
         <section className="rounded-2xl border border-[#DDE4EC] bg-white p-5 shadow-sm sm:p-6">
           <h2 className="text-lg font-bold text-[#0B2A4A]">Article body</h2>
-          <p className="mt-1 text-sm leading-6 text-[#687B8E]">Use blank lines between paragraphs. Start a heading with <code>## </code> or <code>### </code>. Start each list item with <code>- </code>.</p>
+          <p className="mt-1 text-sm leading-6 text-[#5A6B7D]">Use blank lines between paragraphs. Start a heading with <code>## </code> or <code>### </code>. Start each list item with <code>- </code>.</p>
           <textarea className={`${field} min-h-[34rem] font-mono leading-7`} value={post.content} onChange={(event) => update("content", event.target.value)} placeholder={"A ceramic coating makes routine care easier, but it still needs thoughtful washing.\n\n## Start with the right wash\n\n- Use a pH-neutral shampoo\n- Avoid automatic brush washes\n- Dry with a clean microfiber towel"} />
           <span className="mt-1 block text-right text-xs text-[#8492A0]">{post.content.length.toLocaleString()} characters</span>
         </section>
@@ -105,9 +105,9 @@ export function BlogEditor({ initial }: { initial: BlogDraft }) {
       <aside className="space-y-5 xl:sticky xl:top-24 xl:self-start">
         <section className="rounded-2xl border border-[#DDE4EC] bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between gap-3"><h2 className="font-bold text-[#0B2A4A]">Publication</h2><span className={`rounded-full px-2.5 py-1 text-[11px] font-bold uppercase ${post.status === "published" ? "bg-emerald-100 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>{post.status}</span></div>
-          <p className="mt-4 text-sm leading-6 text-[#687B8E]">Save changes first, then publish when the article is complete. Published edits go live when saved.</p>
+          <p className="mt-4 text-sm leading-6 text-[#5A6B7D]">Save changes first, then publish when the article is complete. Published edits go live when saved.</p>
           <div className="mt-5 grid gap-2">
-            <button type="button" disabled={pending} onClick={save} className="min-h-11 rounded-xl bg-[#0B2A4A] px-4 text-sm font-bold text-white disabled:opacity-50">{pending ? "Working…" : "Save"}</button>
+            <button type="button" disabled={pending} onClick={save} className="min-h-11 rounded-xl bg-[#0B2A4A] px-4 text-sm font-bold text-white admin-on-dark disabled:opacity-50">{pending ? "Working…" : "Save"}</button>
             {post.status === "published"
               ? <button type="button" disabled={pending} onClick={() => changePublication("unpublish")} className="min-h-11 rounded-xl border border-[#C8D3DE] px-4 text-sm font-bold text-[#7A3140] disabled:opacity-50">Unpublish</button>
               : <button type="button" disabled={pending || !post.id} onClick={() => changePublication("publish")} className="min-h-11 rounded-xl bg-[#E0A93B] px-4 text-sm font-bold text-[#0B2A4A] disabled:opacity-50">Publish</button>}

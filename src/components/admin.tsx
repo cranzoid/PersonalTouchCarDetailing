@@ -57,7 +57,7 @@ export function AdminNavLinks({ items, mobile = false }: { items: AdminNavItem[]
                   : "text-white/65 hover:bg-white/8 hover:text-white"
             }`}
           >
-            <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-md transition ${active ? "bg-[#E0A93B] text-[#0B2A4A]" : mobile ? "bg-[#EEF2F7] text-[#607087] group-hover:text-[#0B2A4A]" : "bg-white/7 text-white/70 group-hover:bg-white/10 group-hover:text-white"}`}>
+            <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-md transition ${active ? "bg-[#E0A93B] text-[#0B2A4A]" : mobile ? "bg-[#EEF2F7] text-[#5A6B7D] group-hover:text-[#0B2A4A]" : "bg-white/7 text-white/70 group-hover:bg-white/10 group-hover:text-white"}`}>
               <AdminIcon name={item.icon} />
             </span>
             <span className="truncate">{item.label}</span>

@@ -389,6 +389,60 @@ day.
   booking confirmation template. Add it above `Estimated total:` under
   Admin → Communications so confirmation emails show the saving.
 
+## Winning back no-shows and cancellations
+
+**Admin → Marketing** can now build a campaign from the people who cancelled or
+never turned up, instead of you copying names out of the appointment book.
+
+**How to run one**
+
+1. Admin → Marketing → New campaign. Pick **Win back a no-show or cancellation**
+   for the starting wording, choose text or email, name it, and create it.
+2. On the campaign screen, **Who didn't come in** lists them. Switch between
+   **No-shows**, **Cancelled** or **Both**, and how far back to look.
+3. Each row shows the reason they gave — or *No reason recorded*, which is what
+   a no-show usually is. Tick the ones you want and **Add to this campaign**.
+4. Edit the message, send yourself a test, then release it in small batches as
+   usual. Nothing is sent until you press send.
+
+**Who you can and cannot message**
+
+Rows are greyed out with the reason when they cannot be contacted: no number or
+address on file, already on the do-not-contact list, or outside the window the
+law allows. That last one is worked out from your own records — somebody who has
+**paid an invoice in the last two years** can be messaged, and so can anybody
+whose **booking was in the last six months**. Past both, they need to ask you
+first. Nothing is sent to them and nothing is quietly assumed on their behalf.
+
+People you have already messaged in another campaign are flagged too, so nobody
+gets the same pitch twice.
+
+**Recording why somebody did not show**
+
+Marking an appointment **No-show** now asks whether they said why. Leave it blank
+if you never heard from them — that is normal, and the campaign list prints it as
+*No reason recorded*. Cancellations already ask for a reason, as before.
+
+## Sending a designed HTML email
+
+An email campaign can carry a full HTML template. On the campaign screen tick
+**Use a designed HTML template** and paste the markup from Canva, Mailchimp or
+your designer.
+
+- `{{FirstName}}`, `{{Company}}` and `{{LastVisit}}` work inside the HTML.
+- Your address and the unsubscribe link are still added at the bottom for you —
+  do not paste your own.
+- The plain-text box underneath is sent alongside it, for people whose mail
+  client blocks HTML. Leave it blank and it is written from your template.
+- Scripts, forms and iframes are refused. Email clients block them anyway and
+  they get the whole message filtered as spam.
+- **The preview does not load hosted images.** That is a limitation of the
+  preview, not of your template. **Send yourself a test** to see the finished
+  email exactly as a customer will.
+
+Once part of a campaign has gone out, the wording locks — create a new campaign
+to send something different.
+
 ## Booking quote-only work (custom lines)
 
 **Admin → Appointments → New** now has a **Custom lines** step, for anything the

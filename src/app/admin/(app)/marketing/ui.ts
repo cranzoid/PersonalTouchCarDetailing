@@ -7,8 +7,8 @@ export const input =
 export const textarea =
   "mt-1.5 w-full rounded-xl border border-[#D5DEE7] bg-white px-3 py-2.5 text-sm leading-6 text-[#1C2026] outline-none placeholder:text-[#9AA8B6] focus-visible:border-[#0B2A4A] focus-visible:ring-2 focus-visible:ring-[#E0A93B]";
 export const primaryButton =
-  "inline-flex min-h-11 items-center justify-center rounded-xl bg-[#0B2A4A] px-4 text-sm font-semibold text-white transition hover:bg-[#123B63] disabled:opacity-40";
+  "inline-flex min-h-11 items-center justify-center rounded-xl bg-[#0B2A4A] px-4 text-sm font-semibold text-white admin-on-dark transition hover:bg-[#123B63] disabled:opacity-40";
 export const secondaryButton =
   "inline-flex min-h-11 items-center justify-center rounded-xl border border-[#D5DEE7] bg-white px-4 text-sm font-semibold text-[#42536A] transition hover:border-[#0B2A4A]/30 hover:text-[#0B2A4A] disabled:opacity-40";
 export const heading = "text-base font-bold text-[#0B2A4A]";
-export const subtle = "text-xs leading-5 text-[#6B7D90]";
+export const subtle = "text-xs leading-5 text-[#5A6B7D]";

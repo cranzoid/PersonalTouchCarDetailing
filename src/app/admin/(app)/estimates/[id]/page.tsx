@@ -111,7 +111,7 @@ export default async function EstimateDetailPage({
                 <td className="px-4 py-3 text-ink-200">
                   {l.description}
                   {l.isOptional && (
-                    <span className="ml-2 rounded-full bg-ink-800 px-2 py-0.5 text-xs text-ink-400">
+                    <span className="ml-2 rounded-full bg-ink-800 px-2 py-0.5 text-xs text-ink-300">
                       optional{l.isSelected ? " · selected" : " · not selected"}
                     </span>
                   )}

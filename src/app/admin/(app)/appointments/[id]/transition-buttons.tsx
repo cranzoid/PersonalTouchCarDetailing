@@ -22,6 +22,8 @@ const ACTIONS: Record<
     label: string;
     danger?: boolean;
     needsReason?: boolean;
+    /** Asks for a note but proceeds without one. */
+    optionalReason?: boolean;
     /** Rendered as a quiet secondary button. */
     secondary?: boolean;
   }[]
@@ -35,7 +37,7 @@ const ACTIONS: Record<
     // Checking the vehicle in records arrival too, so this is only for the
     // customer who is here but waiting.
     { to: "arrived", label: "Mark Arrived (waiting)", secondary: true },
-    { to: "no_show", label: "No-show", danger: true },
+    { to: "no_show", label: "No-show", danger: true, optionalReason: true },
     { to: "cancelled", label: "Cancel", danger: true, needsReason: true },
   ],
   arrived: [{ to: "completed", label: "Mark Completed" }],
@@ -61,12 +63,26 @@ export function TransitionButtons({
   const remainingDepositCents = Math.max(0, depositRequiredCents - depositPaidCents);
   if (actions.length === 0 && status !== "deposit_required") return null;
 
-  async function run(to: (typeof actions)[number]["to"], needsReason?: boolean) {
+  async function run(
+    to: (typeof actions)[number]["to"],
+    needsReason?: boolean,
+    optionalReason?: boolean,
+  ) {
     let reason: string | undefined;
     if (needsReason) {
       // eslint-disable-next-line no-alert
       reason = window.prompt("Reason for cancellation (required):") ?? undefined;
       if (!reason?.trim()) return;
+    } else if (optionalReason) {
+      // Cancel on this prompt means "don't mark them a no-show at all", so it
+      // has to be distinguishable from an empty note, which is a valid answer.
+      // eslint-disable-next-line no-alert
+      const answer = window.prompt(
+        "Did they say why? Leave blank if you never heard from them.\n\nThis shows on win-back campaigns.",
+        "",
+      );
+      if (answer === null) return;
+      reason = answer.trim() || undefined;
     }
     setBusy(true);
     setError(null);
@@ -128,7 +144,7 @@ export function TransitionButtons({
           <button
             key={a.to}
             disabled={busy}
-            onClick={() => void run(a.to, a.needsReason)}
+            onClick={() => void run(a.to, a.needsReason, a.optionalReason)}
             className={`rounded-lg px-4 py-2 text-sm font-medium disabled:opacity-40 ${
               a.danger
                 ? "border border-red-800 text-red-300 hover:bg-red-950"

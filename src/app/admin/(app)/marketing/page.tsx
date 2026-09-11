@@ -84,7 +84,7 @@ export default async function MarketingPage() {
           <section className={`mt-6 ${card}`}>
             <h2 className={heading}>Campaigns</h2>
             {campaigns.length === 0 ? (
-              <p className="mt-4 rounded-xl bg-[#F6F8FA] px-4 py-10 text-center text-sm text-[#687B8E]">
+              <p className="mt-4 rounded-xl bg-[#F6F8FA] px-4 py-10 text-center text-sm text-[#5A6B7D]">
                 No campaigns yet. Create one above to get started.
               </p>
             ) : (
@@ -147,7 +147,7 @@ export default async function MarketingPage() {
             automatically.
           </p>
           {replies.length === 0 ? (
-            <p className="mt-4 rounded-xl bg-[#F6F8FA] px-4 py-8 text-center text-sm text-[#687B8E]">
+            <p className="mt-4 rounded-xl bg-[#F6F8FA] px-4 py-8 text-center text-sm text-[#5A6B7D]">
               No replies yet.
             </p>
           ) : (

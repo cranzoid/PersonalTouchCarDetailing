@@ -14,6 +14,7 @@ import {
   updateCampaignAction,
 } from "../actions";
 import { card, heading, input, label, primaryButton, secondaryButton, subtle, textarea } from "../ui";
+import { AudiencePanel, type AudienceFilterValue, type AudienceRow } from "./audience-panel";
 
 type Recipient = {
   id: string;
@@ -25,6 +26,8 @@ type Recipient = {
   status: string;
   skipReason: string | null;
   sentAt: string | null;
+  /** Why they are on this list, snapshotted when they were queued. */
+  contextNote: string | null;
   replies: { id: string; body: string; kind: string }[];
 };
 
@@ -34,6 +37,7 @@ type Campaign = {
   channel: "email" | "sms";
   subject: string | null;
   body: string;
+  bodyHtml: string | null;
   status: string;
   allowRecontact: boolean;
 };
@@ -74,12 +78,19 @@ export function CampaignWorkspace({
   issues,
   sendWindow,
   businessName,
+  audience,
 }: {
   campaign: Campaign;
   recipients: Recipient[];
   issues: ComplianceIssue[];
   sendWindow: { allowed: boolean; localHour: number };
   businessName: string;
+  audience: {
+    filter: AudienceFilterValue;
+    withinDays: number;
+    totals: { eligible: number; blocked: number; scanned: number };
+    rows: AudienceRow[];
+  };
 }) {
   const router = useRouter();
   const [batch, setBatch] = useState<BatchResult | null>(null);
@@ -104,12 +115,16 @@ export function CampaignWorkspace({
       const n = recipients.filter((r) => r.status === "pending" && !r.companyName.trim()).length;
       if (n > 0) gaps.push(`${n} waiting contact${n === 1 ? " has" : "s have"} no company name`);
     }
+    if (campaign.body.includes("{{LastVisit}}") || campaign.bodyHtml?.includes("{{LastVisit}}")) {
+      const n = recipients.filter((r) => r.status === "pending" && !r.contextNote).length;
+      if (n > 0) gaps.push(`${n} waiting contact${n === 1 ? " was" : "s were"} not added from a booking`);
+    }
     if (campaign.body.includes("{{FirstName}}")) {
       const n = recipients.filter((r) => r.status === "pending" && !r.firstName.trim()).length;
       if (n > 0) gaps.push(`${n} waiting contact${n === 1 ? " has" : "s have"} no first name`);
     }
     return gaps;
-  }, [campaign.body, recipients]);
+  }, [campaign.body, campaign.bodyHtml, recipients]);
   for (const gap of blanks) {
     warnings.push({
       level: "warning",
@@ -133,6 +148,14 @@ export function CampaignWorkspace({
           onChanged={() => router.refresh()}
         />
         <Composer campaign={campaign} locked={locked} businessName={businessName} onSaved={() => router.refresh()} />
+        <AudiencePanel
+          campaignId={campaign.id}
+          channel={campaign.channel}
+          rows={audience.rows}
+          totals={audience.totals}
+          filter={audience.filter}
+          withinDays={audience.withinDays}
+        />
         <ImportPanel campaignId={campaign.id} channel={campaign.channel} onImported={() => router.refresh()} />
         <RecipientTable campaignId={campaign.id} recipients={recipients} onChanged={() => router.refresh()} />
       </div>
@@ -329,12 +352,14 @@ function Composer({
   const [name, setName] = useState(campaign.name);
   const [subject, setSubject] = useState(campaign.subject ?? "");
   const [body, setBody] = useState(campaign.body);
+  const [bodyHtml, setBodyHtml] = useState(campaign.bodyHtml ?? "");
+  const [useHtml, setUseHtml] = useState(Boolean(campaign.bodyHtml));
   const [allowRecontact, setAllowRecontact] = useState(campaign.allowRecontact);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
-  const unknown = unknownMergeFields(body);
+  const unknown = [...new Set([...unknownMergeFields(body), ...unknownMergeFields(useHtml ? bodyHtml : "")])];
 
   async function save() {
     setBusy(true);
@@ -346,6 +371,9 @@ function Composer({
       channel: campaign.channel,
       subject,
       body,
+      // Unticking the box clears the stored template rather than hiding it, so
+      // what the screen shows is what would be sent.
+      bodyHtml: useHtml ? bodyHtml : "",
       allowRecontact,
     });
     setBusy(false);
@@ -395,15 +423,96 @@ function Composer({
       )}
 
       <label className={`mt-4 block ${label}`}>
-        Message
+        {useHtml ? "Plain-text version" : "Message"}
         <textarea
           value={body}
           onChange={(event) => setBody(event.target.value)}
           disabled={locked}
-          rows={campaign.channel === "sms" ? 6 : 12}
+          rows={campaign.channel === "sms" ? 6 : useHtml ? 6 : 12}
           className={textarea}
+          placeholder={
+            useHtml ? "Leave blank and we'll write this from the HTML for you." : undefined
+          }
         />
+        {useHtml && (
+          <span className="mt-1 block text-[11px] font-normal text-[#5A6B7D]">
+            Sent alongside the HTML, for clients that block it. Leave it blank and it is generated
+            from the template.
+          </span>
+        )}
       </label>
+
+      {campaign.channel === "email" && (
+        <div className="mt-5 rounded-xl border border-[#E4EAF0] bg-[#F9FBFC] p-4">
+          <label className="flex items-start gap-2.5 text-sm font-semibold text-[#25313F]">
+            <input
+              type="checkbox"
+              checked={useHtml}
+              disabled={locked}
+              onChange={(event) => setUseHtml(event.target.checked)}
+              className="mt-0.5 h-4 w-4"
+            />
+            <span>
+              Use a designed HTML template
+              <span className="block text-[11px] font-normal text-[#5A6B7D]">
+                Paste the full HTML from your designer, Canva or Mailchimp. Your address and the
+                unsubscribe link are still added at the bottom automatically.
+              </span>
+            </span>
+          </label>
+
+          {useHtml && (
+            <>
+              <label className={`mt-4 block ${label}`}>
+                HTML
+                <textarea
+                  value={bodyHtml}
+                  onChange={(event) => setBodyHtml(event.target.value)}
+                  disabled={locked}
+                  rows={14}
+                  spellCheck={false}
+                  placeholder="<table role=&quot;presentation&quot; …>"
+                  className={`${textarea} font-mono text-[12px] leading-5`}
+                />
+                <span className="mt-1 block text-[11px] font-normal text-[#5A6B7D]">
+                  {"{{FirstName}}"}, {"{{Company}}"} and {"{{LastVisit}}"} work here too. Scripts,
+                  forms and iframes are rejected — email clients block them and they get the whole
+                  message filtered.
+                </span>
+              </label>
+
+              {bodyHtml.trim().length > 0 && (
+                <div className="mt-4">
+                  <p className={label}>Preview</p>
+                  {/*
+                    Sandboxed with no allow-* flags, so pasted markup cannot run
+                    script, reach this page's cookies or navigate the admin
+                    away. dangerouslySetInnerHTML would hand the admin session
+                    to whatever was pasted.
+
+                    A srcdoc frame inherits this page's CSP, which allows images
+                    only from 'self' — so hosted pictures do not load here. That
+                    is called out below rather than engineered around: the
+                    alternative is carving an exception out of the site-wide
+                    policy for every page, and the test send already shows the
+                    real thing.
+                  */}
+                  <iframe
+                    title="HTML email preview"
+                    sandbox=""
+                    srcDoc={bodyHtml}
+                    className="mt-1.5 h-96 w-full rounded-xl border border-[#D5DEE7] bg-white"
+                  />
+                  <span className="mt-1.5 block text-[11px] text-[#5A6B7D]">
+                    Layout, wording and placeholders shown live. Hosted images stay blank here —
+                    send yourself a test below to see the finished email exactly as it lands.
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      )}
 
       {unknown.length > 0 && (
         <p className="mt-2 text-sm text-[#8B3F3F]">
@@ -469,7 +578,7 @@ function PreviewPanel({ campaign, recipients }: { campaign: Campaign; recipients
       </div>
 
       {segments && (
-        <div className="mt-3 space-y-1 text-[11px] text-[#6B7D90]">
+        <div className="mt-3 space-y-1 text-[11px] text-[#5A6B7D]">
           <p>
             {segments.characters} characters ·{" "}
             <span className={segments.segments > 3 ? "font-semibold text-[#8A681F]" : ""}>
@@ -624,7 +733,7 @@ function ImportPanel({
         </label>
       </div>
 
-      <p className="mt-3 rounded-xl border border-[#E4EAF0] bg-[#F9FBFC] px-3.5 py-2.5 text-[11px] leading-5 text-[#6B7D90]">
+      <p className="mt-3 rounded-xl border border-[#E4EAF0] bg-[#F9FBFC] px-3.5 py-2.5 text-[11px] leading-5 text-[#5A6B7D]">
         This is recorded against each contact as your basis for messaging them. Canadian anti-spam
         law needs it, so please only add people you actually met — a list bought or scraped from the
         web is not a consent basis, and there is no option here for one.
@@ -719,7 +828,7 @@ function RecipientTable({
       {error && <p className="mt-3 text-sm text-[#8B3F3F]">{error}</p>}
 
       {recipients.length === 0 ? (
-        <p className="mt-4 rounded-xl bg-[#F6F8FA] px-4 py-10 text-center text-sm text-[#687B8E]">
+        <p className="mt-4 rounded-xl bg-[#F6F8FA] px-4 py-10 text-center text-sm text-[#5A6B7D]">
           No contacts yet. Add some above.
         </p>
       ) : (
@@ -774,6 +883,10 @@ function RecipientTable({
                     </span>
                     {recipient.companyName && (
                       <span className="block text-xs text-[#8494A5]">{recipient.companyName}</span>
+                    )}
+                    {/* Why they are on this list, as it read when they were queued. */}
+                    {recipient.contextNote && (
+                      <span className="mt-0.5 block text-[11px] text-[#5A6B7D]">{recipient.contextNote}</span>
                     )}
                   </td>
                   <td className="py-3 pr-3 text-[#526A80]">{recipient.destination}</td>

@@ -148,7 +148,7 @@ export function CaseStudyEditor({
 
         <section className="rounded-2xl border border-[#DDE4EC] bg-white p-5 shadow-sm sm:p-6">
           <h2 className="text-lg font-bold text-[#0B2A4A]">Related services</h2>
-          <p className="mt-1 text-sm text-[#687B8E]">These become contextual links on the public story.</p>
+          <p className="mt-1 text-sm text-[#5A6B7D]">These become contextual links on the public story.</p>
           <div className="mt-4 grid gap-2 sm:grid-cols-2">
             {services.filter((service) => service.id !== story.primaryServiceId).map((service) => (
               <label key={service.id} className="flex items-center gap-3 rounded-xl border border-[#E2E8EF] px-3 py-2.5 text-sm text-[#42566A]">
@@ -161,9 +161,9 @@ export function CaseStudyEditor({
 
         <section className="rounded-2xl border border-[#DDE4EC] bg-white p-5 shadow-sm sm:p-6">
           <h2 className="text-lg font-bold text-[#0B2A4A]">Customer-approved media</h2>
-          <p className="mt-1 text-sm text-[#687B8E]">Only currently consented JPEG, PNG and WebP job images appear here. Revoking consent removes the public image immediately.</p>
+          <p className="mt-1 text-sm text-[#5A6B7D]">Only currently consented JPEG, PNG and WebP job images appear here. Revoking consent removes the public image immediately.</p>
           {photos.length === 0 ? (
-            <p className="mt-4 rounded-xl bg-[#F5F7FA] p-5 text-sm text-[#63778B]">No browser-ready photos currently have public consent.</p>
+            <p className="mt-4 rounded-xl bg-[#F5F7FA] p-5 text-sm text-[#5A6B7D]">No browser-ready photos currently have public consent.</p>
           ) : (
             <div className="mt-5 grid gap-4 sm:grid-cols-2">
               {photos.map((photo) => {
@@ -211,7 +211,7 @@ export function CaseStudyEditor({
             <span>I checked that plates, VINs, names, addresses and other identifying details are absent.</span>
           </label>
           <div className="mt-5 grid gap-2">
-            <button disabled={pending} onClick={save} className="min-h-11 rounded-xl bg-[#0B2A4A] px-4 text-sm font-bold text-white disabled:opacity-50">{pending ? "Working…" : "Save draft"}</button>
+            <button disabled={pending} onClick={save} className="min-h-11 rounded-xl bg-[#0B2A4A] px-4 text-sm font-bold text-white admin-on-dark disabled:opacity-50">{pending ? "Working…" : "Save draft"}</button>
             {story.status === "published" ? (
               <button disabled={pending} onClick={() => changePublication("unpublish")} className="min-h-11 rounded-xl border border-[#C8D3DE] px-4 text-sm font-bold text-[#7A3140] disabled:opacity-50">Unpublish</button>
             ) : (

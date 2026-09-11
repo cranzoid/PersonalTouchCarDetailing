@@ -124,9 +124,42 @@ summary::-webkit-details-marker {
   color-scheme: light;
 }
 
+/*
+ * Legacy admin copy was authored white-on-dark. The light workspace above keeps
+ * it readable by repainting `text-white` navy.
+ *
+ * A component that brings its OWN dark background is the exception, and got
+ * navy text on a navy button — a 1:1 contrast ratio, i.e. invisible. Those opt
+ * back out with `admin-on-dark` rather than the rule being dropped, because
+ * roughly two hundred legacy call sites still depend on the repaint.
+ */
 .admin-shell .text-white {
   color: #0b2a4a;
 }
+
+.admin-shell .admin-on-dark,
+.admin-shell .admin-on-dark.text-white,
+.admin-shell .admin-on-dark .text-white {
+  color: #ffffff;
+}
+
+/*
+ * The remap inverts the ink scale, which is right for surfaces and wrong for
+ * the two shades used as FOREGROUND on a gold button: `text-ink-950` landed on
+ * near-white over gold (1.96:1). Restored to the dark end of the original
+ * palette, where this markup always meant "darkest ink", giving 8.3:1.
+ */
+.admin-shell .text-ink-950 { color: #061a2c; }
+.admin-shell .text-ink-900 { color: #0b2a4a; }
+
+/*
+ * Secondary and tertiary body copy. The remapped values were pitched for a dark
+ * canvas and land at 3.76:1 and 2.15:1 on white — legible as decoration, not as
+ * text, which is what they are used for. Raised to clear WCAG AA (4.5:1) on
+ * both the white cards and the #F4F6FA page.
+ */
+.admin-shell .text-ink-500 { color: #566a7e; }
+.admin-shell .text-ink-600 { color: #4a5d70; }
 
 /* Legacy admin success/error copy was authored for a dark canvas. Keep those
  * semantic messages readable after the light workspace remap. */

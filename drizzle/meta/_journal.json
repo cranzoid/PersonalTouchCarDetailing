@@ -155,6 +155,13 @@
       "when": 1788826686818,
       "tag": "0021_bundle_offer_perks",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1788830286818,
+      "tag": "0022_winback_campaigns",
+      "breakpoints": true
     }
   ]
 }

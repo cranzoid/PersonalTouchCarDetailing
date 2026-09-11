@@ -7,16 +7,31 @@
  * is a preview that will eventually lie.
  */
 
-/** The only placeholders an outreach body may contain. */
-export const OUTREACH_MERGE_FIELDS = ["FirstName", "Company"] as const;
+/**
+ * The only placeholders an outreach body may contain.
+ *
+ * `LastVisit` is the date of the appointment a win-back recipient missed,
+ * snapshotted onto the recipient row when they were queued. It renders empty
+ * for a recipient who was pasted in rather than built from an appointment,
+ * which the composer warns about the same way it does for a missing company.
+ */
+export const OUTREACH_MERGE_FIELDS = ["FirstName", "Company", "LastVisit"] as const;
 
 /** Hard ceiling on one "send next N" press. Small on purpose. */
 export const MAX_BATCH_SIZE = 25;
 
-export type OutreachMergeValues = { firstName: string; companyName: string };
+export type OutreachMergeValues = {
+  firstName: string;
+  companyName: string;
+  lastVisit?: string;
+};
 
 export function renderOutreachBody(body: string, values: OutreachMergeValues): string {
-  const vars: Record<string, string> = { FirstName: values.firstName, Company: values.companyName };
+  const vars: Record<string, string> = {
+    FirstName: values.firstName,
+    Company: values.companyName,
+    LastVisit: values.lastVisit ?? "",
+  };
   return body.replace(/\{\{(\w+)\}\}/g, (_, key: string) => vars[key] ?? "");
 }
 

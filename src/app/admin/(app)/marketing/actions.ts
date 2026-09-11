@@ -7,7 +7,13 @@ import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { AuthError, requireStaff } from "@/lib/auth/session";
 import { newId } from "@/lib/id";
+import {
+  describeFooting,
+  findMissedAppointments,
+  type AudienceFilter,
+} from "@/lib/marketing/audience";
 import { checkCampaignCompliance } from "@/lib/marketing/compliance";
+import { checkCampaignHtml, htmlToPlainText } from "@/lib/marketing/html-email";
 import { parseContactPaste } from "@/lib/marketing/import";
 import {
   MAX_BATCH_SIZE,
@@ -35,14 +41,25 @@ export type ActionResult<T extends object = Record<never, never>> =
 
 const channel = z.enum(["email", "sms"]);
 
-const createCampaignInput = z.object({
-  name: z.string().trim().min(1).max(120),
-  channel,
-  subject: z.string().trim().max(200).optional(),
-  body: z.string().trim().min(1).max(4000),
-});
+/**
+ * `body` is no longer required on its own: an email campaign may be a pasted
+ * HTML template with the plain-text part derived from it. One of the two has to
+ * carry the message, which `hasMessage` enforces below.
+ */
+const createCampaignInput = z
+  .object({
+    name: z.string().trim().min(1).max(120),
+    channel,
+    subject: z.string().trim().max(200).optional(),
+    body: z.string().trim().max(4000).default(""),
+    /** Email only. Larger cap than `body` — a real template is mostly markup. */
+    bodyHtml: z.string().trim().max(200_000).optional(),
+  })
+  .refine((v) => v.body.length > 0 || (v.channel === "email" && (v.bodyHtml ?? "").length > 0), {
+    message: "Write a message or paste an HTML template.",
+  });
 
-const updateCampaignInput = createCampaignInput.extend({
+const updateCampaignInput = createCampaignInput.innerType().extend({
   campaignId: z.string().min(1),
   allowRecontact: z.boolean(),
 });
@@ -98,20 +115,44 @@ async function loadCampaign(campaignId: string) {
   return campaign ?? null;
 }
 
-/** Compliance + merge-field checks shared by save, test send and batch send. */
+/**
+ * Compliance + merge-field checks shared by save, test send and batch send.
+ *
+ * For an HTML campaign the CASL body rules run against the READABLE TEXT of the
+ * template, not its markup: "does this name the sender" has to look at what the
+ * recipient sees, and a business name sitting in a CSS class would otherwise
+ * pass a check it should fail.
+ */
 async function validateCampaignContent(input: {
   channel: MarketingChannel;
   subject: string | null;
   body: string;
+  bodyHtml?: string | null;
 }): Promise<{ errors: string[]; warnings: string[] }> {
   const settings = await getSettings();
-  const issues = checkCampaignCompliance({ ...input, businessName: settings.businessName });
+  const html = input.channel === "email" ? (input.bodyHtml ?? "").trim() : "";
+  const readable = input.body.trim().length > 0 ? input.body : htmlToPlainText(html);
+
+  const issues = checkCampaignCompliance({
+    channel: input.channel,
+    subject: input.subject,
+    body: readable,
+    businessName: settings.businessName,
+  });
   const errors = issues.filter((i) => i.level === "error").map((i) => i.message);
   const warnings = issues.filter((i) => i.level === "warning").map((i) => i.message);
-  const unknown = unknownMergeFields(input.body);
+
+  if (html.length > 0) {
+    for (const issue of checkCampaignHtml(html)) {
+      (issue.level === "error" ? errors : warnings).push(issue.message);
+    }
+  }
+
+  // Both parts are merged with the same placeholders, so both are checked.
+  const unknown = [...new Set([...unknownMergeFields(input.body), ...unknownMergeFields(html)])];
   if (unknown.length > 0) {
     errors.push(
-      `Unknown placeholder${unknown.length > 1 ? "s" : ""} ${unknown.map((f) => `{{${f}}}`).join(", ")} — only {{FirstName}} and {{Company}} can be filled in.`,
+      `Unknown placeholder${unknown.length > 1 ? "s" : ""} ${unknown.map((f) => `{{${f}}}`).join(", ")} — only {{FirstName}}, {{Company}} and {{LastVisit}} can be filled in.`,
     );
   }
   return { errors, warnings };
@@ -125,10 +166,12 @@ export async function createCampaignAction(raw: unknown): Promise<ActionResult<{
     const input = parsed.data;
 
     const subject = input.channel === "email" ? (input.subject ?? "") : null;
+    const bodyHtml = input.channel === "email" ? (input.bodyHtml?.trim() || null) : null;
     const { errors } = await validateCampaignContent({
       channel: input.channel,
       subject,
       body: input.body,
+      bodyHtml,
     });
     if (errors.length > 0) return { ok: false, error: errors[0] };
 
@@ -140,6 +183,7 @@ export async function createCampaignAction(raw: unknown): Promise<ActionResult<{
         channel: input.channel,
         subject,
         body: input.body,
+        bodyHtml,
         status: "draft",
         createdByStaffId: staff.id,
       });
@@ -193,7 +237,8 @@ export async function updateCampaignAction(raw: unknown): Promise<ActionResult<{
       const contentChanged =
         before.body !== input.body ||
         before.channel !== input.channel ||
-        (before.subject ?? "") !== (input.subject ?? "");
+        (before.subject ?? "") !== (input.subject ?? "") ||
+        (before.bodyHtml ?? "") !== (input.bodyHtml?.trim() ?? "");
       if (alreadySent && contentChanged) {
         return {
           ok: false,
@@ -203,10 +248,12 @@ export async function updateCampaignAction(raw: unknown): Promise<ActionResult<{
       }
 
       const subject = input.channel === "email" ? (input.subject ?? "") : null;
+      const bodyHtml = input.channel === "email" ? (input.bodyHtml?.trim() || null) : null;
       const { errors, warnings } = await validateCampaignContent({
         channel: input.channel,
         subject,
         body: input.body,
+        bodyHtml,
       });
       if (errors.length > 0) return { ok: false, error: errors[0] };
 
@@ -217,6 +264,7 @@ export async function updateCampaignAction(raw: unknown): Promise<ActionResult<{
           channel: input.channel,
           subject,
           body: input.body,
+          bodyHtml,
           allowRecontact: input.allowRecontact,
           updatedAt: new Date(),
         })
@@ -432,6 +480,153 @@ export async function importContactsAction(raw: unknown): Promise<
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* Win-back audience                                                   */
+/* ------------------------------------------------------------------ */
+
+const queueAudienceInput = z.object({
+  campaignId: z.string().min(1),
+  filter: z.enum(["cancelled", "no_show", "missed"]),
+  withinDays: z.number().int().min(1).max(1095),
+  /** The rows the owner actually ticked. Never "everything that matched". */
+  appointmentIds: z.array(z.string().min(1)).min(1).max(500),
+});
+
+/**
+ * Adds the selected cancelled / no-show customers to a campaign.
+ *
+ * Two things deserve to be deliberate here.
+ *
+ * CONSENT IS RECORDED, NOT ASSUMED. `sendMessage` refuses a marketing message
+ * to anyone without `marketing_consent` (DECISIONS.md #8), so queueing these
+ * rows without recording a basis would produce a campaign where every row comes
+ * back "skipped" — technically safe, completely useless. The basis written here
+ * is the one the audience builder computed from the shop's own records: a
+ * purchase inside two years, or the missed booking itself inside six months.
+ * Rows with no footing are refused rather than consented into existence.
+ *
+ * THE SELECTION IS RE-CHECKED SERVER-SIDE. The ids arrive from a list the
+ * browser rendered some minutes ago; an appointment that has since been
+ * rebooked, or a customer who has since opted out, must not be queued because
+ * a stale checkbox said so.
+ */
+export async function queueAudienceAction(raw: unknown): Promise<
+  ActionResult<{
+    queued: number;
+    duplicates: number;
+    invalid: number;
+    refused: { name: string; reason: string }[];
+  }>
+> {
+  try {
+    const staff = await requireStaff("manage_marketing");
+    const parsed = queueAudienceInput.safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Select at least one contact to add." };
+    const input = parsed.data;
+
+    const campaign = await loadCampaign(input.campaignId);
+    if (!campaign) return { ok: false, error: "Campaign not found." };
+    if (campaign.status === "completed" || campaign.status === "cancelled") {
+      return { ok: false, error: "This campaign is closed — create a new one to message more contacts." };
+    }
+    const campaignChannel = campaign.channel as MarketingChannel;
+    const settings = await getSettings();
+
+    const { candidates } = await findMissedAppointments({
+      filter: input.filter as AudienceFilter,
+      channel: campaignChannel,
+      withinDays: input.withinDays,
+      timezone: settings.timezone,
+      limit: 1000,
+    });
+
+    const wanted = new Set(input.appointmentIds);
+    const selected = candidates.filter((c) => wanted.has(c.appointmentId));
+    if (selected.length === 0) {
+      return { ok: false, error: "Those bookings are no longer on the list — reload and try again." };
+    }
+
+    const refused: { name: string; reason: string }[] = [];
+    const outcome = await db().transaction(async (tx) => {
+      const queueable: Parameters<typeof queueRecipients>[2][number][] = [];
+      const now = new Date();
+
+      for (const candidate of selected) {
+        if (candidate.blockedReason) {
+          refused.push({ name: candidate.firstName, reason: candidate.blockedReason });
+          continue;
+        }
+
+        // Express consent already on file is left exactly as it is — overwriting
+        // it with a weaker implied basis would lose the stronger record.
+        if (candidate.footing !== "express") {
+          await tx
+            .update(schema.customers)
+            .set({
+              marketingConsent: true,
+              marketingConsentAt: now,
+              marketingConsentSource: `winback:${candidate.footing}`,
+              updatedAt: now,
+            })
+            .where(eq(schema.customers.id, candidate.customerId));
+        }
+
+        queueable.push({
+          customerId: candidate.customerId,
+          destination: candidate.destination,
+          firstName: candidate.firstName,
+          companyName: candidate.companyName,
+          appointmentId: candidate.appointmentId,
+          contextNote: [
+            candidate.outcome === "no_show" ? "No-show" : "Cancelled",
+            candidate.missedOnLabel,
+            candidate.reason ? `— ${candidate.reason}` : "— no reason recorded",
+          ].join(" "),
+          lastVisitLabel: candidate.missedOnLabel,
+        });
+      }
+
+      const queueResult = await queueRecipients(
+        tx,
+        { id: campaign.id, channel: campaignChannel },
+        queueable,
+      );
+
+      if (!campaign.audience) {
+        await tx
+          .update(schema.outreachCampaigns)
+          .set({ audience: input.filter, updatedAt: now })
+          .where(eq(schema.outreachCampaigns.id, campaign.id));
+      }
+
+      await audit(tx, {
+        actorType: "staff",
+        actorId: staff.id,
+        action: "outreach_campaign.audience_queued",
+        entityType: "outreach_campaign",
+        entityId: campaign.id,
+        after: {
+          filter: input.filter,
+          withinDays: input.withinDays,
+          selected: selected.length,
+          queued: queueResult.queued,
+          refused: refused.length,
+          bases: [...new Set(selected.map((c) => describeFooting(c.footing)))],
+        },
+      });
+
+      return queueResult;
+    });
+
+    revalidatePath(`/admin/marketing/${input.campaignId}`);
+    return { ok: true, ...outcome, refused };
+  } catch (error) {
+    if (error instanceof AuthError) return { ok: false, error: error.message };
+    console.error("queueAudienceAction failed", error);
+    return { ok: false, error: "Something went wrong adding those contacts." };
+  }
+}
+
 /** Confirms the provider this campaign needs is actually configured. */
 async function providerReady(campaignChannel: MarketingChannel): Promise<boolean> {
   const { getIntegrationSecret } = await import("@/lib/integrations");
@@ -488,13 +683,22 @@ export async function sendTestAction(raw: unknown): Promise<TestSendResult> {
       };
     }
 
-    const body = renderOutreachBody(campaign.body, { firstName: "Sample", companyName: "Sample Company" });
+    // Obvious sample values, so a missing {{FirstName}} shows up as a hole
+    // rather than as a plausible-looking blank.
+    const sample = { firstName: "Sample", companyName: "Sample Company", lastVisit: "3 Aug 2026" };
+    const html = campaign.bodyHtml ? renderOutreachBody(campaign.bodyHtml, sample) : null;
+    const body = campaign.body.trim().length > 0
+      ? renderOutreachBody(campaign.body, sample)
+      : htmlToPlainText(html ?? "");
     const result = await sendMessage({
       channel: campaignChannel,
       kind: "staff_alert",
       to: input.destination,
       subject: campaignChannel === "email" ? `[TEST] ${campaign.subject ?? campaign.name}` : undefined,
       body: campaignChannel === "sms" ? body : `${body}\n\n— test send, footer omitted —`,
+      // The test has to exercise the SAME markup that will go out, or it proves
+      // nothing about how the template renders in a real inbox.
+      ...(html ? { html } : {}),
       relatedEntityType: "outreach_campaign",
       relatedEntityId: campaign.id,
     });
@@ -545,6 +749,7 @@ export async function sendBatchAction(raw: unknown): Promise<ActionResult<{ outc
       channel: campaignChannel,
       subject: campaign.subject,
       body: campaign.body,
+      bodyHtml: campaign.bodyHtml,
     });
     if (errors.length > 0) return { ok: false, error: errors[0] };
     if (warnings.length > 0 && !input.acknowledgeWarnings) {

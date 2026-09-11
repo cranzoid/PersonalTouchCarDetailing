@@ -11,7 +11,7 @@ export default async function CaseStudyPreviewPage({ params }: { params: Promise
   const [story, media] = await Promise.all([getCaseStudyEditorData(id), getConsentedCaseMedia(id)]);
   if (!story) notFound();
   return (
-    <article className="mx-auto max-w-5xl rounded-3xl bg-[#102131] p-6 text-white shadow-xl sm:p-10">
+    <article className="mx-auto max-w-5xl rounded-3xl bg-[#102131] p-6 text-white admin-on-dark shadow-xl sm:p-10">
       <div className="flex items-center justify-between gap-3"><span className="rounded-full bg-[#E0A93B] px-3 py-1 text-xs font-bold uppercase text-[#0B2A4A]">Private preview</span><Link href={`/admin/results/${id}`} className="text-sm text-white/70 hover:text-white">Back to editor</Link></div>
       <h1 className="mt-8 max-w-4xl font-serif text-5xl leading-tight">{story.title}</h1>
       <p className="mt-5 max-w-3xl text-lg leading-8 text-white/75">{story.summary || "No summary yet."}</p>

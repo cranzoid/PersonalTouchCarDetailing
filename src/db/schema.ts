@@ -519,6 +519,13 @@ export const appointments = pgTable(
     cancelledAt: timestamp("cancelled_at", { withTimezone: true }),
     cancelledBy: text("cancelled_by"),
     cancellationReason: text("cancellation_reason"),
+    /**
+     * Why the customer did not turn up, when staff know. Separate from
+     * `cancellation_reason` because a no-show is not a cancellation: nobody
+     * told us anything, and "no reason recorded" is itself the useful fact on
+     * a win-back list. NULL on every no-show taken before this shipped.
+     */
+    noShowNote: text("no_show_note"),
     jobId: text("job_id"),
     estimateId: text("estimate_id"),
     /** Stamped once the pre-appointment SMS reminder goes out — prevents duplicate sends. */
@@ -1333,6 +1340,15 @@ export const outreachCampaigns = pgTable("outreach_campaigns", {
   channel: text("channel").notNull(), // email | sms
   subject: text("subject"), // email only
   body: text("body").notNull(),
+  /**
+   * A pasted HTML email, email channel only. Kept BESIDE `body` rather than
+   * replacing it: `body` stays the plain-text alternative of the same message.
+   * Every HTML mail goes out multipart, because an HTML-only send is both worse
+   * for deliverability and unreadable to anyone whose client blocks HTML.
+   */
+  bodyHtml: text("body_html"),
+  /** How the list was built — 'manual', 'no_show', 'cancelled' or 'missed'. */
+  audience: text("audience"),
   status: text("status").notNull().default("draft"), // draft | sending | paused | completed | cancelled
   /**
    * Off by default, and the reason a second campaign cannot quietly re-text
@@ -1363,6 +1379,15 @@ export const outreachRecipients = pgTable(
     destinationNormalized: text("destination_normalized").notNull(),
     firstName: text("first_name").notNull().default(""),
     companyName: text("company_name").notNull().default(""),
+    /**
+     * The missed appointment this recipient was built from, and the reason and
+     * date AS THEY READ WHEN QUEUED. Snapshotted for the same reason the merge
+     * values are (DECISIONS.md #20) — reopening or editing the appointment
+     * later must not change what we can show the campaign was built from.
+     */
+    appointmentId: text("appointment_id").references(() => appointments.id),
+    contextNote: text("context_note"),
+    lastVisitLabel: text("last_visit_label"),
     status: text("status").notNull().default("pending"), // pending | claimed | sent | failed | skipped
     /** Why a row was skipped or failed, shown verbatim in the admin list. */
     skipReason: text("skip_reason"),
@@ -1387,5 +1412,6 @@ export const outreachRecipients = pgTable(
      */
     uniqueIndex("outreach_recipients_campaign_dest_uq").on(t.campaignId, t.destinationNormalized),
     index("outreach_recipients_dest_idx").on(t.destinationNormalized),
+    index("outreach_recipients_appointment_idx").on(t.appointmentId),
   ],
 );

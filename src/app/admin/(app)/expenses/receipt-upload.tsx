@@ -131,7 +131,7 @@ function ReceiptTile({
           {isReceiptImage(contentType) ? "Image" : "PDF"}
         </span>
       )}
-      <span className="mt-1 block truncate text-[11px] text-[#6B7D90]">{detail}</span>
+      <span className="mt-1 block truncate text-[11px] text-[#5A6B7D]">{detail}</span>
     </>
   );
 

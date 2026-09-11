@@ -59,7 +59,7 @@ export default async function DoNotContactPage() {
       </div>
 
       {entries.length === 0 && (
-        <p className={`mt-6 ${card} text-center text-sm text-[#687B8E]`}>
+        <p className={`mt-6 ${card} text-center text-sm text-[#5A6B7D]`}>
           <span className={`block ${heading}`}>Nobody has opted out</span>
           <span className="mt-1 block">STOP replies and unsubscribes will appear here automatically.</span>
         </p>

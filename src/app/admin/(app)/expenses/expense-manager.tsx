@@ -194,7 +194,7 @@ export function ExpenseManager({
           <div className="flex flex-wrap items-end justify-between gap-2">
             <div>
               <h2 className="text-base font-bold text-[#0B2A4A]">Spending by category</h2>
-              <p className="mt-1 text-xs text-[#6B7D90]">Largest categories first for {period.label}.</p>
+              <p className="mt-1 text-xs text-[#5A6B7D]">Largest categories first for {period.label}.</p>
             </div>
             <p className="text-xs font-semibold text-[#718296]">{summary.byCategory.length} categories</p>
           </div>
@@ -223,7 +223,7 @@ export function ExpenseManager({
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="text-base font-bold text-[#0B2A4A]">Expense ledger</h2>
-            <p className="mt-1 text-xs text-[#6B7D90]">
+            <p className="mt-1 text-xs text-[#5A6B7D]">
               {visibleExpenses.length === expenses.length
                 ? `${expenses.length} payments in ${period.label}`
                 : `${visibleExpenses.length} of ${expenses.length} payments shown`}
@@ -273,7 +273,7 @@ export function ExpenseManager({
               />
             ))}
             {visibleExpenses.length === 0 && (
-              <p className="rounded-xl bg-[#F6F8FA] px-4 py-8 text-center text-sm text-[#687B8E]">
+              <p className="rounded-xl bg-[#F6F8FA] px-4 py-8 text-center text-sm text-[#5A6B7D]">
                 No expenses match those filters.
               </p>
             )}
@@ -472,7 +472,7 @@ function AddExpense({
     <section id="add-expense" className={`mt-6 scroll-mt-24 ${card}`}>
       <div>
         <h2 className="text-base font-bold text-[#0B2A4A]">Add an expense</h2>
-        <p className="mt-1 text-xs leading-5 text-[#6B7D90]">
+        <p className="mt-1 text-xs leading-5 text-[#5A6B7D]">
           Start with the receipt essentials. The date, category and payment method stay selected
           after saving so a stack of receipts is faster to enter.
         </p>

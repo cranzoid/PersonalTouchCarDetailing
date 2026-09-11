@@ -876,3 +876,90 @@ own ordering decide what a customer saw first.
 The dropdown's two groups are hand-written because they are an editorial
 shortlist, not the whole menu; if the owner starts expecting Admin → Services to
 move them, they need to come from the category rows like the booking step does.
+
+## 30. Win-back campaigns: the CRM decides who may be messaged, not the sender
+Cancellations and no-shows are the shop's most obvious repeat business, so
+Admin → Marketing now builds a campaign list from them directly instead of
+asking the owner to copy names out of the appointment book.
+
+The audience is **one row per missed appointment**, not per customer, because
+the owner is choosing who to chase by looking at what actually happened —
+somebody who cancelled twice is a different conversation from somebody who
+cancelled once. Queueing collapses them anyway: `outreach_recipients` is unique
+on the destination, so a duplicate cannot become a second message.
+
+The decisions that would not be obvious from the code alone:
+
+- **A no-show can now record a reason, and "none" is a real answer.**
+  `cancellation_reason` only ever covered cancellations; a no-show's reason
+  lived in the audit log, which the campaign screens cannot practically join.
+  `appointments.no_show_note` is optional on purpose and the list prints "No
+  reason recorded" rather than a blank — for a win-back list, *nobody told us
+  anything* is the useful fact, not missing data.
+- **CASL footing is computed from the shop's own records, never assumed.**
+  `sendMessage` refuses marketing to anyone without recorded consent (#8), so
+  queueing these people blind would produce a campaign where every row comes
+  back "skipped" — safe, and useless. Instead each row is resolved to a real
+  basis: a **paid invoice** inside two years is an existing business
+  relationship; otherwise the missed booking itself is an **inquiry**, which
+  runs only six months. An issued-but-unpaid invoice is not a purchase and does
+  not open the two-year window. Rows with neither are shown greyed out with the
+  reason, and the action refuses them rather than consenting them into
+  existence. Express consent already on file is never overwritten by a weaker
+  implied basis.
+- **The selection is re-checked server-side.** The ticked ids come from a list
+  the browser rendered minutes ago. An appointment since rebooked, or a customer
+  since opted out, must not be queued because a stale checkbox said so.
+- **`{{LastVisit}}` is snapshotted onto the recipient**, like the other merge
+  values, so editing or reopening the appointment later cannot change what we
+  can show the campaign was built from. `context_note` records why they were on
+  the list in the same way.
+
+**Revisit when:** the shop wants this to run unattended. The audience query and
+the claim/send split already support it; what is missing is a decision about
+re-contact cadence, which is a business call rather than a technical one.
+
+## 31. Pasted HTML emails, and the preview that admits what it cannot show
+An email campaign may carry a designed HTML template pasted straight from Canva,
+Mailchimp or a designer, alongside — never instead of — the plain-text body.
+
+- **Always multipart.** `body` stays the text part. Where the owner has not
+  written one it is derived from the same merged HTML, so the two parts can
+  never describe different offers, and a client that blocks HTML still gets a
+  readable message.
+- **The CASL footer is injected, not trusted to the template.** Same rule as
+  #20, in markup: the identity block and unsubscribe link are appended inside
+  `</body>`, because Gmail discards what follows `</html>`.
+- **Dangerous constructs are rejected at save time, not stripped.** Scripts,
+  iframes, objects, forms, inline event handlers, `javascript:` links and meta
+  refreshes fail the save with the reason. Silently rewriting somebody's
+  template and sending the result is worse than refusing it — the owner would
+  have approved a preview of something we then changed. `<style>` is kept; real
+  email templates need it.
+- **The preview is a sandboxed iframe, never `dangerouslySetInnerHTML`**, which
+  would hand the admin session to whatever was pasted.
+- **The preview does not show hosted images, and says so.** A `srcdoc` frame
+  inherits the page's CSP, and the site policy allows images only from `'self'`.
+  The fix would be carving an exception out of the security header that protects
+  every page, which is not a trade worth making for a convenience: the test send
+  already delivers the real template to the owner's own inbox. The panel tells
+  the reader that rather than letting them conclude their design is broken.
+
+## 32. The light admin's `text-white` remap needed an opt-out
+The admin workspace turns the dark ink scale inside out (`.admin-shell`), and
+repaints every `text-white` navy so that roughly two hundred legacy call sites
+authored for a dark canvas stay readable. Components that bring their **own**
+dark background were caught by the same rule and rendered navy text on a navy
+button — a contrast ratio of 1.00:1, which is to say invisible.
+
+The blanket rule stays, because those two hundred call sites still depend on it.
+Elements with their own dark surface opt out with `admin-on-dark`, which wins on
+specificity. Two matching foreground bugs came from the same inversion:
+`text-ink-950` on the gold buttons rendered near-white (1.96:1), and
+`text-ink-500`/`600` body copy sat at 3.76:1 and 2.15:1. All three are fixed in
+`globals.css` by utility, not by touching call sites, so backgrounds and borders
+built on the same scale are unaffected.
+
+**Revisit when:** the legacy dark-canvas components are finally rewritten. At
+that point the `text-white` repaint and the three foreground overrides can all
+go, and `admin-on-dark` with them.

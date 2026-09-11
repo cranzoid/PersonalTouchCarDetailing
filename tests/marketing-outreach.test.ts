@@ -262,3 +262,104 @@ describe("sendOutreachBatch", () => {
     expect(await sendOutreachBatch(campaign, 10)).toMatchObject({ attempted: 0, sent: 0 });
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* HTML email campaigns                                                */
+/* ------------------------------------------------------------------ */
+
+async function addHtmlCampaign(input: { body?: string; bodyHtml: string }) {
+  const id = newId("ocm");
+  await db().insert(schema.outreachCampaigns).values({
+    id,
+    name: "Win back",
+    channel: "email",
+    subject: "We missed you",
+    body: input.body ?? "",
+    bodyHtml: input.bodyHtml,
+    status: "sending",
+  });
+  const [campaign] = await db()
+    .select()
+    .from(schema.outreachCampaigns)
+    .where(eq(schema.outreachCampaigns.id, id));
+  return campaign;
+}
+
+describe("HTML email campaigns", () => {
+  beforeEach(resetDb);
+
+  it("merges the HTML and records what the recipient was actually sent", async () => {
+    const leadId = await addLead({ consent: true, email: "dave@example.com" });
+    const campaign = await addHtmlCampaign({
+      bodyHtml: "<h1>Hi {{FirstName}}</h1><p>We had you booked on {{LastVisit}}.</p>",
+    });
+    await queueRecipients(db(), { id: campaign.id, channel: "email" }, [
+      {
+        leadId,
+        destination: "dave@example.com",
+        firstName: "Dave",
+        companyName: "Hamilton Plumbing",
+        lastVisitLabel: "3 Aug 2026",
+      },
+    ]);
+
+    const outcome = await sendOutreachBatch(campaign, 5);
+    expect(outcome.sent).toBe(1);
+
+    const [row] = await db().select().from(schema.outreachRecipients);
+    expect(row.renderedBody).toContain("<h1>Hi Dave</h1>");
+    expect(row.renderedBody).toContain("We had you booked on 3 Aug 2026.");
+    // The identity block and unsubscribe link are appended by us, never left to
+    // the pasted template.
+    expect(row.renderedBody).toContain("Unsubscribe");
+    expect(row.lastVisitLabel).toBe("3 Aug 2026");
+  });
+
+  it("derives a readable plain-text part when the owner wrote none", async () => {
+    const leadId = await addLead({ consent: true, email: "dave@example.com" });
+    const campaign = await addHtmlCampaign({
+      body: "",
+      bodyHtml: "<h1>Come back, {{FirstName}}</h1><p>Reply to rebook.</p>",
+    });
+    await queueRecipients(db(), { id: campaign.id, channel: "email" }, [
+      { leadId, destination: "dave@example.com", firstName: "Dave", companyName: "" },
+    ]);
+
+    await sendOutreachBatch(campaign, 5);
+
+    // `communications.body` is the text part, and is what the history shows.
+    const [message] = await db().select().from(schema.communications);
+    expect(message.body).toContain("Come back, Dave");
+    expect(message.body).toContain("Reply to rebook.");
+    expect(message.body).not.toContain("<h1>");
+  });
+
+  it("keeps a plain-text part the owner did write", async () => {
+    const leadId = await addLead({ consent: true, email: "dave@example.com" });
+    const campaign = await addHtmlCampaign({
+      body: "Come back {{FirstName}} — reply to rebook.",
+      bodyHtml: "<h1>Ignore me</h1>",
+    });
+    await queueRecipients(db(), { id: campaign.id, channel: "email" }, [
+      { leadId, destination: "dave@example.com", firstName: "Dave", companyName: "" },
+    ]);
+
+    await sendOutreachBatch(campaign, 5);
+
+    const [message] = await db().select().from(schema.communications);
+    expect(message.body).toContain("Come back Dave — reply to rebook.");
+    expect(message.body).not.toContain("Ignore me");
+  });
+
+  it("still refuses an HTML campaign to someone without consent", async () => {
+    const leadId = await addLead({ consent: false, email: "dave@example.com" });
+    const campaign = await addHtmlCampaign({ bodyHtml: "<p>Hi {{FirstName}}</p>" });
+    await queueRecipients(db(), { id: campaign.id, channel: "email" }, [
+      { leadId, destination: "dave@example.com", firstName: "Dave", companyName: "" },
+    ]);
+
+    const outcome = await sendOutreachBatch(campaign, 5);
+    expect(outcome.sent).toBe(0);
+    expect(outcome.skipped).toBe(1);
+  });
+});

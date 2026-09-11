@@ -323,6 +323,17 @@ export default async function AppointmentDetailPage({
         </section>
       )}
 
+      {appt.status === "no_show" && (
+        <section className="mt-6 rounded-xl border border-red-900/50 p-5">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-red-400">No-show</h2>
+          {/* Said plainly rather than left blank: "nobody told us why" is what a
+              win-back campaign is built on, and an empty panel reads as a bug. */}
+          <p className="mt-2 text-sm text-ink-300">
+            {appt.noShowNote ?? "No reason recorded — they did not get in touch."}
+          </p>
+        </section>
+      )}
+
       {attr && Object.keys(attr).length > 0 && (
         <section className="mt-6 rounded-xl border border-ink-800 p-5">
           <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-400">Marketing attribution</h2>

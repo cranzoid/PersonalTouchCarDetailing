@@ -131,7 +131,7 @@ export function StaffManager({
                 const isSelected = selected?.id === user.id;
                 return (
                   <button key={user.id} type="button" onClick={() => setSelectedId(user.id)} aria-current={isSelected ? "true" : undefined} className={`flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left transition ${isSelected ? "border-accent-500/50 bg-accent-400/10 shadow-sm" : "border-transparent hover:border-ink-800 hover:bg-ink-900"}`}>
-                    <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-xs font-bold ${user.active ? "bg-ink-800 text-accent-500" : "bg-ink-800 text-ink-500"}`}>
+                    <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-full text-xs font-bold ${user.active ? "bg-ink-800 text-accent-500" : "bg-ink-800 text-ink-300"}`}>
                       {initials(user.name)}
                     </span>
                     <span className="min-w-0 flex-1">
@@ -292,7 +292,7 @@ function StaffDetails({ user, currency, isCurrent }: { user: StaffSummary; curre
             <p className="mt-1 text-xs text-ink-500">Added {new Date(user.createdAt).toLocaleDateString("en-CA", { year: "numeric", month: "short", day: "numeric" })}</p>
           </div>
         </div>
-        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${user.active ? "bg-emerald-50 text-emerald-700" : "bg-ink-800 text-ink-500"}`}>{user.active ? "Active access" : "Inactive"}</span>
+        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${user.active ? "bg-emerald-50 text-emerald-700" : "bg-ink-800 text-ink-300"}`}>{user.active ? "Active access" : "Inactive"}</span>
       </header>
 
       <div className="mt-6 grid gap-3 sm:grid-cols-3">

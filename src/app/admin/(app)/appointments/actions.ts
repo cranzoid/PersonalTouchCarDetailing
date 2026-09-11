@@ -409,6 +409,11 @@ export async function transitionAppointmentAction(raw: unknown): Promise<ActionR
           ...(to === "cancelled"
             ? { cancelledAt: new Date(), cancelledBy: staff.id, cancellationReason: reason }
             : {}),
+          // A no-show reason is OPTIONAL — usually nobody tells us anything, and
+          // "no reason recorded" is itself the useful fact on a win-back list.
+          // It is stored on the appointment rather than left in the audit log,
+          // which the campaign screens cannot practically join.
+          ...(to === "no_show" ? { noShowNote: reason?.trim() || null } : {}),
         })
         .where(eq(schema.appointments.id, appointmentId));
 

@@ -206,7 +206,7 @@ export function TimesheetWeekGrid({
       )}
 
       {visible.length === 0 ? (
-        <p className="mt-6 rounded-2xl border border-dashed border-[#C9D5E0] bg-white p-8 text-center text-sm text-[#687B8E]">
+        <p className="mt-6 rounded-2xl border border-dashed border-[#C9D5E0] bg-white p-8 text-center text-sm text-[#5A6B7D]">
           No staff accounts yet.{" "}
           <Link href="/admin/staff" className="text-accent-300 hover:underline">
             Add one
@@ -297,7 +297,7 @@ function StaffWeek({
             {person.name}
             {!person.active && <span className="ml-2 text-xs text-ink-500">(inactive)</span>}
           </h2>
-          <p className="mt-0.5 text-xs text-[#6B7D90]">{rateNote(person, currency)}</p>
+          <p className="mt-0.5 text-xs text-[#5A6B7D]">{rateNote(person, currency)}</p>
         </div>
         <p className="rounded-xl border border-[#DDE5EC] bg-white px-3 py-2 text-sm text-[#607386] shadow-sm">
           <span className="font-semibold text-[#0B2A4A]">

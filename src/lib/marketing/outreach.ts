@@ -4,6 +4,7 @@ import { newId } from "@/lib/id";
 import { sendMessage } from "@/lib/messaging";
 import { getPublicSettings } from "@/lib/settings";
 import { emailComplianceFooter } from "./compliance";
+import { appendHtmlFooter, emailComplianceFooterHtml, htmlToPlainText } from "./html-email";
 import { MAX_BATCH_SIZE, renderOutreachBody } from "./message";
 import { normalizeDestination, type MarketingChannel } from "./suppressions";
 import { unsubscribeUrl } from "./unsubscribe";
@@ -36,6 +37,10 @@ export type QueueCandidate = {
   destination: string;
   firstName: string;
   companyName: string;
+  /** Win-back context, snapshotted at queue time. Absent for a pasted contact. */
+  appointmentId?: string;
+  contextNote?: string;
+  lastVisitLabel?: string;
 };
 
 /**
@@ -75,6 +80,9 @@ export async function queueRecipients(
       destinationNormalized: normalized,
       firstName: candidate.firstName.trim(),
       companyName: candidate.companyName.trim(),
+      appointmentId: candidate.appointmentId,
+      contextNote: candidate.contextNote,
+      lastVisitLabel: candidate.lastVisitLabel,
       status: "pending",
     });
   }
@@ -189,19 +197,34 @@ export async function sendOutreachBatch(
   const settings = campaign.channel === "email" ? await getPublicSettings() : null;
 
   for (const recipient of claimed) {
-    const merged = renderOutreachBody(campaign.body, {
+    const mergeValues = {
       firstName: recipient.firstName,
       companyName: recipient.companyName,
-    });
-    const body = settings
-      ? merged + "\n" + emailComplianceFooter(settings, unsubscribeUrl(recipient.id))
-      : merged;
+      lastVisit: recipient.lastVisitLabel ?? "",
+    };
+    const unsubscribe = unsubscribeUrl(recipient.id);
+
+    // An HTML campaign still sends a plain-text part. Where the owner wrote one
+    // it is used as-is; otherwise it is derived from the same merged HTML, so
+    // the two parts can never describe different offers.
+    const html =
+      settings && campaign.bodyHtml
+        ? appendHtmlFooter(
+            renderOutreachBody(campaign.bodyHtml, mergeValues),
+            emailComplianceFooterHtml(settings, unsubscribe),
+          )
+        : null;
+
+    const merged = campaign.bodyHtml && campaign.body.trim().length === 0
+      ? htmlToPlainText(renderOutreachBody(campaign.bodyHtml, mergeValues))
+      : renderOutreachBody(campaign.body, mergeValues);
+    const body = settings ? merged + "\n" + emailComplianceFooter(settings, unsubscribe) : merged;
 
     if (contactedElsewhere.has(recipient.destinationNormalized)) {
       await finalize(recipient.id, {
         status: "skipped",
         skipReason: "Already messaged in an earlier campaign",
-        renderedBody: body,
+        renderedBody: html ?? body,
       });
       outcome.skipped += 1;
       outcome.results.push({
@@ -224,6 +247,7 @@ export async function sendOutreachBatch(
       to: recipient.destination,
       subject: campaign.channel === "email" ? (campaign.subject ?? undefined) : undefined,
       body,
+      ...(html ? { html } : {}),
       relatedEntityType: "outreach_campaign",
       relatedEntityId: campaign.id,
     });
@@ -233,7 +257,7 @@ export async function sendOutreachBatch(
         status: "sent",
         sentAt: new Date(),
         communicationId: result.id,
-        renderedBody: body,
+        renderedBody: html ?? body,
       });
       outcome.sent += 1;
       outcome.results.push({ recipientId: recipient.id, destination: recipient.destination, status: "sent" });
@@ -247,7 +271,7 @@ export async function sendOutreachBatch(
       status,
       skipReason: reason,
       communicationId: result.id,
-      renderedBody: body,
+      renderedBody: html ?? body,
     });
     if (status === "skipped") outcome.skipped += 1;
     else outcome.failed += 1;

@@ -128,7 +128,7 @@ export function PayrollReport({
       <section className="mt-6 rounded-2xl border border-[#DCE4EC] bg-white p-5 shadow-[0_8px_24px_rgba(11,42,74,0.04)] sm:p-6">
         <div>
           <h2 className="text-base font-bold text-[#0B2A4A]">Who is owed what</h2>
-          <p className="mt-1 text-xs leading-5 text-[#6B7D90]">
+          <p className="mt-1 text-xs leading-5 text-[#5A6B7D]">
             Positive balances need a payout. Recording one creates the same audited expense used by
             the expense ledger and P&amp;L.
           </p>
@@ -157,7 +157,7 @@ export function PayrollReport({
           <div className="mt-5 hidden overflow-x-auto rounded-xl border border-[#DFE6ED] md:block">
             <table className="w-full text-sm">
               <caption className="sr-only">Payroll by staff member for {period.label}</caption>
-              <thead className="bg-[#F5F7FA] text-left text-[#64778A]">
+              <thead className="bg-[#F5F7FA] text-left text-[#5A6B7D]">
                 <tr>
                   <th scope="col" className="px-4 py-3">Staff member</th>
                   <th scope="col" className="px-4 py-3 text-right">Hours</th>
