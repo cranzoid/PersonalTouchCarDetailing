@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { getStoredAttribution } from "@/components/attribution";
-import { trackMetaLead } from "@/components/meta-pixel";
+import { trackMetaEvent, trackMetaLead } from "@/components/meta-pixel";
 import { trackBookAppointmentConversion } from "@/components/google-tag";
 import { DATE_ONLY_BOOKING_NOTICE, DATE_ONLY_BOOKING_NOTICE_SHORT } from "@/lib/ceramic";
 import { formatCents } from "@/lib/money";
@@ -420,7 +420,17 @@ export function BookingWizard({
     // Conversion: the appointment was created server-side and has a reference.
     // Fired once per successful booking, not on step navigation or errors.
     if (res.ok) {
-      trackMetaLead({ content_name: "Booking", content_category: service.name });
+      // The offer already emitted Lead when its claim was created. Report the
+      // downstream appointment as Schedule so one person cannot become two
+      // Meta leads. Ordinary bookings still become a Lead here.
+      if (washClaim) {
+        trackMetaEvent("Schedule", {
+          content_name: "First Detail Appointment",
+          content_category: service.name,
+        });
+      } else {
+        trackMetaLead({ content_name: "Booking", content_category: service.name });
+      }
       trackBookAppointmentConversion();
     }
   }
