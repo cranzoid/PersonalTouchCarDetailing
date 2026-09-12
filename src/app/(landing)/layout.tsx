@@ -18,7 +18,7 @@ export const dynamic = "force-dynamic";
  */
 export default function LandingLayout({ children }: { children: ReactNode }) {
   return (
-    <div className="min-h-screen bg-[#0A0A0B]">
+    <div className="min-h-screen bg-ink-950">
       <AttributionCapture />
       <MetaPixel />
       <GoogleTag ga4MeasurementId={process.env.GA4_MEASUREMENT_ID} />

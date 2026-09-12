@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
 
 const TITLE = "First Wash $15.99 in Hamilton | Personal Touch Car Detailing";
 const DESCRIPTION =
-  "New customers: your first 100% hand wash for $15.99 (SUVs, pickups and vans $17.99). No automatic brushes. Claim your code and book online in Hamilton, Ontario.";
+  "New customers: your first 100% hand wash for $15.99 — car, SUV, pickup or van, one price. No automatic brushes. Claim your code and book online in Hamilton, Ontario.";
 
 /**
  * Indexable only while the offer is actually running. An advert for a finished
@@ -47,7 +47,11 @@ export async function generateMetadata(): Promise<Metadata> {
   };
 }
 
-/** The two sizes the page quotes, named as the catalogue names them. */
+/**
+ * The two sizes the page quotes, named as the catalogue names them. The offer
+ * charges one price for both, but the catalogue does not — $30 and $35 — and a
+ * savings claim has to be measured against each.
+ */
 const CAR_CATEGORY = "sedan" as const;
 const LARGE_CATEGORY = "suv_small" as const;
 
@@ -95,19 +99,31 @@ export default async function FirstWashOfferPage() {
   const largeRegularCents = regularFor(LARGE_CATEGORY);
 
   const money = (cents: number) => formatCents(cents, settings.currency);
-  const carOffer = money(carOfferCents);
-  const largeOffer = money(largeOfferCents);
-  const carSaving = money(Math.max(0, carRegularCents - carOfferCents));
+
+  // One price whatever you drive — the decision this page is built around. It
+  // is still READ from the per-size map rather than assumed, because those
+  // prices are editable in Admin: if somebody ever sets them apart again, the
+  // page quotes the HIGHER figure and drops the "any vehicle" claim, so the
+  // advertised price stays one nobody can be charged above.
+  const onePrice = carOfferCents === largeOfferCents;
+  const offerCents = Math.max(carOfferCents, largeOfferCents);
+  const offerLabel = money(offerCents);
+  const carSavingCents = Math.max(0, carRegularCents - carOfferCents);
+  const largeSavingCents = Math.max(0, largeRegularCents - largeOfferCents);
+  const savingLabel =
+    carSavingCents === largeSavingCents
+      ? `Save ${money(carSavingCents)}`
+      : `Save ${money(carSavingCents)}–${money(largeSavingCents)}`;
 
   const terms = washOfferTerms({
     businessName: settings.businessName,
     carRegularLabel: money(carRegularCents),
-    carOfferLabel: carOffer,
+    carOfferLabel: money(carOfferCents),
     largeRegularLabel: money(largeRegularCents),
-    largeOfferLabel: largeOffer,
+    largeOfferLabel: money(largeOfferCents),
     claimValidDays: offer.claimValidDays,
     taxLabel: settings.taxLabel,
-    cardPriceLabel: money(withTaxCents(carOfferCents, settings.taxRateBp)),
+    cardPriceLabel: money(withTaxCents(offerCents, settings.taxRateBp)),
     // Read from the raw setting: the resolved offer carries only whether claims
     // are still open, and the terms have to name the day.
     claimsCloseLabel: settings.washOffer.claimsCloseOn
@@ -126,7 +142,7 @@ export default async function FirstWashOfferPage() {
     description: DESCRIPTION,
     url: absoluteUrl(FIRST_WASH_OFFER_PATH),
     priceCurrency: settings.currency,
-    price: (carOfferCents / 100).toFixed(2),
+    price: (offerCents / 100).toFixed(2),
     eligibleCustomerType: "https://schema.org/NewCustomer",
     availability: "https://schema.org/LimitedAvailability",
     offeredBy: { "@id": BUSINESS_ENTITY_ID },
@@ -141,85 +157,105 @@ export default async function FirstWashOfferPage() {
       {/* ---------------------------------------------------------------- */}
       {/* Hero + the form. One screen, one decision.                        */}
       {/* ---------------------------------------------------------------- */}
-      <header className="border-b border-white/10 bg-[#0A0A0B]">
+      <header className="border-b border-white/10 bg-ink-950">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-5 py-4 sm:px-8">
-          <p className="text-sm font-black uppercase leading-tight tracking-[0.1em] text-white sm:text-base">
+          <p className="text-sm font-semibold uppercase leading-tight tracking-[0.16em] text-white sm:text-base">
             {settings.businessName}
           </p>
           <a
             href={`tel:${settings.phone}`}
-            className="min-h-11 shrink-0 rounded-lg border-2 border-[#FFE500] px-3 py-2 text-sm font-black text-[#FFE500] hover:bg-[#FFE500] hover:text-[#0A0A0B] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#FFE500]/70"
+            className="min-h-11 shrink-0 rounded-lg border border-accent-400 px-3.5 py-2 text-sm font-semibold text-accent-300 transition hover:bg-accent-400 hover:text-ink-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-500/60"
           >
             {settings.phone}
           </a>
         </div>
       </header>
 
-      <main className="bg-[#0A0A0B] text-white">
-        <section className="mx-auto w-full max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
-          <div className="grid gap-10 lg:grid-cols-[1.05fr_minmax(23rem,1fr)] lg:items-start lg:gap-14">
-            <div>
-              <p className="inline-flex items-center rounded-full bg-[#E01B24] px-3.5 py-1.5 text-xs font-black uppercase tracking-[0.14em] text-white">
-                New customers only · Hamilton
-              </p>
+      <main className="bg-ink-950 text-ink-100">
+        {/* The gold wash behind the hero is the site's own accent, kept faint:
+            it lifts the fold without competing with the ivory form card. */}
+        <section className="relative isolate overflow-hidden">
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-0 bg-[radial-gradient(1100px_520px_at_12%_-10%,rgba(224,169,59,0.16),transparent_62%),linear-gradient(180deg,#0B2A4A_0%,#061A2C_58%)]"
+          />
+          <div className="relative mx-auto w-full max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
+            <div className="grid gap-10 lg:grid-cols-[1.05fr_minmax(23rem,1fr)] lg:items-start lg:gap-14">
+              <div>
+                <p className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.24em] text-accent-300">
+                  <span aria-hidden="true" className="h-px w-10 bg-accent-400" />
+                  New customers only · Hamilton
+                </p>
 
-              <h1 className="mt-5 text-[2.6rem] font-black leading-[0.95] tracking-[-0.03em] sm:text-6xl lg:text-[4.25rem]">
-                Your first hand wash,
-                <span className="mt-2 block text-[#FFE500]">{carOffer}</span>
-              </h1>
+                <h1 className="mt-5 font-display text-[3rem] leading-[0.95] tracking-[-0.035em] text-white sm:text-6xl lg:text-[4.5rem]">
+                  Your first hand wash,
+                  <span className="mt-1 block text-accent-300">{offerLabel}</span>
+                </h1>
 
-              <p className="mt-5 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-lg text-white/70">
-                <span className="text-2xl text-white/45 line-through">{money(carRegularCents)}</span>
-                <span className="font-bold text-white">Save {carSaving} on a car.</span>
-              </p>
-              <p className="mt-2 text-lg leading-7 text-white/70">
-                SUVs, pickups and vans <span className="font-bold text-white">{largeOffer}</span>{" "}
-                <span className="text-white/45 line-through">{money(largeRegularCents)}</span>
-              </p>
+                {onePrice ? (
+                  <p className="mt-5 text-xl font-semibold text-white sm:text-2xl">
+                    Car, SUV, pickup or van — one price.
+                  </p>
+                ) : (
+                  <p className="mt-5 text-xl font-semibold text-white sm:text-2xl">
+                    {money(carOfferCents)} for a car, {money(largeOfferCents)} for an SUV, pickup or van.
+                  </p>
+                )}
 
-              <ul className="mt-7 space-y-2.5 text-lg">
-                {[
-                  "100% hand wash — no automatic brushes, ever",
-                  "Exterior wash, dry and mats cleaned",
-                  `${settings.yearsInBusinessLabel} on Upper James Street`,
-                  "Book a real time online, no queueing",
-                ].map((line) => (
-                  <li key={line} className="flex items-start gap-3">
-                    <span aria-hidden="true" className="mt-1 text-xl font-black text-[#FFE500]">
-                      ✓
-                    </span>
-                    <span className="text-white/85">{line}</span>
-                  </li>
-                ))}
-              </ul>
+                <p className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-lg text-ink-200">
+                  <span className="text-ink-300 line-through">{money(carRegularCents)} car</span>
+                  <span className="text-ink-300 line-through">{money(largeRegularCents)} SUV</span>
+                  <span className="rounded-full bg-accent-400/15 px-3 py-1 text-base font-semibold text-accent-300">
+                    {savingLabel}
+                  </span>
+                </p>
 
-              <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-white/10 pt-6 text-sm">
-                <span className="font-bold text-white">
-                  <span className="text-[#FFE500]">★ {settings.googleReviewRating}</span> from{" "}
-                  {settings.googleReviewCount} Google reviews
-                </span>
-                <span className="text-white/55">
-                  {settings.addressLine1}, {settings.city}
-                </span>
+                <ul className="mt-7 space-y-2.5 text-lg">
+                  {[
+                    "100% hand wash — no automatic brushes, ever",
+                    "Exterior wash, dry and mats cleaned",
+                    "Same price whatever you drive",
+                    `${settings.yearsInBusinessLabel} on Upper James Street`,
+                  ].map((line) => (
+                    <li key={line} className="flex items-start gap-3">
+                      <span
+                        aria-hidden="true"
+                        className="mt-1 grid size-5 shrink-0 place-items-center rounded-full bg-accent-400 text-[0.7rem] font-black text-ink-950"
+                      >
+                        ✓
+                      </span>
+                      <span className="text-ink-100">{line}</span>
+                    </li>
+                  ))}
+                </ul>
+
+                <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-white/10 pt-6 text-sm">
+                  <span className="font-semibold text-white">
+                    <span className="text-accent-300">★ {settings.googleReviewRating}</span> from{" "}
+                    {settings.googleReviewCount} Google reviews
+                  </span>
+                  <span className="text-ink-300">
+                    {settings.addressLine1}, {settings.city}
+                  </span>
+                </div>
               </div>
-            </div>
 
-            {/*
-              The form is the page. It sits in the first screen on every size
-              rather than behind a "claim now" button that scrolls somewhere —
-              a second tap before the first field is a second chance to leave.
-            */}
-            <div className="lg:sticky lg:top-8">
-              <ClaimForm
-                copy={{
-                  carPriceLabel: carOffer,
-                  largePriceLabel: largeOffer,
-                  claimValidDays: offer.claimValidDays,
-                  phone: settings.phone,
-                  privacyNote:
-                    "We use your name and number only to send this code and arrange your wash.",
-                }}
-              />
+              {/*
+                The form is the page. It sits in the first screen on every size
+                rather than behind a "claim now" button that scrolls somewhere —
+                a second tap before the first field is a second chance to leave.
+              */}
+              <div className="lg:sticky lg:top-8">
+                <ClaimForm
+                  copy={{
+                    priceLabel: offerLabel,
+                    claimValidDays: offer.claimValidDays,
+                    phone: settings.phone,
+                    privacyNote:
+                      "We use your name and number only to send this code and arrange your wash.",
+                  }}
+                />
+              </div>
             </div>
           </div>
         </section>
@@ -229,13 +265,19 @@ export default async function FirstWashOfferPage() {
         {/* cheap wash that turns into an upsell at the counter is how a    */}
         {/* first visit becomes the last one.                              */}
         {/* -------------------------------------------------------------- */}
-        <section className="border-y border-white/10 bg-[#121214]">
-          <div className="mx-auto w-full max-w-6xl px-5 py-12 sm:px-8 sm:py-16">
-            <h2 className="text-3xl font-black tracking-tight sm:text-4xl">Exactly what you get</h2>
+        <section className="surface-light">
+          <div className="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
+            <p className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.24em] text-accent-600">
+              <span aria-hidden="true" className="h-px w-10 bg-accent-500" />
+              No surprises
+            </p>
+            <h2 className="mt-4 font-display text-4xl leading-tight tracking-[-0.02em] text-ink-950 sm:text-5xl">
+              Exactly what you get
+            </h2>
             <div className="mt-8 grid gap-4 sm:grid-cols-2">
-              <div className="rounded-2xl border-2 border-[#FFE500]/30 bg-[#FFE500]/[0.05] p-6">
-                <p className="text-sm font-black uppercase tracking-[0.14em] text-[#FFE500]">Included</p>
-                <ul className="mt-4 space-y-2.5 text-white/85">
+              <div className="rounded-2xl border-t-4 border-accent-400 bg-white p-6 shadow-[0_18px_40px_-28px_rgba(6,26,44,0.6)]">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-600">Included</p>
+                <ul className="mt-4 space-y-2.5 text-ink-900">
                   {[
                     "Full exterior hand wash",
                     "Hand dry — no drying tunnel",
@@ -243,15 +285,20 @@ export default async function FirstWashOfferPage() {
                     "Wheels and tyres rinsed",
                   ].map((item) => (
                     <li key={item} className="flex gap-3">
-                      <span aria-hidden="true" className="font-black text-[#FFE500]">✓</span>
+                      <span
+                        aria-hidden="true"
+                        className="mt-1 grid size-5 shrink-0 place-items-center rounded-full bg-accent-400 text-[0.7rem] font-black text-ink-950"
+                      >
+                        ✓
+                      </span>
                       {item}
                     </li>
                   ))}
                 </ul>
               </div>
-              <div className="rounded-2xl border-2 border-white/12 bg-white/[0.03] p-6">
-                <p className="text-sm font-black uppercase tracking-[0.14em] text-white/55">Not included</p>
-                <ul className="mt-4 space-y-2.5 text-white/65">
+              <div className="rounded-2xl border-t-4 border-ink-300 bg-white/60 p-6">
+                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink-500">Not included</p>
+                <ul className="mt-4 space-y-2.5 text-ink-700">
                   {[
                     "Interior cleaning or vacuuming",
                     "Wax, polish or paint correction",
@@ -259,12 +306,12 @@ export default async function FirstWashOfferPage() {
                     "Commercial vehicles (quoted individually)",
                   ].map((item) => (
                     <li key={item} className="flex gap-3">
-                      <span aria-hidden="true" className="font-black text-white/35">—</span>
+                      <span aria-hidden="true" className="font-semibold text-ink-400">—</span>
                       {item}
                     </li>
                   ))}
                 </ul>
-                <p className="mt-5 text-sm leading-6 text-white/50">
+                <p className="mt-5 text-sm leading-6 text-ink-500">
                   Want any of these? Add them when you book and you will see the price before you
                   confirm. Nothing is ever added at the counter without asking you first.
                 </p>
@@ -274,44 +321,59 @@ export default async function FirstWashOfferPage() {
         </section>
 
         {/* -------------------------------------------------------------- */}
-        <section className="mx-auto w-full max-w-6xl px-5 py-12 sm:px-8 sm:py-16">
-          <h2 className="text-3xl font-black tracking-tight sm:text-4xl">How it works</h2>
-          <ol className="mt-8 grid gap-4 sm:grid-cols-3">
-            {[
-              ["1", "Claim your code", "Name and mobile number. Your code appears straight away, and we text a copy."],
-              ["2", "Pick your time", `Book online with the code. Your ${carOffer} price is applied automatically before you confirm.`],
-              ["3", "Bring it in", "We wash it by hand while you wait or leave it with us. Pay when it is done."],
-            ].map(([step, title, body]) => (
-              <li key={step} className="rounded-2xl border-2 border-white/12 bg-white/[0.03] p-6">
-                <span className="inline-grid size-10 place-items-center rounded-full bg-[#FFE500] text-lg font-black text-[#0A0A0B]">
-                  {step}
-                </span>
-                <h3 className="mt-4 text-xl font-black">{title}</h3>
-                <p className="mt-2 text-sm leading-6 text-white/65">{body}</p>
-              </li>
-            ))}
-          </ol>
+        <section className="bg-ink-900">
+          <div className="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
+            <h2 className="font-display text-4xl leading-tight tracking-[-0.02em] text-white sm:text-5xl">
+              How it works
+            </h2>
+            <ol className="mt-8 grid gap-4 sm:grid-cols-3">
+              {[
+                ["1", "Claim your code", "Name and mobile number. Your code appears straight away, and we text a copy."],
+                ["2", "Pick your time", `Book online with the code. Your ${offerLabel} price is applied automatically before you confirm.`],
+                ["3", "Bring it in", "We wash it by hand while you wait or leave it with us. Pay when it is done."],
+              ].map(([step, title, body]) => (
+                <li key={step} className="rounded-2xl border border-white/12 bg-white/[0.04] p-6">
+                  <span className="inline-grid size-10 place-items-center rounded-full bg-accent-400 font-display text-xl text-ink-950">
+                    {step}
+                  </span>
+                  <h3 className="mt-4 font-display text-2xl leading-tight text-white">{title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-ink-200">{body}</p>
+                </li>
+              ))}
+            </ol>
 
-          <div className="mt-10 rounded-2xl border-2 border-white/12 bg-white/[0.03] p-6 sm:p-8">
-            <h2 className="text-2xl font-black">Why {carOffer}?</h2>
-            <p className="mt-3 max-w-3xl text-base leading-7 text-white/70">
-              Because the hardest part of our business is getting you to try us once. We have washed
-              cars on Upper James for {settings.yearsInBusinessLabel.toLowerCase()}, entirely by hand,
-              and the people who come once tend to come back. This is the cost of introducing
-              ourselves — there is no catch, no membership, and nothing to cancel.
-            </p>
+            <div className="mt-10 rounded-2xl border-l-4 border-accent-400 bg-ink-950/60 p-6 sm:p-8">
+              <h2 className="font-display text-3xl leading-tight text-white">Why {offerLabel}?</h2>
+              <p className="mt-3 max-w-3xl text-base leading-7 text-ink-200">
+                Because the hardest part of our business is getting you to try us once. We have washed
+                cars on Upper James for {settings.yearsInBusinessLabel.toLowerCase()}, entirely by hand,
+                and the people who come once tend to come back. This is the cost of introducing
+                ourselves — there is no catch, no membership, and nothing to cancel.
+                {onePrice
+                  ? " An SUV takes us longer than a car and always has, which is why the catalogue charges more for one. On this wash we are not charging you for the difference."
+                  : ""}
+              </p>
+            </div>
           </div>
         </section>
 
         {/* -------------------------------------------------------------- */}
-        <section className="border-t border-white/10 bg-[#121214]">
-          <div className="mx-auto w-full max-w-6xl px-5 py-12 sm:px-8 sm:py-16">
-            <h2 className="text-3xl font-black tracking-tight sm:text-4xl">Questions</h2>
+        <section className="surface-light">
+          <div className="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
+            <h2 className="font-display text-4xl leading-tight tracking-[-0.02em] text-ink-950 sm:text-5xl">
+              Questions
+            </h2>
             <div className="mt-8 grid gap-3 lg:grid-cols-2">
               {[
                 [
                   "Is this really the full price?",
-                  `Yes. ${carOffer} for a car, ${largeOffer} for an SUV, pickup or van, before ${settings.taxLabel}. Cash and Interac e-transfer pay exactly that; card and cheque add ${settings.taxLabel}. You see the total before you confirm the booking.`,
+                  `Yes. ${offerLabel} for a coupe, sedan, SUV, pickup or van, before ${settings.taxLabel}. Cash and Interac e-transfer pay exactly that; card and cheque add ${settings.taxLabel}. You see the total before you confirm the booking.`,
+                ],
+                [
+                  "Is an SUV or truck more?",
+                  onePrice
+                    ? "Not on this offer. Our regular prices do charge more for a larger vehicle, because it takes longer — but your first wash with us is the same price whatever you drive."
+                    : `An SUV, pickup or van is ${money(largeOfferCents)} on this offer, against ${money(carOfferCents)} for a coupe or sedan.`,
                 ],
                 [
                   "Do I have to buy anything else?",
@@ -334,14 +396,17 @@ export default async function FirstWashOfferPage() {
                   "Never — not on this wash and not on any other. Everything here is washed by hand, which is the whole reason the shop exists.",
                 ],
               ].map(([question, answer]) => (
-                <details key={question} className="group rounded-xl border-2 border-white/12 bg-white/[0.03] p-5 open:border-[#FFE500]/40">
-                  <summary className="cursor-pointer list-none text-lg font-bold marker:hidden focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#FFE500]/70">
+                <details
+                  key={question}
+                  className="group rounded-xl border border-ink-300 bg-white p-5 open:border-accent-400"
+                >
+                  <summary className="cursor-pointer list-none text-lg font-semibold text-ink-950 marker:hidden focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-500/50">
                     {question}
-                    <span aria-hidden="true" className="float-right text-[#FFE500] transition group-open:rotate-45">
+                    <span aria-hidden="true" className="float-right text-accent-600 transition group-open:rotate-45">
                       +
                     </span>
                   </summary>
-                  <p className="mt-3 text-sm leading-6 text-white/65">{answer}</p>
+                  <p className="mt-3 text-sm leading-6 text-ink-700">{answer}</p>
                 </details>
               ))}
             </div>
@@ -351,12 +416,12 @@ export default async function FirstWashOfferPage() {
         {/* -------------------------------------------------------------- */}
         {/* The offer's material terms. Required, and written to be read.   */}
         {/* -------------------------------------------------------------- */}
-        <section className="mx-auto w-full max-w-6xl px-5 py-12 sm:px-8 sm:py-16">
-          <h2 className="text-2xl font-black">Offer terms</h2>
-          <ul className="mt-5 grid gap-2.5 text-sm leading-6 text-white/60 lg:grid-cols-2">
+        <section className="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-16">
+          <h2 className="font-display text-3xl text-white">Offer terms</h2>
+          <ul className="mt-5 grid gap-2.5 text-sm leading-6 text-ink-300 lg:grid-cols-2">
             {terms.map((term) => (
               <li key={term} className="flex gap-3">
-                <span aria-hidden="true" className="text-white/30">•</span>
+                <span aria-hidden="true" className="text-accent-500">•</span>
                 <span>{term}</span>
               </li>
             ))}
@@ -366,29 +431,29 @@ export default async function FirstWashOfferPage() {
 
       {/* CASL and plain trust: who is offering this, where they are, and how */}
       {/* to reach them, on the same page as the offer itself.               */}
-      <footer className="border-t border-white/10 bg-[#0A0A0B]">
-        <div className="mx-auto w-full max-w-6xl px-5 py-10 text-sm text-white/50 sm:px-8">
-          <p className="font-bold text-white">{settings.businessName}</p>
+      <footer className="border-t border-white/10 bg-ink-900">
+        <div className="mx-auto w-full max-w-6xl px-5 py-10 text-sm text-ink-300 sm:px-8">
+          <p className="font-semibold text-white">{settings.businessName}</p>
           {settings.legalEntityName && <p className="mt-1">{settings.legalEntityName}</p>}
           <address className="mt-2 not-italic leading-6">
             {settings.addressLine1}, {settings.city}, {settings.province} {settings.postalCode}
             <br />
-            <a href={`tel:${settings.phone}`} className="hover:text-white">{settings.phone}</a>
+            <a href={`tel:${settings.phone}`} className="hover:text-accent-300">{settings.phone}</a>
             {settings.email && (
               <>
                 {" · "}
-                <a href={`mailto:${settings.email}`} className="break-all hover:text-white">{settings.email}</a>
+                <a href={`mailto:${settings.email}`} className="break-all hover:text-accent-300">{settings.email}</a>
               </>
             )}
           </address>
           <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2">
-            <Link href="/policies/privacy" className="hover:text-white">Privacy</Link>
-            <Link href="/policies/terms" className="hover:text-white">Service terms</Link>
-            <Link href="/policies/cancellation" className="hover:text-white">Cancellation</Link>
-            <Link href="/services" className="hover:text-white">All services</Link>
-            <a href={PUBLIC_SITE_URL} className="hover:text-white">Main site</a>
+            <Link href="/policies/privacy" className="hover:text-accent-300">Privacy</Link>
+            <Link href="/policies/terms" className="hover:text-accent-300">Service terms</Link>
+            <Link href="/policies/cancellation" className="hover:text-accent-300">Cancellation</Link>
+            <Link href="/services" className="hover:text-accent-300">All services</Link>
+            <a href={PUBLIC_SITE_URL} className="hover:text-accent-300">Main site</a>
           </div>
-          <p className="mt-5 text-xs">
+          <p className="mt-5 text-xs text-ink-400">
             © {new Date().getFullYear()} {settings.businessName}. All rights reserved.
           </p>
         </div>
@@ -404,23 +469,23 @@ export default async function FirstWashOfferPage() {
  */
 function OfferClosed({ phone }: { phone: string }) {
   return (
-    <main className="grid min-h-screen place-items-center bg-[#0A0A0B] px-5 py-16 text-center text-white">
+    <main className="grid min-h-screen place-items-center bg-ink-950 px-5 py-16 text-center text-ink-100">
       <div className="max-w-md">
-        <h1 className="text-3xl font-black">This offer has finished</h1>
-        <p className="mt-4 text-base leading-7 text-white/65">
+        <h1 className="font-display text-4xl leading-tight text-white">This offer has finished</h1>
+        <p className="mt-4 text-base leading-7 text-ink-200">
           Our new-customer wash promotion is not running at the moment. We would still be glad to
           look after your vehicle — our full price list is online, and you can book in a minute.
         </p>
         <div className="mt-8 grid gap-2.5">
           <Link
             href="/book"
-            className="inline-flex min-h-14 items-center justify-center rounded-xl bg-[#FFE500] px-6 text-lg font-black text-[#0A0A0B]"
+            className="inline-flex min-h-14 items-center justify-center rounded-xl bg-accent-400 px-6 text-lg font-bold text-ink-950 transition hover:bg-accent-300"
           >
             Book a wash
           </Link>
           <a
             href={`tel:${phone}`}
-            className="inline-flex min-h-14 items-center justify-center rounded-xl border-2 border-white/25 px-6 text-base font-bold text-white"
+            className="inline-flex min-h-14 items-center justify-center rounded-xl border border-ink-500 px-6 text-base font-semibold text-ink-100 transition hover:border-accent-400 hover:text-accent-300"
           >
             Call {phone}
           </a>

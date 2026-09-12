@@ -12,11 +12,19 @@ import type { BusinessSettings } from "@/lib/settings";
  * and "one wash per person, one per plate" is exactly that.
  *
  * WHY THIS IS NOT THE EXISTING `promotion` SLOT: that one is a percentage.
- * This offer charges $15.99 for a car and $17.99 for anything larger, against
- * catalogue prices of $30 and $35 — 46.7% and 48.6%. No single rate produces
- * both figures, and rounding one into the other would put a price on the page
- * that the booking then contradicts. So the promo PRICE is the anchor and the
- * discount is derived from it.
+ * This offer charges $15.99 for any vehicle, against catalogue prices of $30
+ * for a car and $35 for an SUV, pickup or van — 46.7% and 54.3% off the same
+ * advertised figure. One price across two regular prices is precisely what a
+ * rate cannot express, and rounding the two together would put a number on the
+ * page that the booking then contradicts. So the promo PRICE is the anchor and
+ * the discount is derived per vehicle from it.
+ *
+ * The map stays per-category even though every covered size now holds the same
+ * number. It is the eligibility list as much as the price list — an absent
+ * category is not covered, which is how commercial vehicles, quoted
+ * individually, stay out of a fixed-price offer — and the day the owners want
+ * a size priced differently again, that is a number in Admin rather than a
+ * deploy.
  */
 
 export type WashOffer = {
@@ -28,7 +36,8 @@ export type WashOffer = {
   /** Catalogue slug this offer buys. Slug, not id: ids differ per environment. */
   serviceSlug: string;
   /**
-   * Promo price per vehicle category, in cents.
+   * Promo price per vehicle category, in cents. Normally one figure repeated:
+   * the offer is advertised as the same price whatever you drive.
    *
    * A CATEGORY ABSENT FROM THIS MAP IS NOT ELIGIBLE — the same fail-closed
    * rule as `promotion.eligibleServiceIds`. That is what keeps commercial
@@ -248,8 +257,11 @@ export const OFFER_CLAIM_REMINDER_DAYS = [3, 7, 12] as const;
  * `tax_label` is snapshotted onto an invoice (DECISIONS.md #6).
  *
  * Bump this whenever the wording below changes in a way that alters the deal.
+ * `2026-09.2` dropped the surcharge on SUVs, pickups and vans: one price for
+ * every vehicle. Anyone still holding a `2026-09` code is better off under the
+ * new terms, which is the only direction a live promotion may move in.
  */
-export const WASH_OFFER_TERMS_VERSION = "2026-09";
+export const WASH_OFFER_TERMS_VERSION = "2026-09.2";
 
 /**
  * The offer in full, in the order it has to be read.
@@ -272,12 +284,20 @@ export function washOfferTerms(input: {
   cardPriceLabel: string;
   claimsCloseLabel: string | null;
 }): string[] {
+  // One price for every size is the offer as the owners set it, but the prices
+  // are editable in Admin and these sentences ARE the offer — so the wording
+  // follows the configuration rather than assuming it. A page that advertises
+  // "the same whatever you drive" against a map that says otherwise is the one
+  // failure this section exists to prevent.
+  const onePrice = input.carOfferLabel === input.largeOfferLabel;
   return [
     `Available to new customers only — one promotional wash per person and per vehicle. ${input.businessName} may verify this before the wash.`,
-    `${input.carOfferLabel} applies to a coupe or sedan, regularly ${input.carRegularLabel}. ${input.largeOfferLabel} applies to an SUV, pickup or van, regularly ${input.largeRegularLabel}. Commercial vehicles are quoted individually and are not included.`,
+    onePrice
+      ? `${input.carOfferLabel} is the price for any coupe, sedan, SUV, pickup or van — the same whatever you drive — against regular prices of ${input.carRegularLabel} for a car and ${input.largeRegularLabel} for an SUV, pickup or van. Commercial vehicles are quoted individually and are not included.`
+      : `${input.carOfferLabel} applies to a coupe or sedan, regularly ${input.carRegularLabel}. ${input.largeOfferLabel} applies to an SUV, pickup or van, regularly ${input.largeRegularLabel}. Commercial vehicles are quoted individually and are not included.`,
     "Covers the basic exterior wash only: a hand wash, dry and mats. Interior cleaning, waxing and any other extra is charged at the usual price.",
     "100% hand wash. No automatic brushes are used on any vehicle, on this offer or otherwise.",
-    `Prices exclude ${input.taxLabel}. Cash and Interac e-transfer pay the listed price; card and cheque add ${input.taxLabel} (${input.cardPriceLabel} for a car).`,
+    `Prices exclude ${input.taxLabel}. Cash and Interac e-transfer pay the listed price; card and cheque add ${input.taxLabel} (${input.cardPriceLabel}${onePrice ? " in total" : " for a car"}).`,
     `Book your appointment within ${input.claimValidDays} days of claiming. Appointments are subject to availability and the offer cannot be used as a walk-in without one.`,
     "Cannot be combined with any other offer, discount or package deal.",
     input.claimsCloseLabel

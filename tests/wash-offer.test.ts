@@ -9,6 +9,7 @@ import {
   resolveWashOfferCode,
   washOfferAllocation,
   washOfferPriceCents,
+  washOfferTerms,
 } from "../src/lib/wash-offer";
 import { bestOfAllocations } from "../src/lib/bundle-offers";
 import { SETTINGS_DEFAULTS } from "../src/lib/settings";
@@ -16,10 +17,12 @@ import { SETTINGS_DEFAULTS } from "../src/lib/settings";
 /**
  * The new-customer wash offer's money and expiry rules.
  *
- * The offer charges $15.99 for a car and $17.99 for anything larger against
- * catalogue prices of $30 and $35. No single percentage produces both figures,
- * which is the whole reason this is a fixed PRICE turned into a discount rather
- * than a rate — so the arithmetic below is the part that must not drift.
+ * The offer charges $15.99 for any vehicle against catalogue prices of $30 for
+ * a car and $35 for anything larger — 46.7% and 54.3% off one advertised
+ * figure. One price across two regular prices is exactly what a percentage
+ * cannot express, which is the whole reason this is a fixed PRICE turned into a
+ * discount rather than a rate, so the arithmetic below is the part that must
+ * not drift.
  */
 
 const WASH = "svc_wash";
@@ -96,13 +99,12 @@ describe("resolveWashOfferCode", () => {
 describe("washOfferPriceCents", () => {
   const offer = activeWashOffer(settings(), NOW)!;
 
-  it("prices a car and a large vehicle differently", () => {
-    expect(washOfferPriceCents(offer, "sedan")).toBe(1599);
-    expect(washOfferPriceCents(offer, "coupe")).toBe(1599);
-    expect(washOfferPriceCents(offer, "suv_small")).toBe(1799);
-    expect(washOfferPriceCents(offer, "suv_large")).toBe(1799);
-    expect(washOfferPriceCents(offer, "pickup")).toBe(1799);
-    expect(washOfferPriceCents(offer, "van")).toBe(1799);
+  it("charges the same price whatever they drive", () => {
+    // The advertised promise. An SUV costs more in the catalogue and always
+    // will; this offer is what it is because it does not pass that on.
+    for (const category of ["coupe", "sedan", "other", "suv_small", "suv_large", "pickup", "van"] as const) {
+      expect(washOfferPriceCents(offer, category)).toBe(1599);
+    }
   });
 
   it("does not cover a commercial vehicle", () => {
@@ -126,10 +128,14 @@ describe("washOfferAllocation", () => {
     expect(lines[0].priceCents - allocation[0]).toBe(1599);
   });
 
-  it("reaches $17.99 from the large-vehicle catalogue price", () => {
+  it("takes more off a large vehicle to land on the same price", () => {
+    // The $35 catalogue price and the $30 one both have to end at $15.99, which
+    // is only possible because the discount is derived per vehicle rather than
+    // being a rate: $19.01 off here against $14.01 above.
     const large = [{ serviceId: WASH, priceCents: 3500 }];
-    const { allocation } = washOfferAllocation(large, { serviceId: WASH, promoPriceCents: 1799 });
-    expect(large[0].priceCents - allocation[0]).toBe(1799);
+    const { allocation } = washOfferAllocation(large, { serviceId: WASH, promoPriceCents: 1599 });
+    expect(allocation).toEqual([1901]);
+    expect(large[0].priceCents - allocation[0]).toBe(1599);
   });
 
   it("touches nothing when the wash is not in the cart", () => {
@@ -191,6 +197,37 @@ describe("bestOfAllocations", () => {
     const resolved = bestOfAllocations([{ key: "wash", allocation: [0, 0] }]);
     expect(resolved.allocation).toEqual([0, 0]);
     expect(resolved.contributing.size).toBe(0);
+  });
+});
+
+describe("washOfferTerms", () => {
+  const base = {
+    businessName: "Personal Touch Car Detailing",
+    carRegularLabel: "$30.00",
+    carOfferLabel: "$15.99",
+    largeRegularLabel: "$35.00",
+    claimValidDays: 14,
+    taxLabel: "HST",
+    cardPriceLabel: "$18.07",
+    claimsCloseLabel: null,
+  };
+
+  // These sentences ARE the offer — the Competition Act wants the material
+  // terms stated plainly and the saving measured against a price the shop
+  // actually charges. The prices behind them are editable in Admin, so the
+  // wording has to follow the configuration rather than assume it.
+  it("states one price, and both regular prices it is measured against", () => {
+    const pricing = washOfferTerms({ ...base, largeOfferLabel: "$15.99" })[1];
+    expect(pricing).toContain("the same whatever you drive");
+    expect(pricing).toContain("$30.00");
+    expect(pricing).toContain("$35.00");
+    expect(pricing).toContain("Commercial vehicles are quoted individually");
+  });
+
+  it("reverts to naming both prices if a size is ever priced apart again", () => {
+    const pricing = washOfferTerms({ ...base, largeOfferLabel: "$17.99" })[1];
+    expect(pricing).not.toContain("the same whatever you drive");
+    expect(pricing).toContain("$17.99 applies to an SUV, pickup or van");
   });
 });
 

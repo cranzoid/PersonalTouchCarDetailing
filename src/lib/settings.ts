@@ -156,14 +156,19 @@ export const SETTINGS_DEFAULTS: BusinessSettings = {
     code: "FIRSTWASH26",
     label: "First Wash Offer",
     serviceSlug: "basic-car-wash",
+    // One price for every vehicle the shop prices from the catalogue. An SUV
+    // costs more to wash than a car and the catalogue still says so ($35 against
+    // $30) — this offer simply does not charge for the difference, because the
+    // point of it is a first visit, not a margin. `commercial` stays absent:
+    // that work is quoted individually, so no fixed price could be honest.
     priceCentsByCategory: {
       coupe: 1599,
       sedan: 1599,
       other: 1599,
-      suv_small: 1799,
-      suv_large: 1799,
-      pickup: 1799,
-      van: 1799,
+      suv_small: 1599,
+      suv_large: 1599,
+      pickup: 1599,
+      van: 1599,
     },
     claimValidDays: 14,
     claimsCloseOn: "",

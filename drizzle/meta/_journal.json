@@ -169,6 +169,13 @@
       "when": 1789173604325,
       "tag": "0023_first_wash_offer_claims",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1789195204325,
+      "tag": "0024_flat_first_wash_price",
+      "breakpoints": true
     }
   ]
 }

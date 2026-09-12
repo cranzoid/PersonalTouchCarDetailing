@@ -284,7 +284,10 @@ describe("spending a claim on a booking", () => {
     expect(appointment.promoCode).toBe(offer.code);
   });
 
-  it("charges the advertised price for an SUV", async () => {
+  it("charges the same advertised price for an SUV", async () => {
+    // The larger vehicle still bills at its own catalogue price — the discount
+    // simply absorbs the whole difference, which is what makes "one price
+    // whatever you drive" true at the till as well as in the ad.
     const { claim } = await claimFor({ firstName: "Sam", phone: "905-555-0101" }, "suv");
     const { pricing } = await book({
       code: claim.code,
@@ -293,12 +296,15 @@ describe("spending a claim on a booking", () => {
       startMs: await slotAt(0),
     });
     expect(pricing.subtotalCents).toBe(3500);
-    expect(pricing.subtotalCents - pricing.discountCents).toBe(1799);
+    expect(pricing.discountCents).toBe(1901);
+    expect(pricing.subtotalCents - pricing.discountCents).toBe(1599);
   });
 
-  it("charges the size the customer actually books, not the one they guessed", async () => {
+  it("prices the size the customer actually books, not the one they guessed", async () => {
     // They picked "car" on the landing page and arrived booking an SUV. The
-    // honest answer is the SUV price, not a void offer.
+    // booked vehicle decides the catalogue price — the $3500 subtotal proves
+    // the claim's answer was not used as pricing input — and the offer is
+    // honoured rather than voided over the mismatch.
     const { claim } = await claimFor({ firstName: "Sam", phone: "905-555-0101" }, "car");
     const { pricing } = await book({
       code: claim.code,
@@ -306,7 +312,8 @@ describe("spending a claim on a booking", () => {
       category: "suv_small",
       startMs: await slotAt(0),
     });
-    expect(pricing.subtotalCents - pricing.discountCents).toBe(1799);
+    expect(pricing.subtotalCents).toBe(3500);
+    expect(pricing.subtotalCents - pricing.discountCents).toBe(1599);
   });
 
   it("marks the claim booked and links it to the appointment", async () => {

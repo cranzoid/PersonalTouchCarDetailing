@@ -965,25 +965,44 @@ that point the `text-white` repaint and the three foreground overrides can all
 go, and `admin-on-dark` with them.
 
 ## 33. The new-customer wash offer: a fixed price, and two caps that can't lose a race
-The offer is "your first hand wash, $15.99 — SUVs, pickups and vans $17.99", for
-new customers only, one per person and one per licence plate. It lands on its
-own direct-response page at `/offers/first-wash`, issues a code, and hands the
-customer into the ordinary booking wizard with that code applied.
+The offer is "your first hand wash, $15.99 — car, SUV, pickup or van, one
+price", for new customers only, one per person and one per licence plate. It
+lands on its own direct-response page at `/offers/first-wash`, issues a code,
+and hands the customer into the ordinary booking wizard with that code applied.
 
 Consequential choices:
 
-- **A promo PRICE, not a percentage.** Against live catalogue prices of $30 and
-  $35 those two figures are 46.7% and 48.6% off. No single rate produces both,
-  and rounding one into the other would put a number on the page that the
+- **A promo PRICE, not a percentage.** Against live catalogue prices of $30 for
+  a car and $35 for anything larger, the one advertised figure is 46.7% and
+  54.3% off. One price across two regular prices is precisely what a rate cannot
+  express, and rounding the two together would put a number on the page that the
   booking then contradicts. So `washOffer.priceCentsByCategory` is the anchor
   and the discount is derived as `catalogue − promo` per vehicle category.
   This is why it lives beside `promotion` in settings rather than inside it.
+- **One price for every size, still stored per size.** The owners dropped the
+  $17.99 larger-vehicle price on 2026-09-12: an SUV genuinely costs more to wash
+  and the catalogue still says so, but the point of this offer is a first visit,
+  not a margin on it. The map stays per-category because it is the eligibility
+  list as much as the price list — an absent category is not covered, which is
+  what keeps commercial vehicles, quoted individually, out of a fixed-price
+  offer — and because the prices are editable in Admin. The landing page
+  therefore READS whether the sizes agree rather than assuming it: if they are
+  ever set apart again it quotes the higher figure and drops the "any vehicle"
+  claim, so the advertised price is never one a customer could be charged above.
+  The saving is stated as a range ($14.01–$19.01), because it is measured
+  against two different catalogue prices.
+- **The vehicle size is still asked on the claim form**, with no price beside it.
+  It decides how long the bay is held and tells the shop what is coming through
+  the door, and it is on the claim before anyone books. It is not pricing input:
+  the booked vehicle is what the catalogue prices from, so somebody who says
+  "car" and arrives in a pickup is charged the pickup's catalogue price with the
+  discount absorbing the difference — the offer is honoured, not voided.
 - **The wash is still booked at its catalogue price, with the saving as a
   discount.** Writing the line at $15.99 directly would have been simpler and
   wrong: `appointments.discount_cents` would read zero, the invoice would not
   show the saving, and reporting could not tell a promotional wash from a cheap
   one. It also keeps the advertised "regular price" honest — the struck-through
-  figure on the landing page is read from the same catalogue row the booking
+  figures on the landing page are read from the same catalogue rows the booking
   prices from, so it can never advertise a price the shop does not charge.
   Canada's Competition Act measures a savings claim against exactly that.
 - **A `offer_claims` table, which is decision 14's "revisit when".** That

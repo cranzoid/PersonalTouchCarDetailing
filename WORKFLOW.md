@@ -500,8 +500,10 @@ Production seeding refuses those defaults.
 Shipped 2026-09-12, **switched off**. To launch it:
 
 1. Admin → Settings → New-customer wash offer: tick "Run the new-customer wash
-   offer". The prices ship pre-filled ($15.99 car, $17.99 SUV/pickup/van;
-   commercial deliberately blank) and the code is `FIRSTWASH26`.
+   offer". The prices ship pre-filled at $15.99 for every size (commercial
+   deliberately blank) and the code is `FIRSTWASH26`. Leave them equal unless
+   you mean to: the landing page advertises "one price whatever you drive" only
+   while they agree, and quotes the highest one if they do not.
 2. Point ad traffic at `/offers/first-wash`. Claimed codes appear under
    Admin → Offer claims; the licence plate is recorded on the appointment when
    the car arrives, which is what enforces one promotional wash per vehicle.
@@ -512,11 +514,14 @@ Shipped 2026-09-12, **switched off**. To launch it:
 Owner decisions still outstanding:
 
 - **The regular price is $30 for a coupe/sedan and $35 for anything larger**,
-  read live from the catalogue. The original brief said "$35 regular", which is
-  the SUV price — advertising $35 against the $15.99 car price would be a false
-  savings claim. If the owners want the car wash to be $35, that is a catalogue
-  change in Admin → Services and needs to be the price actually charged before
-  it can be advertised as the regular one.
+  read live from the catalogue. The offer price is now one figure for every
+  size, so the page strikes through both regular prices and states the saving as
+  a range ($14.01–$19.01) — one number could not be true of both. The original
+  brief said "$35 regular", which is the SUV price; advertising $35 against the
+  $15.99 price of a car would be a false savings claim. If the owners want the
+  car wash to be $35, that is a catalogue change in Admin → Services and needs
+  to be the price actually charged before it can be advertised as the regular
+  one.
 - SMS delivery is unverified in production (see the Twilio item above). The code
   is shown on screen and emailed, so nothing in the funnel depends on it.
 

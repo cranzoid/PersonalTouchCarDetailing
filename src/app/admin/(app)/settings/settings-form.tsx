@@ -226,6 +226,12 @@ export function SettingsForm({
         <fieldset className="mt-4">
           <legend className="mb-2 text-xs text-ink-400">
             Offer price by vehicle type, before {initial.taxLabel}. Blank means not covered.
+            <span className="mt-1 block text-ink-500">
+              These ship as one price for every size, and the landing page advertises it as the
+              same whatever they drive. Set a size higher and the page stops making that claim
+              and quotes the highest price instead — so the advertised figure is never one a
+              customer could be charged above.
+            </span>
           </legend>
           <div className="grid gap-2 sm:grid-cols-3">
             {VEHICLE_CATEGORIES.map((category) => (
