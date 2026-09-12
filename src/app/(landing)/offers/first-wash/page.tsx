@@ -244,9 +244,9 @@ export default async function FirstWashOfferPage() {
           <h2 className="text-center text-3xl font-black tracking-[-0.035em] sm:text-4xl">Quick questions</h2>
           <div className="mt-7 space-y-2.5">
             {[
-              ["Is this really the full price?", `Yes—${offerLabel} before ${settings.taxLabel}. Cash and Interac e-transfer pay the listed price; card and cheque add ${settings.taxLabel}.`],
+              ["Is this really the full price?", `Yes—${offerLabel} before ${settings.taxLabel}.`],
               ["Is an SUV or truck more?", onePrice ? "No. The offer price is the same for a coupe, sedan, SUV, pickup or van." : `SUVs, pickups and vans are ${money(largeOfferCents)}; coupes and sedans are ${money(carOfferCents)}.`],
-              ["How long does it take?", "About one hour for a standard vehicle. You choose an appointment time, so there is no wash-line wait."],
+              ["How long does it take?", "About 15 minutes for a standard vehicle. You choose an appointment time, so there is no wash-line wait."],
               ["Can I use it on a second car?", "The promotion is one wash per new customer and per vehicle. Additional vehicles are welcome at regular prices."],
             ].map(([question, answer]) => (
               <details key={question} className="group rounded-2xl border border-[#D5DFE0] bg-white px-5 py-4 open:border-[#75CCD3]">
