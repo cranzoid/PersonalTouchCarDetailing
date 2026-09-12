@@ -77,7 +77,67 @@ export async function issueClaim(input: ClaimIssueInput): Promise<ClaimIssueResu
   }
 
   const existing = await findClaimForContact(input.offer.code, phoneNormalized, emailNormalized);
-  if (existing) return { claim: existing, created: false };
+  if (existing) {
+    // A returning claimant may be supplying an email that the earlier version
+    // of the form did not require. Keep the same code, but complete its contact
+    // record and stamp the newly accepted terms so re-sending reaches both
+    // channels and the consent evidence reflects what was actually accepted.
+    const consentAt = input.marketingConsent
+      ? (existing.marketingConsentAt ?? new Date(nowMs))
+      : existing.marketingConsentAt;
+    const updates = {
+      email: existing.email ?? input.email ?? null,
+      emailNormalized: existing.emailNormalized ?? emailNormalized,
+      phone: existing.phone ?? input.phone ?? null,
+      phoneNormalized: existing.phoneNormalized ?? phoneNormalized,
+      marketingConsent: existing.marketingConsent || input.marketingConsent,
+      marketingConsentAt: consentAt,
+      termsVersion: input.termsVersion,
+      updatedAt: new Date(nowMs),
+    };
+
+    let refreshed = existing;
+    try {
+      const [updated] = await db()
+        .update(schema.offerClaims)
+        .set(updates)
+        .where(eq(schema.offerClaims.id, existing.id))
+        .returning();
+      if (updated) refreshed = updated;
+    } catch (error) {
+      // If a newly supplied address is already bound to another live claim,
+      // do not merge identities. We can still record acceptance against the
+      // claim found by the other address without disclosing the collision.
+      if (!isUniqueViolation(error)) throw error;
+      const [updated] = await db()
+        .update(schema.offerClaims)
+        .set({
+          marketingConsent: existing.marketingConsent || input.marketingConsent,
+          marketingConsentAt: consentAt,
+          termsVersion: input.termsVersion,
+          updatedAt: new Date(nowMs),
+        })
+        .where(eq(schema.offerClaims.id, existing.id))
+        .returning();
+      if (updated) refreshed = updated;
+    }
+
+    if (existing.leadId) {
+      await db()
+        .update(schema.leads)
+        .set({
+          email: refreshed.email,
+          phone: refreshed.phone,
+          phoneNormalized: refreshed.phoneNormalized,
+          marketingConsent: refreshed.marketingConsent,
+          marketingConsentAt: refreshed.marketingConsentAt,
+          marketingConsentSource: refreshed.marketingConsent ? "public_offer_terms" : null,
+          updatedAt: new Date(nowMs),
+        })
+        .where(eq(schema.leads.id, existing.leadId));
+    }
+    return { claim: refreshed, created: false };
+  }
 
   // A lead so the claimant lands in the CRM the owners already work from, and
   // so the marketing-consent flag has the home `sendMessage` looks for. Same
@@ -96,7 +156,7 @@ export async function issueClaim(input: ClaimIssueInput): Promise<ClaimIssueResu
     attribution: (input.attribution ?? null) as never,
     marketingConsent: input.marketingConsent,
     marketingConsentAt: consentAt,
-    marketingConsentSource: input.marketingConsent ? "public_offer_claim" : null,
+    marketingConsentSource: input.marketingConsent ? "public_offer_terms" : null,
   });
 
   // Up to a handful of attempts: a code collision is astronomically unlikely,

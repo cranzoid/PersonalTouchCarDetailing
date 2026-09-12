@@ -21,9 +21,9 @@ const claimSchema = z.object({
   // Required. The offer's "one per customer" cap is keyed on this, and it is
   // how the shop reaches someone about an appointment.
   phone: z.string().trim().min(7).max(30),
-  email: z.string().trim().email().max(200).optional().or(z.literal("").transform(() => undefined)),
+  email: z.string().trim().email().max(200),
   vehicleSize: z.enum(["car", "suv"]),
-  marketingConsent: z.boolean().default(false),
+  termsAccepted: z.literal(true),
   attribution: z.record(z.string(), z.unknown()).optional(),
 });
 
@@ -62,7 +62,7 @@ export async function claimWashOfferAction(raw: unknown): Promise<ClaimResult> {
   }
   const parsed = claimSchema.safeParse(raw);
   if (!parsed.success) {
-    return { ok: false, error: "Please check your name and mobile number." };
+    return { ok: false, error: "Please check every field and accept the Terms & Conditions." };
   }
   const input = parsed.data;
 
@@ -81,7 +81,7 @@ export async function claimWashOfferAction(raw: unknown): Promise<ClaimResult> {
       phone: input.phone,
       email: input.email,
       vehicleSize: input.vehicleSize,
-      marketingConsent: input.marketingConsent,
+      marketingConsent: true,
       termsVersion: WASH_OFFER_TERMS_VERSION,
       attribution: (input.attribution ?? undefined) as Attribution | undefined,
     });
@@ -103,7 +103,9 @@ export async function claimWashOfferAction(raw: unknown): Promise<ClaimResult> {
     // carrier registration is finished, and a funnel that depends on a text
     // arriving is a funnel that stops working the day the provider does.
     let sentBy: ("sms" | "email")[] = [];
-    if (created && !alreadyUsed && !expired) {
+    // Re-send an existing live code too. Someone returning because they lost a
+    // message should receive the same useful response as a first-time claim.
+    if (!alreadyUsed && !expired) {
       sentBy = await sendClaimMessages({
         claim,
         offer,

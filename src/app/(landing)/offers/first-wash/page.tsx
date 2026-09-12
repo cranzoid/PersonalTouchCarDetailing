@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { and, eq, inArray } from "drizzle-orm";
@@ -19,16 +20,10 @@ export const dynamic = "force-dynamic";
 
 const TITLE = "First Wash $15.99 in Hamilton | Personal Touch Car Detailing";
 const DESCRIPTION =
-  "New customers: your first 100% hand wash for $15.99 — car, SUV, pickup or van, one price. No automatic brushes. Claim your code and book online in Hamilton, Ontario.";
+  "New customers: your first 100% hand wash for $15.99 — car, SUV, pickup or van, one price. Claim your code and book online in Hamilton, Ontario.";
 
-/**
- * Indexable only while the offer is actually running. An advert for a finished
- * promotion is worse than no page at all, and this one can be switched off by
- * the owner at any moment without a deploy.
- */
 export async function generateMetadata(): Promise<Metadata> {
-  const settings = await getSettings();
-  const offer = activeWashOffer(settings);
+  const offer = activeWashOffer(await getSettings());
   return {
     title: { absolute: TITLE },
     description: DESCRIPTION,
@@ -41,24 +36,18 @@ export async function generateMetadata(): Promise<Metadata> {
       title: TITLE,
       description: DESCRIPTION,
       url: FIRST_WASH_OFFER_PATH,
-      images: [{ url: "/og.png", width: 1200, height: 628, alt: "First wash offer — Personal Touch Car Detailing" }],
+      images: [{ url: "/images/services/hand-wash.png", width: 1450, height: 1086, alt: "Hand washing a vehicle" }],
     },
-    twitter: { card: "summary_large_image", title: TITLE, description: DESCRIPTION, images: ["/og.png"] },
+    twitter: { card: "summary_large_image", title: TITLE, description: DESCRIPTION, images: ["/images/services/hand-wash.png"] },
   };
 }
 
-/**
- * The two sizes the page quotes, named as the catalogue names them. The offer
- * charges one price for both, but the catalogue does not — $30 and $35 — and a
- * savings claim has to be measured against each.
- */
 const CAR_CATEGORY = "sedan" as const;
 const LARGE_CATEGORY = "suv_small" as const;
 
 export default async function FirstWashOfferPage() {
   const settings = await getSettings();
   const offer = activeWashOffer(settings);
-
   const service = offer
     ? (
         await db()
@@ -69,22 +58,12 @@ export default async function FirstWashOfferPage() {
       )[0]
     : undefined;
 
-  // The regular prices come from the CATALOGUE, never from copy typed into this
-  // page. A struck-through price is a savings claim, and Canadian advertising
-  // law measures it against the price the business actually charges — so the
-  // only safe source is the row the booking flow prices from.
   const adjustments = service
     ? await db()
         .select()
         .from(schema.serviceVehicleAdjustments)
-        .where(
-          and(
-            eq(schema.serviceVehicleAdjustments.serviceId, service.id),
-            inArray(schema.serviceVehicleAdjustments.vehicleCategory, [CAR_CATEGORY, LARGE_CATEGORY]),
-          ),
-        )
+        .where(and(eq(schema.serviceVehicleAdjustments.serviceId, service.id), inArray(schema.serviceVehicleAdjustments.vehicleCategory, [CAR_CATEGORY, LARGE_CATEGORY])))
     : [];
-
   const carOfferCents = offer ? washOfferPriceCents(offer, CAR_CATEGORY) : null;
   const largeOfferCents = offer ? washOfferPriceCents(offer, LARGE_CATEGORY) : null;
 
@@ -97,23 +76,13 @@ export default async function FirstWashOfferPage() {
     (adjustments.find((row) => row.vehicleCategory === category)?.priceDeltaCents ?? 0);
   const carRegularCents = regularFor(CAR_CATEGORY);
   const largeRegularCents = regularFor(LARGE_CATEGORY);
-
   const money = (cents: number) => formatCents(cents, settings.currency);
-
-  // One price whatever you drive — the decision this page is built around. It
-  // is still READ from the per-size map rather than assumed, because those
-  // prices are editable in Admin: if somebody ever sets them apart again, the
-  // page quotes the HIGHER figure and drops the "any vehicle" claim, so the
-  // advertised price stays one nobody can be charged above.
   const onePrice = carOfferCents === largeOfferCents;
   const offerCents = Math.max(carOfferCents, largeOfferCents);
   const offerLabel = money(offerCents);
-  const carSavingCents = Math.max(0, carRegularCents - carOfferCents);
-  const largeSavingCents = Math.max(0, largeRegularCents - largeOfferCents);
-  const savingLabel =
-    carSavingCents === largeSavingCents
-      ? `Save ${money(carSavingCents)}`
-      : `Save ${money(carSavingCents)}–${money(largeSavingCents)}`;
+  const savings = [carRegularCents - carOfferCents, largeRegularCents - largeOfferCents].map((value) => Math.max(0, value));
+  const savingLabel = savings[0] === savings[1] ? `Save ${money(savings[0])}` : `Save ${money(savings[0])}–${money(savings[1])}`;
+  const address = `${settings.addressLine1}, ${settings.city}, ${settings.province} ${settings.postalCode}`;
 
   const terms = washOfferTerms({
     businessName: settings.businessName,
@@ -124,8 +93,6 @@ export default async function FirstWashOfferPage() {
     claimValidDays: offer.claimValidDays,
     taxLabel: settings.taxLabel,
     cardPriceLabel: money(withTaxCents(offerCents, settings.taxRateBp)),
-    // Read from the raw setting: the resolved offer carries only whether claims
-    // are still open, and the terms have to name the day.
     claimsCloseLabel: settings.washOffer.claimsCloseOn
       ? formatInZone(new Date(`${settings.washOffer.claimsCloseOn}T12:00:00Z`), settings.timezone, {
           weekday: "long",
@@ -146,349 +113,176 @@ export default async function FirstWashOfferPage() {
     eligibleCustomerType: "https://schema.org/NewCustomer",
     availability: "https://schema.org/LimitedAvailability",
     offeredBy: { "@id": BUSINESS_ENTITY_ID },
-    areaServed: { "@type": "City", name: "Hamilton" },
+    areaServed: { "@type": "City", name: settings.city },
     itemOffered: { "@type": "Service", name: "Exterior hand wash" },
   };
 
   return (
-    <>
+    <div className="min-h-screen bg-[#F2F6F5] text-[#071419]">
       <StructuredData data={structuredData} />
 
-      {/* ---------------------------------------------------------------- */}
-      {/* Hero + the form. One screen, one decision.                        */}
-      {/* ---------------------------------------------------------------- */}
-      <header className="border-b border-white/10 bg-ink-950">
-        <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-5 py-4 sm:px-8">
-          <p className="text-sm font-semibold uppercase leading-tight tracking-[0.16em] text-white sm:text-base">
-            {settings.businessName}
-          </p>
-          <a
-            href={`tel:${settings.phone}`}
-            className="min-h-11 shrink-0 rounded-lg border border-accent-400 px-3.5 py-2 text-sm font-semibold text-accent-300 transition hover:bg-accent-400 hover:text-ink-950 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-500/60"
-          >
-            {settings.phone}
+      <header className="bg-[#071419] text-white">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-7">
+          <p className="text-xs font-black uppercase tracking-[0.16em] sm:text-sm">{settings.businessName}</p>
+          <a href={`tel:${settings.phone}`} className="rounded-full border border-[#4DE3F2]/60 px-4 py-2 text-xs font-bold text-[#BDF8FE] transition hover:bg-[#4DE3F2] hover:text-[#071419] sm:text-sm">
+            Call {settings.phone}
           </a>
         </div>
       </header>
 
-      <main className="bg-ink-950 text-ink-100">
-        {/* The gold wash behind the hero is the site's own accent, kept faint:
-            it lifts the fold without competing with the ivory form card. */}
-        <section className="relative isolate overflow-hidden">
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-0 bg-[radial-gradient(1100px_520px_at_12%_-10%,rgba(224,169,59,0.16),transparent_62%),linear-gradient(180deg,#0B2A4A_0%,#061A2C_58%)]"
-          />
-          <div className="relative mx-auto w-full max-w-6xl px-5 py-10 sm:px-8 sm:py-14">
-            <div className="grid gap-10 lg:grid-cols-[1.05fr_minmax(23rem,1fr)] lg:items-start lg:gap-14">
-              <div>
-                <p className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.24em] text-accent-300">
-                  <span aria-hidden="true" className="h-px w-10 bg-accent-400" />
-                  New customers only · Hamilton
-                </p>
+      <main>
+        <section className="relative isolate overflow-hidden bg-[#0B2429] text-white">
+          <div aria-hidden="true" className="absolute inset-0 bg-[radial-gradient(circle_at_15%_8%,rgba(77,227,242,0.2),transparent_34%),radial-gradient(circle_at_85%_68%,rgba(223,255,69,0.13),transparent_30%)]" />
+          <div className="relative mx-auto grid max-w-7xl gap-8 px-4 pb-12 pt-8 sm:px-7 sm:pb-16 sm:pt-12 lg:grid-cols-[minmax(0,1.15fr)_minmax(23rem,0.85fr)] lg:items-start lg:gap-10">
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-[#DFFF45] px-3 py-1.5 text-[0.68rem] font-black uppercase tracking-[0.14em] text-[#071419]">New customers</span>
+                <span className="rounded-full border border-white/20 px-3 py-1.5 text-[0.68rem] font-black uppercase tracking-[0.14em] text-white/80">Hamilton only</span>
+              </div>
 
-                <h1 className="mt-5 font-display text-[3rem] leading-[0.95] tracking-[-0.035em] text-white sm:text-6xl lg:text-[4.5rem]">
-                  Your first hand wash,
-                  <span className="mt-1 block text-accent-300">{offerLabel}</span>
-                </h1>
+              <h1 className="mt-5 max-w-3xl text-[clamp(2.7rem,9vw,6.6rem)] font-black leading-[0.86] tracking-[-0.065em]">
+                Your car called.
+                <span className="block text-[#4DE3F2]">It wants a wash.</span>
+              </h1>
 
-                {onePrice ? (
-                  <p className="mt-5 text-xl font-semibold text-white sm:text-2xl">
-                    Car, SUV, pickup or van — one price.
-                  </p>
-                ) : (
-                  <p className="mt-5 text-xl font-semibold text-white sm:text-2xl">
-                    {money(carOfferCents)} for a car, {money(largeOfferCents)} for an SUV, pickup or van.
-                  </p>
-                )}
-
-                <p className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 text-lg text-ink-200">
-                  <span className="text-ink-300 line-through">{money(carRegularCents)} car</span>
-                  <span className="text-ink-300 line-through">{money(largeRegularCents)} SUV</span>
-                  <span className="rounded-full bg-accent-400/15 px-3 py-1 text-base font-semibold text-accent-300">
-                    {savingLabel}
-                  </span>
-                </p>
-
-                <ul className="mt-7 space-y-2.5 text-lg">
-                  {[
-                    "100% hand wash — no automatic brushes, ever",
-                    "Exterior wash, dry and mats cleaned",
-                    "Same price whatever you drive",
-                    `${settings.yearsInBusinessLabel} on Upper James Street`,
-                  ].map((line) => (
-                    <li key={line} className="flex items-start gap-3">
-                      <span
-                        aria-hidden="true"
-                        className="mt-1 grid size-5 shrink-0 place-items-center rounded-full bg-accent-400 text-[0.7rem] font-black text-ink-950"
-                      >
-                        ✓
-                      </span>
-                      <span className="text-ink-100">{line}</span>
-                    </li>
-                  ))}
-                </ul>
-
-                <div className="mt-7 flex flex-wrap items-center gap-x-6 gap-y-3 border-t border-white/10 pt-6 text-sm">
-                  <span className="font-semibold text-white">
-                    <span className="text-accent-300">★ {settings.googleReviewRating}</span> from{" "}
-                    {settings.googleReviewCount} Google reviews
-                  </span>
-                  <span className="text-ink-300">
-                    {settings.addressLine1}, {settings.city}
-                  </span>
+              <div className="mt-7 flex flex-wrap items-end gap-x-5 gap-y-3">
+                <p className="text-[clamp(4.5rem,16vw,8.5rem)] font-black leading-[0.72] tracking-[-0.08em] text-[#DFFF45]">{offerLabel}</p>
+                <div className="pb-1 text-sm font-bold text-white/70 sm:text-base">
+                  <p className="line-through">Regularly {money(carRegularCents)}–{money(largeRegularCents)}</p>
+                  <p className="mt-1 text-[#DFFF45]">{savingLabel} · first visit</p>
                 </div>
               </div>
 
-              {/*
-                The form is the page. It sits in the first screen on every size
-                rather than behind a "claim now" button that scrolls somewhere —
-                a second tap before the first field is a second chance to leave.
-              */}
-              <div className="lg:sticky lg:top-8">
-                <ClaimForm
-                  copy={{
-                    priceLabel: offerLabel,
-                    claimValidDays: offer.claimValidDays,
-                    phone: settings.phone,
-                    privacyNote:
-                      "We use your name and number only to send this code and arrange your wash.",
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* -------------------------------------------------------------- */}
-        {/* What the price does and does not buy. Said plainly, because a   */}
-        {/* cheap wash that turns into an upsell at the counter is how a    */}
-        {/* first visit becomes the last one.                              */}
-        {/* -------------------------------------------------------------- */}
-        <section className="surface-light">
-          <div className="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
-            <p className="flex items-center gap-3 text-xs font-semibold uppercase tracking-[0.24em] text-accent-600">
-              <span aria-hidden="true" className="h-px w-10 bg-accent-500" />
-              No surprises
-            </p>
-            <h2 className="mt-4 font-display text-4xl leading-tight tracking-[-0.02em] text-ink-950 sm:text-5xl">
-              Exactly what you get
-            </h2>
-            <div className="mt-8 grid gap-4 sm:grid-cols-2">
-              <div className="rounded-2xl border-t-4 border-accent-400 bg-white p-6 shadow-[0_18px_40px_-28px_rgba(6,26,44,0.6)]">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-600">Included</p>
-                <ul className="mt-4 space-y-2.5 text-ink-900">
-                  {[
-                    "Full exterior hand wash",
-                    "Hand dry — no drying tunnel",
-                    "Floor mats cleaned",
-                    "Wheels and tyres rinsed",
-                  ].map((item) => (
-                    <li key={item} className="flex gap-3">
-                      <span
-                        aria-hidden="true"
-                        className="mt-1 grid size-5 shrink-0 place-items-center rounded-full bg-accent-400 text-[0.7rem] font-black text-ink-950"
-                      >
-                        ✓
-                      </span>
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="rounded-2xl border-t-4 border-ink-300 bg-white/60 p-6">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-ink-500">Not included</p>
-                <ul className="mt-4 space-y-2.5 text-ink-700">
-                  {[
-                    "Interior cleaning or vacuuming",
-                    "Wax, polish or paint correction",
-                    "Engine bay cleaning",
-                    "Commercial vehicles (quoted individually)",
-                  ].map((item) => (
-                    <li key={item} className="flex gap-3">
-                      <span aria-hidden="true" className="font-semibold text-ink-400">—</span>
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-                <p className="mt-5 text-sm leading-6 text-ink-500">
-                  Want any of these? Add them when you book and you will see the price before you
-                  confirm. Nothing is ever added at the counter without asking you first.
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* -------------------------------------------------------------- */}
-        <section className="bg-ink-900">
-          <div className="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
-            <h2 className="font-display text-4xl leading-tight tracking-[-0.02em] text-white sm:text-5xl">
-              How it works
-            </h2>
-            <ol className="mt-8 grid gap-4 sm:grid-cols-3">
-              {[
-                ["1", "Claim your code", "Name and mobile number. Your code appears straight away, and we text a copy."],
-                ["2", "Pick your time", `Book online with the code. Your ${offerLabel} price is applied automatically before you confirm.`],
-                ["3", "Bring it in", "We wash it by hand while you wait or leave it with us. Pay when it is done."],
-              ].map(([step, title, body]) => (
-                <li key={step} className="rounded-2xl border border-white/12 bg-white/[0.04] p-6">
-                  <span className="inline-grid size-10 place-items-center rounded-full bg-accent-400 font-display text-xl text-ink-950">
-                    {step}
-                  </span>
-                  <h3 className="mt-4 font-display text-2xl leading-tight text-white">{title}</h3>
-                  <p className="mt-2 text-sm leading-6 text-ink-200">{body}</p>
-                </li>
-              ))}
-            </ol>
-
-            <div className="mt-10 rounded-2xl border-l-4 border-accent-400 bg-ink-950/60 p-6 sm:p-8">
-              <h2 className="font-display text-3xl leading-tight text-white">Why {offerLabel}?</h2>
-              <p className="mt-3 max-w-3xl text-base leading-7 text-ink-200">
-                Because the hardest part of our business is getting you to try us once. We have washed
-                cars on Upper James for {settings.yearsInBusinessLabel.toLowerCase()}, entirely by hand,
-                and the people who come once tend to come back. This is the cost of introducing
-                ourselves — there is no catch, no membership, and nothing to cancel.
-                {onePrice
-                  ? " An SUV takes us longer than a car and always has, which is why the catalogue charges more for one. On this wash we are not charging you for the difference."
-                  : ""}
+              <p className="mt-6 max-w-2xl text-xl font-bold leading-snug sm:text-2xl">
+                {onePrice ? "Car, SUV, pickup or van. One simple price." : `${money(carOfferCents)} for a car. ${money(largeOfferCents)} for an SUV, pickup or van.`}
               </p>
+              <p className="mt-2 text-base text-white/70">100% hand washed. No tunnel. No brushes. No membership.</p>
+
+              <div className="relative mt-8 overflow-hidden rounded-[1.75rem] border border-white/15 shadow-[0_32px_80px_-35px_rgba(0,0,0,0.9)]">
+                <Image
+                  src="/images/services/hand-wash.png"
+                  alt="A vehicle being carefully washed by hand"
+                  width={1450}
+                  height={1086}
+                  priority
+                  sizes="(min-width: 1024px) 58vw, 100vw"
+                  className="aspect-[16/10] w-full object-cover object-center"
+                />
+                <div className="absolute inset-x-0 bottom-0 flex flex-wrap justify-between gap-2 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-5 pb-5 pt-16 text-xs font-bold sm:px-6 sm:pb-6 sm:text-sm">
+                  <span>✓ Exterior hand wash</span>
+                  <span>✓ Hand dry</span>
+                  <span>✓ Mats cleaned</span>
+                </div>
+              </div>
             </div>
+
+            <aside className="lg:sticky lg:top-5">
+              <ClaimForm copy={{
+                priceLabel: offerLabel,
+                priceValue: offerCents / 100,
+                currency: settings.currency,
+                claimValidDays: offer.claimValidDays,
+                phone: settings.phone,
+                businessName: settings.businessName,
+                email: settings.email,
+                address,
+                offerTerms: terms,
+              }} />
+              <div className="mt-4 grid grid-cols-3 gap-2 text-center text-[0.66rem] font-bold text-white/75 sm:text-xs">
+                <p className="rounded-xl border border-white/10 bg-white/[0.04] px-2 py-3"><span className="block text-base text-[#4DE3F2]">★ {settings.googleReviewRating}</span>{settings.googleReviewCount} reviews</p>
+                <p className="rounded-xl border border-white/10 bg-white/[0.04] px-2 py-3"><span className="block text-base text-[#4DE3F2]">{settings.yearsInBusinessLabel}</span>local care</p>
+                <p className="rounded-xl border border-white/10 bg-white/[0.04] px-2 py-3"><span className="block text-base text-[#4DE3F2]">100%</span>hand wash</p>
+              </div>
+            </aside>
           </div>
         </section>
 
-        {/* -------------------------------------------------------------- */}
-        <section className="surface-light">
-          <div className="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
-            <h2 className="font-display text-4xl leading-tight tracking-[-0.02em] text-ink-950 sm:text-5xl">
-              Questions
-            </h2>
-            <div className="mt-8 grid gap-3 lg:grid-cols-2">
+        <section className="mx-auto max-w-7xl px-4 py-12 sm:px-7 sm:py-16">
+          <div className="grid gap-8 lg:grid-cols-[0.75fr_1.25fr] lg:items-start">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-[#087B87]">Nothing hidden</p>
+              <h2 className="mt-3 text-4xl font-black leading-none tracking-[-0.045em] sm:text-5xl">A clean car.<br />A clear deal.</h2>
+              <p className="mt-5 max-w-md leading-7 text-[#526267]">We want you to try us once. That is the whole offer—no subscription and no awkward upsell when you arrive.</p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
               {[
-                [
-                  "Is this really the full price?",
-                  `Yes. ${offerLabel} for a coupe, sedan, SUV, pickup or van, before ${settings.taxLabel}. Cash and Interac e-transfer pay exactly that; card and cheque add ${settings.taxLabel}. You see the total before you confirm the booking.`,
-                ],
-                [
-                  "Is an SUV or truck more?",
-                  onePrice
-                    ? "Not on this offer. Our regular prices do charge more for a larger vehicle, because it takes longer — but your first wash with us is the same price whatever you drive."
-                    : `An SUV, pickup or van is ${money(largeOfferCents)} on this offer, against ${money(carOfferCents)} for a coupe or sedan.`,
-                ],
-                [
-                  "Do I have to buy anything else?",
-                  "No. Extras are shown as optional choices while you book, with their prices. If we spot something worth mentioning we will tell you — we never add work without your say-so.",
-                ],
-                [
-                  "How long does it take?",
-                  "About an hour for a standard vehicle. You choose a real appointment time, so there is no waiting in a queue.",
-                ],
-                [
-                  "Can I use it on a second car?",
-                  "It is one promotional wash per customer and per vehicle — we record the plate at the shop. Your second car is very welcome at our normal prices.",
-                ],
-                [
-                  "What if my car is filthy?",
-                  "That is usually fine. If it needs noticeably more time we will say so before we start, and you decide.",
-                ],
-                [
-                  "Do you use automatic brushes?",
-                  "Never — not on this wash and not on any other. Everything here is washed by hand, which is the whole reason the shop exists.",
-                ],
-              ].map(([question, answer]) => (
-                <details
-                  key={question}
-                  className="group rounded-xl border border-ink-300 bg-white p-5 open:border-accent-400"
-                >
-                  <summary className="cursor-pointer list-none text-lg font-semibold text-ink-950 marker:hidden focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-accent-500/50">
-                    {question}
-                    <span aria-hidden="true" className="float-right text-accent-600 transition group-open:rotate-45">
-                      +
-                    </span>
-                  </summary>
-                  <p className="mt-3 text-sm leading-6 text-ink-700">{answer}</p>
-                </details>
+                ["01", "Claim the code", "Enter your details. The code appears immediately and arrives by text and email."],
+                ["02", "Choose a time", `Continue to booking. The ${offerLabel} price is applied before you confirm.`],
+                ["03", "Drive in", "We wash by hand. Pay when it is finished."],
+              ].map(([number, title, body]) => (
+                <article key={number} className="rounded-2xl border border-[#D5DFE0] bg-white p-5 shadow-[0_16px_45px_-35px_rgba(7,20,25,0.7)]">
+                  <span className="text-sm font-black text-[#087B87]">{number}</span>
+                  <h3 className="mt-8 text-xl font-black">{title}</h3>
+                  <p className="mt-2 text-sm leading-6 text-[#526267]">{body}</p>
+                </article>
               ))}
             </div>
           </div>
         </section>
 
-        {/* -------------------------------------------------------------- */}
-        {/* The offer's material terms. Required, and written to be read.   */}
-        {/* -------------------------------------------------------------- */}
-        <section className="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-16">
-          <h2 className="font-display text-3xl text-white">Offer terms</h2>
-          <ul className="mt-5 grid gap-2.5 text-sm leading-6 text-ink-300 lg:grid-cols-2">
-            {terms.map((term) => (
-              <li key={term} className="flex gap-3">
-                <span aria-hidden="true" className="text-accent-500">•</span>
-                <span>{term}</span>
-              </li>
+        <section className="bg-[#C8F8FB]">
+          <div className="mx-auto grid max-w-7xl gap-8 px-4 py-12 sm:px-7 sm:py-16 lg:grid-cols-2">
+            <div className="rounded-[1.5rem] bg-[#071419] p-6 text-white sm:p-8">
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-[#4DE3F2]">Included</p>
+              <h2 className="mt-3 text-3xl font-black">The essentials, done by hand.</h2>
+              <ul className="mt-6 grid gap-3 text-sm sm:grid-cols-2">
+                {["Full exterior hand wash", "Careful hand dry", "Floor mats cleaned", "Wheels and tyres rinsed"].map((item) => (
+                  <li key={item} className="flex gap-2"><span className="text-[#DFFF45]">●</span>{item}</li>
+                ))}
+              </ul>
+            </div>
+            <div className="p-1 sm:p-5">
+              <p className="text-xs font-black uppercase tracking-[0.18em] text-[#087B87]">Good to know</p>
+              <h2 className="mt-3 text-3xl font-black">No surprise extras.</h2>
+              <p className="mt-4 leading-7 text-[#3E5055]">Interior cleaning, waxing, paint correction and engine-bay cleaning are not included. You can add services during booking and see their prices first. Commercial vehicles are quoted separately.</p>
+              <a href="#claim" className="mt-6 inline-flex min-h-12 items-center rounded-full bg-[#071419] px-6 font-black text-white transition hover:bg-[#14373D]">Claim my code ↑</a>
+            </div>
+          </div>
+        </section>
+
+        <section className="mx-auto max-w-4xl px-4 py-12 sm:px-7 sm:py-16">
+          <h2 className="text-center text-3xl font-black tracking-[-0.035em] sm:text-4xl">Quick questions</h2>
+          <div className="mt-7 space-y-2.5">
+            {[
+              ["Is this really the full price?", `Yes—${offerLabel} before ${settings.taxLabel}. Cash and Interac e-transfer pay the listed price; card and cheque add ${settings.taxLabel}.`],
+              ["Is an SUV or truck more?", onePrice ? "No. The offer price is the same for a coupe, sedan, SUV, pickup or van." : `SUVs, pickups and vans are ${money(largeOfferCents)}; coupes and sedans are ${money(carOfferCents)}.`],
+              ["How long does it take?", "About one hour for a standard vehicle. You choose an appointment time, so there is no wash-line wait."],
+              ["Can I use it on a second car?", "The promotion is one wash per new customer and per vehicle. Additional vehicles are welcome at regular prices."],
+            ].map(([question, answer]) => (
+              <details key={question} className="group rounded-2xl border border-[#D5DFE0] bg-white px-5 py-4 open:border-[#75CCD3]">
+                <summary className="cursor-pointer list-none font-black">{question}<span aria-hidden="true" className="float-right text-[#087B87] group-open:rotate-45">+</span></summary>
+                <p className="mt-3 pr-6 text-sm leading-6 text-[#526267]">{answer}</p>
+              </details>
             ))}
-          </ul>
+          </div>
         </section>
       </main>
 
-      {/* CASL and plain trust: who is offering this, where they are, and how */}
-      {/* to reach them, on the same page as the offer itself.               */}
-      <footer className="border-t border-white/10 bg-ink-900">
-        <div className="mx-auto w-full max-w-6xl px-5 py-10 text-sm text-ink-300 sm:px-8">
-          <p className="font-semibold text-white">{settings.businessName}</p>
-          {settings.legalEntityName && <p className="mt-1">{settings.legalEntityName}</p>}
-          <address className="mt-2 not-italic leading-6">
-            {settings.addressLine1}, {settings.city}, {settings.province} {settings.postalCode}
-            <br />
-            <a href={`tel:${settings.phone}`} className="hover:text-accent-300">{settings.phone}</a>
-            {settings.email && (
-              <>
-                {" · "}
-                <a href={`mailto:${settings.email}`} className="break-all hover:text-accent-300">{settings.email}</a>
-              </>
-            )}
-          </address>
-          <div className="mt-5 flex flex-wrap gap-x-5 gap-y-2">
-            <Link href="/policies/privacy" className="hover:text-accent-300">Privacy</Link>
-            <Link href="/policies/terms" className="hover:text-accent-300">Service terms</Link>
-            <Link href="/policies/cancellation" className="hover:text-accent-300">Cancellation</Link>
-            <Link href="/services" className="hover:text-accent-300">All services</Link>
-            <a href={PUBLIC_SITE_URL} className="hover:text-accent-300">Main site</a>
+      <footer className="bg-[#071419] text-white/65">
+        <div className="mx-auto flex max-w-7xl flex-col justify-between gap-5 px-4 py-9 text-xs sm:flex-row sm:px-7">
+          <div><p className="font-black text-white">{settings.businessName}</p><p className="mt-1">{address}</p></div>
+          <div className="flex flex-wrap gap-x-5 gap-y-2">
+            <Link href="/policies/terms" className="hover:text-[#4DE3F2]">Terms</Link>
+            <Link href="/policies/privacy" className="hover:text-[#4DE3F2]">Privacy</Link>
+            <Link href="/policies/cancellation" className="hover:text-[#4DE3F2]">Cancellation</Link>
+            <a href={PUBLIC_SITE_URL} className="hover:text-[#4DE3F2]">Main site</a>
           </div>
-          <p className="mt-5 text-xs text-ink-400">
-            © {new Date().getFullYear()} {settings.businessName}. All rights reserved.
-          </p>
         </div>
       </footer>
-    </>
+    </div>
   );
 }
 
-/**
- * The offer is switched off, or the catalogue cannot price it. Shown rather
- * than 404ing, because the ad that sent this visitor here may still be live for
- * hours after the owner flips the switch, and a dead end is a wasted click.
- */
 function OfferClosed({ phone }: { phone: string }) {
   return (
-    <main className="grid min-h-screen place-items-center bg-ink-950 px-5 py-16 text-center text-ink-100">
+    <main className="grid min-h-screen place-items-center bg-[#071419] px-5 py-16 text-center text-white">
       <div className="max-w-md">
-        <h1 className="font-display text-4xl leading-tight text-white">This offer has finished</h1>
-        <p className="mt-4 text-base leading-7 text-ink-200">
-          Our new-customer wash promotion is not running at the moment. We would still be glad to
-          look after your vehicle — our full price list is online, and you can book in a minute.
-        </p>
+        <p className="text-xs font-black uppercase tracking-[0.18em] text-[#4DE3F2]">Offer update</p>
+        <h1 className="mt-4 text-4xl font-black leading-tight">This offer has finished</h1>
+        <p className="mt-4 leading-7 text-white/70">Our full wash and detailing menu is still available online.</p>
         <div className="mt-8 grid gap-2.5">
-          <Link
-            href="/book"
-            className="inline-flex min-h-14 items-center justify-center rounded-xl bg-accent-400 px-6 text-lg font-bold text-ink-950 transition hover:bg-accent-300"
-          >
-            Book a wash
-          </Link>
-          <a
-            href={`tel:${phone}`}
-            className="inline-flex min-h-14 items-center justify-center rounded-xl border border-ink-500 px-6 text-base font-semibold text-ink-100 transition hover:border-accent-400 hover:text-accent-300"
-          >
-            Call {phone}
-          </a>
+          <Link href="/book" className="inline-flex min-h-14 items-center justify-center rounded-xl bg-[#DFFF45] px-6 text-lg font-black text-[#071419]">Book a wash</Link>
+          <a href={`tel:${phone}`} className="inline-flex min-h-14 items-center justify-center rounded-xl border border-white/30 px-6 font-bold">Call {phone}</a>
         </div>
       </div>
     </main>

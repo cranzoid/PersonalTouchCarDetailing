@@ -238,7 +238,12 @@ export function claimCodeFromBytes(bytes: Uint8Array): string {
 /* Customer-facing content                                             */
 /* ------------------------------------------------------------------ */
 
-export const FIRST_WASH_OFFER_PATH = "/offers/first-wash";
+/**
+ * Public ad destination. Keep this short and stable: it is printed into ads,
+ * analytics reports and code-delivery links, so changing it loses attribution
+ * and makes old creative land on a dead page.
+ */
+export const FIRST_WASH_OFFER_PATH = "/offer/first-detail";
 
 /**
  * Days after a claim on which an unbooked code is nudged, owner-confirmed at
@@ -257,11 +262,11 @@ export const OFFER_CLAIM_REMINDER_DAYS = [3, 7, 12] as const;
  * `tax_label` is snapshotted onto an invoice (DECISIONS.md #6).
  *
  * Bump this whenever the wording below changes in a way that alters the deal.
- * `2026-09.2` dropped the surcharge on SUVs, pickups and vans: one price for
- * every vehicle. Anyone still holding a `2026-09` code is better off under the
- * new terms, which is the only direction a live promotion may move in.
+ * `2026-09.3` is the combined service, offer and electronic-message consent
+ * displayed beside the claim checkbox. Earlier codes keep their snapshotted
+ * version; reclaiming explicitly accepts and records the current one.
  */
-export const WASH_OFFER_TERMS_VERSION = "2026-09.2";
+export const WASH_OFFER_TERMS_VERSION = "2026-09.3";
 
 /**
  * The offer in full, in the order it has to be read.

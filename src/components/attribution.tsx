@@ -92,7 +92,31 @@ export function AttributionCapture() {
 
 export function getStoredAttribution(): StoredAttribution {
   try {
-    return JSON.parse(localStorage.getItem(KEY) ?? "{}");
+    const stored: StoredAttribution = JSON.parse(localStorage.getItem(KEY) ?? "{}");
+    if (typeof window === "undefined") return stored;
+
+    // A very fast visitor can submit before AttributionCapture's effect has
+    // run. Read the current landing URL here as well so the lead never loses
+    // the UTM/fbclid that paid for the visit.
+    const params = new URLSearchParams(window.location.search);
+    const utm: Record<string, string> = {};
+    for (const [key, value] of params) {
+      if (key.startsWith("utm_")) utm[key] = value;
+    }
+    const gclid = params.get("gclid") ?? undefined;
+    const fbclid = params.get("fbclid") ?? undefined;
+    return {
+      ...stored,
+      source: utm.utm_source ?? (gclid ? "google_ads" : fbclid ? "meta_ads" : stored.source),
+      medium: utm.utm_medium ?? stored.medium,
+      campaign: utm.utm_campaign ?? stored.campaign,
+      ad: utm.utm_content ?? stored.ad,
+      keyword: utm.utm_term ?? stored.keyword,
+      landingPage: stored.landingPage ?? window.location.pathname,
+      utm: Object.keys(utm).length > 0 ? { ...stored.utm, ...utm } : stored.utm,
+      gclid: gclid ?? stored.gclid,
+      fbclid: fbclid ?? stored.fbclid,
+    };
   } catch {
     return {};
   }

@@ -504,7 +504,8 @@ Shipped 2026-09-12, **switched off**. To launch it:
    deliberately blank) and the code is `FIRSTWASH26`. Leave them equal unless
    you mean to: the landing page advertises "one price whatever you drive" only
    while they agree, and quotes the highest one if they do not.
-2. Point ad traffic at `/offers/first-wash`. Claimed codes appear under
+2. Point ad traffic at `/offer/first-detail`. The legacy `/offers/first-wash`
+   URL redirects here and preserves campaign query parameters. Claimed codes appear under
    Admin → Offer claims; the licence plate is recorded on the appointment when
    the car arrives, which is what enforces one promotional wash per vehicle.
 3. Leave "Remind people who claimed but never booked" OFF until Twilio 10DLC

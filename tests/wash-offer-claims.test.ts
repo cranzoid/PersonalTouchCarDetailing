@@ -16,6 +16,7 @@ import {
   claimsDueReminder,
   recordClaimReminder,
   expireStaleClaims,
+  sendClaimMessages,
 } from "../src/lib/wash-offer-claims";
 
 /**
@@ -175,7 +176,7 @@ describe("issuing a claim", () => {
 
     const [lead] = await db().select().from(schema.leads).where(eq(schema.leads.id, yes.claim.leadId!));
     expect(lead.marketingConsent).toBe(true);
-    expect(lead.marketingConsentSource).toBe("public_offer_claim");
+    expect(lead.marketingConsentSource).toBe("public_offer_terms");
   });
 
   it("hands back the SAME code rather than erroring on a second claim", async () => {
@@ -189,6 +190,30 @@ describe("issuing a claim", () => {
 
     const rows = await db().select().from(schema.offerClaims);
     expect(rows).toHaveLength(1);
+  });
+
+  it("adds a newly supplied email and records current consent when reissuing a code", async () => {
+    const first = await claimFor({ firstName: "Sam", phone: "905-555-0101" });
+    const second = await issueClaim({
+      offer,
+      firstName: "Sam",
+      phone: "905-555-0101",
+      email: "sam@example.com",
+      vehicleSize: "car",
+      marketingConsent: true,
+      termsVersion: "2026-09.3",
+    });
+
+    expect(second.created).toBe(false);
+    expect(second.claim.id).toBe(first.claim.id);
+    expect(second.claim.email).toBe("sam@example.com");
+    expect(second.claim.marketingConsent).toBe(true);
+    expect(second.claim.termsVersion).toBe("2026-09.3");
+
+    const [lead] = await db().select().from(schema.leads).where(eq(schema.leads.id, second.claim.leadId!));
+    expect(lead.email).toBe("sam@example.com");
+    expect(lead.marketingConsent).toBe(true);
+    expect(lead.marketingConsentSource).toBe("public_offer_terms");
   });
 
   it("caps on the email address too, not only the phone", async () => {
@@ -554,6 +579,54 @@ describe("expiry and reminders", () => {
   });
 });
 
+describe("code delivery", () => {
+  it("sends a live code by both SMS and email when both are collected", async () => {
+    await db().insert(schema.messageTemplates).values([
+      {
+        id: newId("tpl"),
+        key: "offer_claim_code_sms",
+        channel: "sms",
+        body: "{{businessName}}: code {{code}}. Reply STOP to opt out.",
+      },
+      {
+        id: newId("tpl"),
+        key: "offer_claim_code_email",
+        channel: "email",
+        subject: "Your wash code {{code}}",
+        body: "Hi {{firstName}}, your code is {{code}}. {{unsubscribe}}",
+      },
+    ]).onConflictDoNothing();
+
+    const { claim } = await issueClaim({
+      offer,
+      firstName: "Sam",
+      phone: "905-555-0101",
+      email: "sam@example.com",
+      vehicleSize: "car",
+      marketingConsent: true,
+      termsVersion: "2026-09.3",
+    });
+
+    const sent = await sendClaimMessages({
+      claim,
+      offer,
+      settings,
+      variant: "code",
+      baseUrl: "https://www.personaltouchcardetailing.ca",
+    });
+
+    expect(sent).toEqual(["sms", "email"]);
+    const rows = await db()
+      .select({ channel: schema.communications.channel, status: schema.communications.status })
+      .from(schema.communications)
+      .where(eq(schema.communications.relatedEntityId, claim.id));
+    expect(rows).toEqual([
+      { channel: "sms", status: "logged" },
+      { channel: "email", status: "logged" },
+    ]);
+  });
+});
+
 describe("the /w/<code> short link", () => {
   /**
    * The Location header must stay RELATIVE.
@@ -599,6 +672,6 @@ describe("the /w/<code> short link", () => {
   });
 
   it("lands an unknown code on the offer page rather than a 404", async () => {
-    expect(await followShortLink("PTWNOPE9")).toBe("/offers/first-wash");
+    expect(await followShortLink("PTWNOPE9")).toBe("/offer/first-detail");
   });
 });
