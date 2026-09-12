@@ -50,7 +50,7 @@ async function seed() {
     TRUNCATE offer_claims, appointment_services, appointments, jobs, vehicles, customers,
              leads, communications, audit_log, schedule_blocks, staff_schedules, staff_users,
              resources, business_hours, service_addons, service_vehicle_adjustments,
-             services, service_categories, addons CASCADE
+             services, service_categories, addons, business_settings CASCADE
   `);
   await db().insert(schema.resources).values({ id: newId("res"), name: "Bay 1", type: "bay" });
   await db().insert(schema.businessHours).values({
@@ -544,5 +544,54 @@ describe("expiry and reminders", () => {
   it("does not nudge a claim that is too young", async () => {
     await claimFor({ firstName: "Sam", phone: "905-555-0101" });
     expect(await claimsDueReminder([3, 7, 12])).toHaveLength(0);
+  });
+});
+
+describe("the /w/<code> short link", () => {
+  /**
+   * The Location header must stay RELATIVE.
+   *
+   * Behind the Azure slot the incoming request URL is the container's own
+   * address, so an absolute Location built from it pointed customers at
+   * `https://<container-id>:8080/...` — a host that resolves nowhere. Every
+   * code text would have led to a dead page, and nothing else in the suite
+   * looks at this header.
+   */
+  async function followShortLink(code: string) {
+    const { GET } = await import("../src/app/w/[code]/route");
+    const response = await GET(new Request(`https://3d5c849641b9:8080/w/${code}`), {
+      params: Promise.resolve({ code }),
+    });
+    return response.headers.get("location") ?? "";
+  }
+
+  beforeEach(async () => {
+    await db()
+      .insert(schema.businessSettings)
+      .values({ key: "washOffer", value: settings.washOffer })
+      .onConflictDoUpdate({
+        target: schema.businessSettings.key,
+        set: { value: settings.washOffer },
+      });
+  });
+
+  it("sends a live code into the booking flow, relatively", async () => {
+    const { claim } = await claimFor({ firstName: "Sam", phone: "905-555-0101" });
+    const location = await followShortLink(claim.code);
+    expect(location.startsWith("/book?")).toBe(true);
+    expect(location).toContain(`claim=${claim.code}`);
+    // The container hostname must never reach a customer's phone.
+    expect(location).not.toMatch(/^https?:/);
+    expect(location).not.toContain("3d5c849641b9");
+  });
+
+  it("accepts the code as it is written on screen, dashes and all", async () => {
+    const { claim } = await claimFor({ firstName: "Sam", phone: "905-555-0101" });
+    const dashed = `${claim.code.slice(0, 3)}-${claim.code.slice(3)}`.toLowerCase();
+    expect(await followShortLink(dashed)).toContain(`claim=${claim.code}`);
+  });
+
+  it("lands an unknown code on the offer page rather than a 404", async () => {
+    expect(await followShortLink("PTWNOPE9")).toBe("/offers/first-wash");
   });
 });

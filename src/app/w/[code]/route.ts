@@ -1,4 +1,3 @@
-import { NextResponse } from "next/server";
 import { db } from "@/db";
 import { getSettings } from "@/lib/settings";
 import { activeWashOffer, FIRST_WASH_OFFER_PATH, normalizeClaimCode } from "@/lib/wash-offer";
@@ -15,6 +14,14 @@ export const dynamic = "force-dynamic";
  *
  * Resolves nothing sensitive: a code that does not exist simply lands on the
  * offer page, which is also the right answer for a mistyped one.
+ *
+ * Redirects RELATIVELY, and must keep doing so. Behind the Azure slot the
+ * incoming request URL is the container's own address, so building an absolute
+ * Location from it sent customers to `https://<container-id>:8080/...` — a host
+ * that resolves nowhere, which would have broken every code text silently.
+ * A relative Location is resolved by the browser against the address it
+ * actually asked for, so it is right on the apex domain, the www redirect and
+ * the staging slot alike.
  */
 export async function GET(
   _request: Request,
@@ -29,10 +36,22 @@ export async function GET(
     const lookup = await lookupClaim(db(), offer.code, canonical);
     if (lookup.ok) {
       const destination = `/book?service=${encodeURIComponent(offer.serviceSlug)}&offer=${encodeURIComponent(offer.code)}&claim=${encodeURIComponent(lookup.claim.code)}`;
-      return NextResponse.redirect(new URL(destination, _request.url), 302);
+      return seeOther(destination);
     }
   }
   // Expired, spent, unknown, or the offer is over: the landing page explains
   // whichever of those it is far better than a 404 does.
-  return NextResponse.redirect(new URL(FIRST_WASH_OFFER_PATH, _request.url), 302);
+  return seeOther(FIRST_WASH_OFFER_PATH);
+}
+
+function seeOther(path: string): Response {
+  return new Response(null, {
+    status: 302,
+    headers: {
+      Location: path,
+      // A code's destination changes the moment it is booked or expires, so
+      // nothing between us and the customer may remember this answer.
+      "Cache-Control": "no-store",
+    },
+  });
 }
