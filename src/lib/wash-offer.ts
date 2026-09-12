@@ -243,7 +243,7 @@ export function claimCodeFromBytes(bytes: Uint8Array): string {
  * analytics reports and code-delivery links, so changing it loses attribution
  * and makes old creative land on a dead page.
  */
-export const FIRST_WASH_OFFER_PATH = "/offer/first-detail";
+export const FIRST_WASH_OFFER_PATH = "/offers/first-wash";
 
 /**
  * Days after a claim on which an unbooked code is nudged, owner-confirmed at

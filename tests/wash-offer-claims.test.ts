@@ -672,6 +672,6 @@ describe("the /w/<code> short link", () => {
   });
 
   it("lands an unknown code on the offer page rather than a 404", async () => {
-    expect(await followShortLink("PTWNOPE9")).toBe("/offer/first-detail");
+    expect(await followShortLink("PTWNOPE9")).toBe("/offers/first-wash");
   });
 });

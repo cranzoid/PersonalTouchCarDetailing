@@ -44,14 +44,6 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       {
-        // The campaign originally shipped under this internal route name.
-        // Preserve every UTM/fbclid query parameter while moving ad traffic to
-        // the short public URL used in current creative.
-        source: "/offers/first-wash",
-        destination: "/offer/first-detail",
-        permanent: true,
-      },
-      {
         // Keep the www hostname canonical for every route, including API and
         // static-file requests. Next.js preserves the incoming query string.
         source: "/:path*",

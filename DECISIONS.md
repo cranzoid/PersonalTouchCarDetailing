@@ -967,9 +967,8 @@ go, and `admin-on-dark` with them.
 ## 33. The new-customer wash offer: a fixed price, and two caps that can't lose a race
 The offer is "your first hand wash, $15.99 — car, SUV, pickup or van, one
 price", for new customers only, one per person and one per licence plate. It
-lands on its own direct-response page at `/offer/first-detail` (with the former
-`/offers/first-wash` path retained as a query-preserving redirect), issues a code,
-and hands the customer into the ordinary booking wizard with that code applied.
+lands on its own direct-response page at `/offers/first-wash`, issues a code, and
+hands the customer into the ordinary booking wizard with that code applied.
 
 Consequential choices:
 

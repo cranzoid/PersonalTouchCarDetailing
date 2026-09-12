@@ -206,7 +206,7 @@ export function SettingsForm({
         </h2>
         <p className="mb-3 max-w-2xl text-xs leading-5 text-ink-500">
           A fixed price for a first visit, claimed on the landing page at{" "}
-          <code className="text-accent-300">/offer/first-detail</code>. Leave a vehicle type blank and
+          <code className="text-accent-300">/offers/first-wash</code>. Leave a vehicle type blank and
           it is not covered — that is how commercial vehicles stay out of it. The customer is
           charged the difference from the catalogue price, so the regular price shown on the offer
           page always matches what the booking flow would charge.
@@ -277,7 +277,7 @@ export function SettingsForm({
           <div className="mt-4 rounded-lg border border-ink-700 bg-ink-950/60 p-3 text-xs text-ink-300">
             <p>
               Send ad traffic to{" "}
-              <code className="text-accent-300">/offer/first-detail</code>. Claimed codes are listed
+              <code className="text-accent-300">/offers/first-wash</code>. Claimed codes are listed
               under Offer claims, and the licence plate is recorded on the appointment when the car
               arrives.
             </p>
