@@ -1,4 +1,5 @@
 import { db, schema } from "@/db";
+import type { WashOffer } from "@/lib/wash-offer";
 
 /**
  * Typed business settings over the key/value businessSettings table.
@@ -59,6 +60,12 @@ export type BusinessSettings = {
   staffNotifyEmails: string[];
   /** Ad-driven promotion. See src/lib/promotions.ts for how it is resolved. */
   promotion: Promotion;
+  /**
+   * New-customer wash offer. A fixed promo PRICE per vehicle size rather than
+   * a percentage, so it lives beside `promotion` instead of inside it. See
+   * src/lib/wash-offer.ts for why, and for how it is resolved.
+   */
+  washOffer: WashOffer;
 };
 
 /**
@@ -136,6 +143,32 @@ export const SETTINGS_DEFAULTS: BusinessSettings = {
     expiresOn: "",
     firstTimeOnly: true,
     eligibleServiceIds: [],
+  },
+  /**
+   * Ships disabled, so merging this changes no price until staff switch it on
+   * in Admin -> Settings. The prices below are the owner-confirmed offer
+   * (2026-09-12) against live catalogue prices of $30 for a coupe/sedan and
+   * $35 for anything larger; commercial is deliberately absent because the
+   * catalogue quotes it individually and a fixed price could not be honest.
+   */
+  washOffer: {
+    enabled: false,
+    code: "FIRSTWASH26",
+    label: "First Wash Offer",
+    serviceSlug: "basic-car-wash",
+    priceCentsByCategory: {
+      coupe: 1599,
+      sedan: 1599,
+      other: 1599,
+      suv_small: 1799,
+      suv_large: 1799,
+      pickup: 1799,
+      van: 1799,
+    },
+    claimValidDays: 14,
+    claimsCloseOn: "",
+    firstTimeOnly: true,
+    remindersEnabled: false,
   },
 };
 

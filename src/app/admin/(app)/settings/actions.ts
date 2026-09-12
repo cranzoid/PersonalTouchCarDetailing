@@ -5,6 +5,7 @@ import { z } from "zod";
 import { and, eq, gt, inArray, lt, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requireStaff, AuthError } from "@/lib/auth/session";
+import { VEHICLE_CATEGORIES } from "@/lib/types";
 import { audit } from "@/lib/audit";
 import {
   getSettings,
@@ -67,6 +68,41 @@ const settingsInput = z.object({
       message: "Tick at least one service the offer applies to",
       path: ["eligibleServiceIds"],
     }),
+  /**
+   * New-customer wash offer. Fails closed the same way the percentage offer
+   * does: switched on with no service, no price or no validity window, it would
+   * either do nothing or price something nobody intended.
+   */
+  washOffer: z
+    .object({
+      enabled: z.boolean(),
+      code: z
+        .string()
+        .trim()
+        .toUpperCase()
+        .regex(/^[A-Z0-9][A-Z0-9_-]{1,23}$/, "Use 2-24 letters, digits, dashes or underscores"),
+      label: z.string().trim().min(1).max(60),
+      serviceSlug: z.string().trim().max(80),
+      priceCentsByCategory: z.record(
+        z.enum(VEHICLE_CATEGORIES),
+        z.number().int().min(0).max(1_000_000),
+      ),
+      claimValidDays: z.number().int().min(1).max(120),
+      claimsCloseOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).or(z.literal("")),
+      firstTimeOnly: z.boolean(),
+      remindersEnabled: z.boolean(),
+    })
+    .refine((o) => !o.enabled || o.serviceSlug.length > 0, {
+      message: "The wash offer needs the catalogue slug of the service it buys",
+      path: ["serviceSlug"],
+    })
+    .refine(
+      (o) => !o.enabled || Object.values(o.priceCentsByCategory).some((cents) => (cents ?? 0) > 0),
+      {
+        message: "Set an offer price for at least one vehicle type",
+        path: ["priceCentsByCategory"],
+      },
+    ),
 });
 
 export type ActionResult = { ok: true } | { ok: false; error: string };

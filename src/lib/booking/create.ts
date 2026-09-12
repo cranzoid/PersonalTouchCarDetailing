@@ -7,7 +7,9 @@ import type { Attribution } from "@/db/schema";
 import { normalizePhone } from "@/lib/phone";
 import { isDateOnlyBookingSlug } from "@/lib/ceramic";
 import { priceBooking, type BookingPricing, type CustomBookingLine } from "@/lib/pricing";
-import { isFirstTimeDetailCustomer, type ResolvedPromotion } from "@/lib/promotions";
+import { isFirstTimeDetailCustomer, isNewCustomer, type ResolvedPromotion } from "@/lib/promotions";
+import type { ResolvedWashOffer } from "@/lib/wash-offer";
+import { lookupClaim, markClaimBooked } from "@/lib/wash-offer-claims";
 import { localDateISO } from "@/lib/tz";
 import { VEHICLE_CATEGORIES, type VehicleCategory } from "@/lib/types";
 import { createAppointmentDepositAccessToken } from "@/lib/appointment-deposits";
@@ -70,11 +72,13 @@ function dateOnlyWindow(ctx: DayContext, req: BookingRequest): Interval {
  * underneath someone.
  */
 export class OfferChangedError extends BookingError {
-  constructor(readonly reason: "returning" | "expired") {
+  constructor(readonly reason: "returning" | "expired" | "spent") {
     super(
       reason === "returning"
         ? "This offer is for first-time customers only, so it does not apply to this booking."
-        : "This offer is no longer available.",
+        : reason === "spent"
+          ? "That offer code has already been used."
+          : "This offer is no longer available.",
     );
   }
 }
@@ -113,6 +117,12 @@ export type BookingRequest = {
    * under the booking lock. Absent means no promotion was applied.
    */
   promo?: ResolvedPromotion | null;
+  /**
+   * The new-customer wash claim priced into `pricing`, so the code can be spent
+   * and eligibility re-checked under the booking lock. Absent means no claim
+   * was applied.
+   */
+  washClaim?: { offer: ResolvedWashOffer; code: string } | null;
   /**
    * Staff-only: book outside the minimum-notice / maximum-window rules, for
    * walk-ins being recorded after the fact or same-day jobs. Ignored for
@@ -195,6 +205,28 @@ export async function createAppointmentInTransaction(
       // The caller re-prices through priceBooking() rather than adjusting
       // totals here — that stays the one pricing authority.
       throw new OfferChangedError("returning");
+    }
+
+    // The wash claim, re-read under the same locks. A code spent on a booking
+    // that commits a millisecond earlier must not buy a second one, and the
+    // conditional spend below is what actually settles the race — this lookup
+    // only produces the friendlier message in the common case.
+    let washClaimId: string | null = null;
+    if (
+      actor.type === "customer" &&
+      req.washClaim &&
+      req.pricing.promoCode === req.washClaim.offer.code &&
+      req.pricing.discountCents > 0
+    ) {
+      const lookup = await lookupClaim(tx, req.washClaim.offer.code, req.washClaim.code);
+      if (!lookup.ok) throw new OfferChangedError(lookup.reason === "expired" ? "expired" : "spent");
+      // "New customer" here means new to the SHOP, not new to this package: a
+      // $200 detail last year makes you a customer, however little washing we
+      // have done for you. See isNewCustomer.
+      if (req.washClaim.offer.firstTimeOnly && !(await isNewCustomer(tx, req.customer))) {
+        throw new OfferChangedError("returning");
+      }
+      washClaimId = lookup.claim.id;
     }
 
     const { ctx, bayIds } = await loadDayContext({
@@ -320,6 +352,14 @@ export async function createAppointmentInTransaction(
         sort: i,
       })),
     );
+
+    // Spend the claim. Conditional on it still being `issued`, so two bookings
+    // racing on one code cannot both win — the loser rolls the whole
+    // transaction back and the customer confirms the real total, exactly as
+    // they would on losing the first-time re-check above.
+    if (washClaimId && !(await markClaimBooked(tx, washClaimId, { appointmentId, customerId }))) {
+      throw new OfferChangedError("spent");
+    }
 
     await audit(tx, {
       actorType: actor.type,

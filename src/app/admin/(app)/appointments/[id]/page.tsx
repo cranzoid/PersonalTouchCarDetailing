@@ -15,6 +15,8 @@ import { RevisePanel } from "./revise-panel";
 import { DepositRefundPanel } from "./deposit-refund-panel";
 import { CreateInvoicePanel } from "./create-invoice-panel";
 import { VehiclePanel, type AppointmentVehicle } from "./vehicle-panel";
+import { OfferRedemptionPanel } from "./offer-redemption-panel";
+import { formatClaimCode } from "@/lib/wash-offer";
 import { isRevisableAppointmentStatus } from "@/lib/booking/revise";
 
 export const dynamic = "force-dynamic";
@@ -55,6 +57,15 @@ export default async function AppointmentDetailPage({
     .where(eq(schema.vehicles.customerId, appt.customerId))
     .orderBy(asc(schema.vehicles.make), asc(schema.vehicles.model));
   const vehicle = customerVehicles.find((row) => row.id === appt.vehicleId);
+
+  // A promotional wash claim spent on this booking, if there is one. The panel
+  // it feeds is where the licence plate is recorded — the counter half of "one
+  // promotional wash per vehicle".
+  const [offerClaim] = await db()
+    .select()
+    .from(schema.offerClaims)
+    .where(eq(schema.offerClaims.appointmentId, appt.id))
+    .limit(1);
   const lines = await db()
     .select()
     .from(schema.appointmentServices)
@@ -178,6 +189,25 @@ export default async function AppointmentDetailPage({
           )}
         </section>
       </div>
+
+      {offerClaim && offerClaim.status !== "void" && (
+        <OfferRedemptionPanel
+          claim={{
+            id: offerClaim.id,
+            code: formatClaimCode(offerClaim.code),
+            offerLabel: appt.promoLabel ?? "New-customer wash offer",
+            redeemedPlate: offerClaim.redeemedPlateNormalized,
+            redeemedLabel: offerClaim.redeemedAt
+              ? formatInZone(offerClaim.redeemedAt, settings.timezone, {
+                  year: "numeric",
+                  month: "short",
+                  day: "numeric",
+                })
+              : null,
+            vehiclePlate: vehicle?.licencePlate ?? null,
+          }}
+        />
+      )}
 
       <section className="mt-6 rounded-xl border border-ink-800 p-5">
         <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-400">Vehicle</h2>

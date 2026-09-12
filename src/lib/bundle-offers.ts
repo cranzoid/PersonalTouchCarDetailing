@@ -44,6 +44,38 @@ export function bundleDiscountAllocations(
   return { allocation, labels: [...labels] };
 }
 
+export type DiscountSource = { key: string; allocation: readonly number[] };
+
+/**
+ * Chooses the single best discount on each line, across any number of competing
+ * offers. Offers never stack: one line takes one saving, the largest available.
+ *
+ * Ties go to the EARLIER source in the list, so the caller decides precedence
+ * by ordering rather than by luck.
+ */
+export function bestOfAllocations(sources: readonly DiscountSource[]): {
+  allocation: number[];
+  /** Which sources actually paid for at least one line. */
+  contributing: Set<string>;
+} {
+  const contributing = new Set<string>();
+  const length = sources.reduce((max, source) => Math.max(max, source.allocation.length), 0);
+  const allocation = Array.from({ length }, (_, index) => {
+    let bestCents = 0;
+    let bestKey: string | null = null;
+    for (const source of sources) {
+      const cents = source.allocation[index] ?? 0;
+      if (cents > bestCents) {
+        bestCents = cents;
+        bestKey = source.key;
+      }
+    }
+    if (bestKey) contributing.add(bestKey);
+    return bestCents;
+  });
+  return { allocation, contributing };
+}
+
 /**
  * Chooses the better discount on each line. This lets a claimed campaign code
  * coexist with an automatic bundle without stacking two percentages onto the
@@ -53,20 +85,15 @@ export function bestAllocation(
   bundle: readonly number[],
   campaign: readonly number[],
 ): { allocation: number[]; bundleContributes: boolean; campaignContributes: boolean } {
-  let bundleContributes = false;
-  let campaignContributes = false;
-  const length = Math.max(bundle.length, campaign.length);
-  const allocation = Array.from({ length }, (_, index) => {
-    const bundleCents = bundle[index] ?? 0;
-    const campaignCents = campaign[index] ?? 0;
-    if (bundleCents >= campaignCents && bundleCents > 0) {
-      bundleContributes = true;
-      return bundleCents;
-    }
-    if (campaignCents > 0) campaignContributes = true;
-    return campaignCents;
-  });
-  return { allocation, bundleContributes, campaignContributes };
+  const resolved = bestOfAllocations([
+    { key: "bundle", allocation: bundle },
+    { key: "campaign", allocation: campaign },
+  ]);
+  return {
+    allocation: resolved.allocation,
+    bundleContributes: resolved.contributing.has("bundle"),
+    campaignContributes: resolved.contributing.has("campaign"),
+  };
 }
 
 /**

@@ -9,7 +9,8 @@ import {
 } from "@/lib/promotions";
 import type { BusinessSettings } from "@/lib/settings";
 import type { VehicleCategory } from "@/lib/types";
-import { bestAllocation, bundleDiscountAllocations, bundlePerkFor } from "@/lib/bundle-offers";
+import { bestOfAllocations, bundleDiscountAllocations, bundlePerkFor } from "@/lib/bundle-offers";
+import { washOfferAllocation, washOfferPriceCents, type ResolvedWashOffer } from "@/lib/wash-offer";
 
 export type PricedLine = {
   serviceId?: string;
@@ -99,6 +100,13 @@ export async function priceBooking(input: {
    * hand-built request cannot add a free line to any booking it likes.
    */
   perkOptIn?: boolean;
+  /**
+   * Server-resolved new-customer wash offer, passed only once the caller has
+   * checked that the visitor holds a live claim for it. Like `promo`, the
+   * amount is never supplied — the promo price comes from settings and the
+   * discount is the difference from the catalogue price computed here.
+   */
+  washOffer?: ResolvedWashOffer | null;
 }): Promise<BookingPricing> {
   const { serviceIds, addonIds, vehicleCategory, settings, promo } = input;
   const customLines = input.customLines ?? [];
@@ -244,13 +252,39 @@ export async function priceBooking(input: {
         ))
     : [];
   const bundle = bundleDiscountAllocations(lines, bundleRows);
-  const resolved = bestAllocation(bundle.allocation, campaignAllocation);
+
+  // New-customer wash offer: a fixed promo PRICE, turned into a discount off
+  // the catalogue price of the one service it buys. Fails closed everywhere —
+  // no offer, the service not in the cart, or a vehicle category the offer does
+  // not price (commercial) all produce nothing.
+  const washService = input.washOffer
+    ? services.find((service) => service.slug === input.washOffer!.serviceSlug)
+    : undefined;
+  const washPriceCents = input.washOffer
+    ? washOfferPriceCents(input.washOffer, vehicleCategory)
+    : null;
+  const wash = washService && washPriceCents !== null
+    ? washOfferAllocation(lines, { serviceId: washService.id, promoPriceCents: washPriceCents })
+    : { allocation: new Array(lines.length).fill(0) as number[], applies: false };
+
+  // Precedence by order: the claim-backed wash offer first, because it is the
+  // one the customer was shown a specific dollar price for and the one whose
+  // code has to end up on the appointment. In practice they cannot collide —
+  // the wash is not a bundle service and is not on the campaign's list.
+  const resolved = bestOfAllocations([
+    { key: "wash", allocation: wash.allocation },
+    { key: "bundle", allocation: bundle.allocation },
+    { key: "campaign", allocation: campaignAllocation },
+  ]);
   const allocation = resolved.allocation;
   const discountCents = allocation.reduce((sum, cents) => sum + cents, 0);
 
+  const washContributes = resolved.contributing.has("wash");
+  const campaignContributes = resolved.contributing.has("campaign");
   const contributingLabels = [
-    ...(resolved.bundleContributes ? bundle.labels : []),
-    ...(resolved.campaignContributes && promo ? [promo.label] : []),
+    ...(washContributes && input.washOffer ? [input.washOffer.label] : []),
+    ...(resolved.contributing.has("bundle") ? bundle.labels : []),
+    ...(campaignContributes && promo ? [promo.label] : []),
   ];
   const discountLabel = contributingLabels.length > 1
     ? "Best available offers"
@@ -280,10 +314,16 @@ export async function priceBooking(input: {
   return {
     ...computeTotals(lines, settings.taxRateBp, depositRequiredCents, {
       cents: discountCents,
-      // A campaign code is recorded only if it contributed money. In the
-      // common ceramic bundle case the larger bundle percentage wins, so a
-      // returning customer is not incorrectly subjected to first-time checks.
-      code: resolved.campaignContributes ? (promo?.code ?? null) : null,
+      // A code is recorded only if it contributed money. In the common ceramic
+      // bundle case the larger bundle percentage wins, so a returning customer
+      // is not incorrectly subjected to first-time checks. The wash offer takes
+      // the column when it paid, because its claim has to be traceable from the
+      // appointment back to the person who spent it.
+      code: washContributes
+        ? (input.washOffer?.code ?? null)
+        : campaignContributes
+          ? (promo?.code ?? null)
+          : null,
       label: discountLabel,
     }),
     requiredSkills: [...new Set(services.flatMap((service) => service.requiredSkills.map(normalizeSkill)).filter(Boolean))],

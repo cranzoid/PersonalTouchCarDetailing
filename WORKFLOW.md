@@ -495,6 +495,31 @@ The development seed creates `owner@ptcd.local` with password
 `detailing-dev-2026` only when no staff exists and `NODE_ENV` is not production.
 Production seeding refuses those defaults.
 
+## New-customer wash offer
+
+Shipped 2026-09-12, **switched off**. To launch it:
+
+1. Admin → Settings → New-customer wash offer: tick "Run the new-customer wash
+   offer". The prices ship pre-filled ($15.99 car, $17.99 SUV/pickup/van;
+   commercial deliberately blank) and the code is `FIRSTWASH26`.
+2. Point ad traffic at `/offers/first-wash`. Claimed codes appear under
+   Admin → Offer claims; the licence plate is recorded on the appointment when
+   the car arrives, which is what enforces one promotional wash per vehicle.
+3. Leave "Remind people who claimed but never booked" OFF until Twilio 10DLC
+   registration is finished. The reminders (days 3, 7 and 12) run from the
+   existing cron tick and send nothing while the toggle is off.
+
+Owner decisions still outstanding:
+
+- **The regular price is $30 for a coupe/sedan and $35 for anything larger**,
+  read live from the catalogue. The original brief said "$35 regular", which is
+  the SUV price — advertising $35 against the $15.99 car price would be a false
+  savings claim. If the owners want the car wash to be $35, that is a catalogue
+  change in Admin → Services and needs to be the price actually charged before
+  it can be advertised as the regular one.
+- SMS delivery is unverified in production (see the Twilio item above). The code
+  is shown on screen and emailed, so nothing in the funnel depends on it.
+
 ## Repository handoff note
 
 The completion work is present in the working tree and has not been committed,

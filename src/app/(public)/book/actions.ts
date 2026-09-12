@@ -5,6 +5,8 @@ import { db } from "@/db";
 import { getSettings } from "@/lib/settings";
 import { priceBooking, PricingError } from "@/lib/pricing";
 import { isFirstTimeDetailCustomer, resolveActivePromotion } from "@/lib/promotions";
+import { activeWashOffer, washOfferPriceCents } from "@/lib/wash-offer";
+import { claimBelongsTo, lookupClaim } from "@/lib/wash-offer-claims";
 import { getAvailableSlots } from "@/lib/booking/availability";
 import { createAppointment, BookingError, OfferChangedError } from "@/lib/booking/create";
 import { appointmentWhenLabel } from "@/lib/appointment-time";
@@ -132,6 +134,12 @@ const bookingInputSchema = z.object({
   expectedDiscountCents: z.number().int().min(0).max(10_000_000).optional(),
   /** The customer ticked the extra their bundle unlocks. Re-checked server-side. */
   perkOptIn: z.boolean().optional(),
+  /**
+   * A new-customer wash code the visitor is carrying. Only ever a claim: the
+   * server resolves it, checks it is live, checks it belongs to the phone
+   * number on this booking, and prices it from settings.
+   */
+  washClaimCode: z.string().trim().max(64).optional(),
 });
 
 export type BookingResult =
@@ -183,12 +191,25 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
     if (promo?.firstTimeOnly && !(await isFirstTimeDetailCustomer(db(), input.customer, promo.eligibleServiceIds))) {
       promo = null;
     }
+
+    // The new-customer wash offer. The code is worth nothing on its own: it has
+    // to resolve to a live claim AND belong to the phone number booking the
+    // appointment, so a code shared publicly buys nobody else a wash. The
+    // authoritative re-check happens again inside the booking transaction.
+    const offer = activeWashOffer(settings);
+    const claimLookup = offer && input.washClaimCode
+      ? await lookupClaim(db(), offer.code, input.washClaimCode)
+      : null;
+    const washOffer =
+      offer && claimLookup?.ok && claimBelongsTo(claimLookup.claim, input.customer) ? offer : null;
+
     const pricing = await priceBooking({
       serviceIds: input.serviceIds,
       addonIds: input.addonIds,
       vehicleCategory: input.vehicleCategory,
       settings,
       promo,
+      washOffer,
       perkOptIn: input.perkOptIn,
     });
 
@@ -203,7 +224,7 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
         kind: "offer_changed",
         error:
           pricing.discountCents === 0
-            ? "This offer does not apply to this booking — it is for first-time detailing customers. Please review the updated total."
+            ? washOfferMismatchReason(input, offer, claimLookup, washOffer !== null)
             : "The offer changed while you were booking. Please review the updated total.",
         totals: {
           subtotalCents: pricing.subtotalCents,
@@ -236,7 +257,11 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
         : input.attribution,
       policiesAccepted: input.policiesAccepted,
       settings,
-      promo: pricing.promoCode ? promo : null,
+      promo: pricing.promoCode === promo?.code ? promo : null,
+      washClaim:
+        washOffer && pricing.promoCode === washOffer.code && input.washClaimCode
+          ? { offer: washOffer, code: input.washClaimCode }
+          : null,
     });
 
     // Formatted from what was stored, not from what was submitted: a coating
@@ -348,4 +373,45 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
     console.error("submitBookingAction failed", err);
     return { ok: false, error: "Something went wrong creating your booking. Please try again." };
   }
+}
+
+/**
+ * Why the wash offer did not come off, in words the customer can act on.
+ *
+ * Deliberately vague about one thing only: it never says "you are already a
+ * customer" before a booking is attempted, because that would answer a question
+ * the browser is not entitled to ask (DECISIONS.md #14). By the time this runs
+ * the person has typed their own name, vehicle and contact details, so telling
+ * them the offer is for first-time customers reveals nothing they did not
+ * already know about themselves.
+ */
+function washOfferMismatchReason(
+  input: { washClaimCode?: string; vehicleCategory: (typeof VEHICLE_CATEGORIES)[number] },
+  offer: ReturnType<typeof activeWashOffer>,
+  claim: Awaited<ReturnType<typeof lookupClaim>> | null,
+  /** False when the claim is live but was issued to a different contact. */
+  belongsToBooker: boolean,
+): string {
+  if (!input.washClaimCode || !offer) {
+    return "This offer does not apply to this booking — it is for first-time detailing customers. Please review the updated total.";
+  }
+  if (!claim || !claim.ok) {
+    if (claim?.reason === "expired") {
+      return "That offer code has expired. Please review the updated total, or call us and we will see what we can do.";
+    }
+    if (claim?.reason === "spent") {
+      return "That offer code has already been used. Please review the updated total.";
+    }
+    return "We could not find that offer code. Please review the updated total.";
+  }
+  if (washOfferPriceCents(offer, input.vehicleCategory) === null) {
+    return "This offer does not cover that vehicle type, so it has not been applied. Please review the updated total.";
+  }
+  if (!belongsToBooker) {
+    // The most likely mistake by far — a typo in a pre-filled phone number, or
+    // a code passed to a friend. Say which it is rather than leaving them to
+    // guess why the price moved.
+    return "This code is tied to the mobile number it was sent to. Use that number, or call us and we will sort it out.";
+  }
+  return "This offer applies to a first wash for a new customer, so it has not been applied to this booking. Please review the updated total.";
 }

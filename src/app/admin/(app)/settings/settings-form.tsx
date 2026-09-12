@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { BusinessSettings } from "@/lib/settings";
 import { formatHHMM12 } from "@/lib/tz";
+import { VEHICLE_CATEGORIES, VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
 import { updateSettingsAction, updateBusinessHoursAction } from "./actions";
 
 export type DayHours = {
@@ -65,7 +66,25 @@ export function SettingsForm({
     promoCode: initial.promotion.code,
     promoLabel: initial.promotion.label,
     promoExpiresOn: initial.promotion.expiresOn,
+    // Dollars in the UI, cents on save — the same convention as every other
+    // money field the owners touch.
+    washLabel: initial.washOffer.label,
+    washCode: initial.washOffer.code,
+    washServiceSlug: initial.washOffer.serviceSlug,
+    washValidDays: String(initial.washOffer.claimValidDays),
+    washClaimsCloseOn: initial.washOffer.claimsCloseOn,
   });
+  const [washEnabled, setWashEnabled] = useState(initial.washOffer.enabled);
+  const [washFirstTimeOnly, setWashFirstTimeOnly] = useState(initial.washOffer.firstTimeOnly);
+  const [washReminders, setWashReminders] = useState(initial.washOffer.remindersEnabled);
+  const [washPrices, setWashPrices] = useState<Partial<Record<VehicleCategory, string>>>(() =>
+    Object.fromEntries(
+      VEHICLE_CATEGORIES.map((category) => {
+        const cents = initial.washOffer.priceCentsByCategory[category];
+        return [category, cents === undefined ? "" : (cents / 100).toFixed(2)];
+      }),
+    ),
+  );
   const [notifyOnNewAppointment, setNotifyOnNewAppointment] = useState(initial.notifyOnNewAppointment);
   const [promoEnabled, setPromoEnabled] = useState(initial.promotion.enabled);
   const [promoFirstTimeOnly, setPromoFirstTimeOnly] = useState(initial.promotion.firstTimeOnly);
@@ -112,6 +131,26 @@ export function SettingsForm({
         expiresOn: form.promoExpiresOn,
         firstTimeOnly: promoFirstTimeOnly,
         eligibleServiceIds: promoServiceIds,
+      },
+      washOffer: {
+        enabled: washEnabled,
+        code: form.washCode.trim().toUpperCase(),
+        label: form.washLabel.trim(),
+        serviceSlug: form.washServiceSlug.trim(),
+        // A blank or unparseable box means "this size is not covered", which is
+        // how commercial vehicles stay out of a fixed-price offer.
+        priceCentsByCategory: Object.fromEntries(
+          VEHICLE_CATEGORIES.flatMap((category) => {
+            const raw = (washPrices[category] ?? "").trim();
+            if (!raw) return [];
+            const cents = Math.round(Number(raw) * 100);
+            return Number.isFinite(cents) && cents > 0 ? [[category, cents] as const] : [];
+          }),
+        ),
+        claimValidDays: Number(form.washValidDays),
+        claimsCloseOn: form.washClaimsCloseOn,
+        firstTimeOnly: washFirstTimeOnly,
+        remindersEnabled: washReminders,
       },
     });
     setBusy(false);
@@ -161,6 +200,85 @@ export function SettingsForm({
           {field("taxRegistrationNumber", "HST registration number *")}
         </div>
       </section>
+      <section>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-ink-300">
+          New-customer wash offer
+        </h2>
+        <p className="mb-3 max-w-2xl text-xs leading-5 text-ink-500">
+          A fixed price for a first visit, claimed on the landing page at{" "}
+          <code className="text-accent-300">/offers/first-wash</code>. Leave a vehicle type blank and
+          it is not covered — that is how commercial vehicles stay out of it. The customer is
+          charged the difference from the catalogue price, so the regular price shown on the offer
+          page always matches what the booking flow would charge.
+        </p>
+        <label className="flex items-center gap-2 text-sm text-ink-200">
+          <input type="checkbox" checked={washEnabled} onChange={(e) => setWashEnabled(e.target.checked)} />
+          Run the new-customer wash offer
+        </label>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          {field("washLabel", "Customer-facing label", { placeholder: "First Wash Offer" })}
+          {field("washCode", "Campaign code", { placeholder: "FIRSTWASH26" })}
+          {field("washServiceSlug", "Catalogue slug of the service it buys", { placeholder: "basic-car-wash" })}
+          {field("washValidDays", "Days a claimed code stays valid", { inputMode: "numeric" })}
+          {field("washClaimsCloseOn", "New claims close on (blank = open)", { type: "date" })}
+        </div>
+
+        <fieldset className="mt-4">
+          <legend className="mb-2 text-xs text-ink-400">
+            Offer price by vehicle type, before {initial.taxLabel}. Blank means not covered.
+          </legend>
+          <div className="grid gap-2 sm:grid-cols-3">
+            {VEHICLE_CATEGORIES.map((category) => (
+              <label key={category} className="block">
+                <span className={label}>{VEHICLE_CATEGORY_LABELS[category]}</span>
+                <input
+                  className={input}
+                  inputMode="decimal"
+                  placeholder="—"
+                  value={washPrices[category] ?? ""}
+                  onChange={(e) => setWashPrices({ ...washPrices, [category]: e.target.value })}
+                />
+              </label>
+            ))}
+          </div>
+        </fieldset>
+
+        <label className="mt-3 flex items-center gap-2 text-sm text-ink-200">
+          <input
+            type="checkbox"
+            checked={washFirstTimeOnly}
+            onChange={(e) => setWashFirstTimeOnly(e.target.checked)}
+          />
+          New customers only (nothing completed with us yet)
+        </label>
+        <label className="mt-2 flex items-start gap-2 text-sm text-ink-200">
+          <input
+            type="checkbox"
+            className="mt-1"
+            checked={washReminders}
+            onChange={(e) => setWashReminders(e.target.checked)}
+          />
+          <span>
+            Remind people who claimed a code but never booked
+            <span className="block text-xs text-ink-500">
+              Three messages, on days 3, 7 and 12. Leave this off until text messaging is live —
+              reminders nobody receives are worse than none.
+            </span>
+          </span>
+        </label>
+
+        {washEnabled && (
+          <div className="mt-4 rounded-lg border border-ink-700 bg-ink-950/60 p-3 text-xs text-ink-300">
+            <p>
+              Send ad traffic to{" "}
+              <code className="text-accent-300">/offers/first-wash</code>. Claimed codes are listed
+              under Offer claims, and the licence plate is recorded on the appointment when the car
+              arrives.
+            </p>
+          </div>
+        )}
+      </section>
+
       <section>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-ink-300">Promotion</h2>
         <label className="flex items-center gap-2 text-sm text-ink-200">

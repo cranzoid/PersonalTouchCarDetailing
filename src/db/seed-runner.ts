@@ -216,6 +216,17 @@ const MESSAGE_TEMPLATES = [
   { key: "receipt", channel: "email", subject: "Payment received — {{businessName}}", body: "Hi {{firstName}},\n\nWe received your payment of {{amount}} for invoice INV-{{invoiceNumber}}.\n{{balanceLine}}\nThank you for choosing {{businessName}}!\n\n— {{businessName}}" },
   { key: "review_request", channel: "email", subject: "How did we do? — {{businessName}}", body: "Hi {{firstName}},\n\nThanks for choosing {{businessName}}! If you have a minute, we'd really appreciate a review — it helps other drivers find us:\n\n{{reviewUrl}}\n\n— {{businessName}}" },
   { key: "maintenance", channel: "email", subject: "Time for your next detail? — {{businessName}}", body: "Hi {{firstName}},\n\nIt's been a little while since we detailed your {{vehicle}} — vehicles look and feel best with regular care. Ready to book your next visit?\n\n{{bookingUrl}}\n\n— {{businessName}}" },
+  /*
+   * New-customer wash offer. These carry the code the customer just asked for,
+   * so they are transactional — but they still promote a commercial offer, and
+   * CASL wants every such message to identify the sender, give a second way to
+   * reach them, and offer a way out. All three are in the bodies below rather
+   * than left to whoever edits the template later.
+   */
+  { key: "offer_claim_code_sms", channel: "sms", subject: null, body: "{{businessName}}: your {{offerLabel}} code is {{code}} — {{price}} first wash. Book by {{expires}}: {{link}}\nQuestions? {{phone}}. Reply STOP to opt out." },
+  { key: "offer_claim_code_email", channel: "email", subject: "Your {{price}} first wash code: {{code}}", body: "Hi {{firstName}},\n\nHere is your {{offerLabel}} code.\n\n  {{code}}\n\nIt is worth a {{price}} hand wash on your first visit, and it is valid until {{expires}}.\n\nBook your time here:\n{{link}}\n\nOr call us on {{phone}} and we will book it for you.\n\nOne promotional wash per customer and per vehicle. Full terms are on the offer page.\n\n— {{businessName}}\n{{address}}\n{{phone}} · {{email}}\n\nDon't want emails from us? Unsubscribe here: {{unsubscribe}}" },
+  { key: "offer_claim_reminder_sms", channel: "sms", subject: null, body: "{{businessName}}: your {{price}} first wash code {{code}} expires {{expires}}. Grab a time: {{link}}\nCall {{phone}}. Reply STOP to opt out." },
+  { key: "offer_claim_reminder_email", channel: "email", subject: "Your {{price}} wash code expires {{expires}}", body: "Hi {{firstName}},\n\nYour {{offerLabel}} code {{code}} is still unused. It is worth a {{price}} hand wash and it expires on {{expires}}.\n\nBook a time here:\n{{link}}\n\nOr call us on {{phone}}.\n\n— {{businessName}}\n{{address}}\n{{phone}} · {{email}}\n\nDon't want emails from us? Unsubscribe here: {{unsubscribe}}" },
 ];
 
 export async function runSeed() {

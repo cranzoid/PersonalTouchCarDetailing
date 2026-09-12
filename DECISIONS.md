@@ -963,3 +963,79 @@ built on the same scale are unaffected.
 **Revisit when:** the legacy dark-canvas components are finally rewritten. At
 that point the `text-white` repaint and the three foreground overrides can all
 go, and `admin-on-dark` with them.
+
+## 33. The new-customer wash offer: a fixed price, and two caps that can't lose a race
+The offer is "your first hand wash, $15.99 — SUVs, pickups and vans $17.99", for
+new customers only, one per person and one per licence plate. It lands on its
+own direct-response page at `/offers/first-wash`, issues a code, and hands the
+customer into the ordinary booking wizard with that code applied.
+
+Consequential choices:
+
+- **A promo PRICE, not a percentage.** Against live catalogue prices of $30 and
+  $35 those two figures are 46.7% and 48.6% off. No single rate produces both,
+  and rounding one into the other would put a number on the page that the
+  booking then contradicts. So `washOffer.priceCentsByCategory` is the anchor
+  and the discount is derived as `catalogue − promo` per vehicle category.
+  This is why it lives beside `promotion` in settings rather than inside it.
+- **The wash is still booked at its catalogue price, with the saving as a
+  discount.** Writing the line at $15.99 directly would have been simpler and
+  wrong: `appointments.discount_cents` would read zero, the invoice would not
+  show the saving, and reporting could not tell a promotional wash from a cheap
+  one. It also keeps the advertised "regular price" honest — the struck-through
+  figure on the landing page is read from the same catalogue row the booking
+  prices from, so it can never advertise a price the shop does not charge.
+  Canada's Competition Act measures a savings claim against exactly that.
+- **A `offer_claims` table, which is decision 14's "revisit when".** That
+  decision said to promote the settings blob to a table the moment an offer
+  needed usage caps. Two caps, so: a table. The PRICES stay in
+  `business_settings` where staff can change them without a deploy.
+- **Both caps are partial unique indexes, not queries.** `(offer_code,
+  phone_normalized)` and `(offer_code, email_normalized)` excluding voided rows;
+  `(offer_code, redeemed_plate_normalized)` with no status condition at all. Two
+  staff checking in two cars at once would both pass a SELECT-then-INSERT check
+  and both be wrong. Releasing a claim frees the PERSON to claim again; it never
+  frees the car.
+- **Re-claiming returns the same code rather than an error.** People lose the
+  text — but the real reason is that an identical response either way means the
+  form cannot be used to ask "is this number one of your customers?". Decision
+  14 refused to build that oracle and this must not quietly reintroduce it. The
+  "are you actually a new customer" question is answered where it already was:
+  server-side inside the booking transaction, and again at the counter.
+- **The code is bound to the phone number it was issued to.** It is not a bearer
+  token: `claimBelongsTo` is checked before pricing and the claim is re-read
+  under the booking locks. A code posted in a Facebook group buys nobody a wash.
+  The booking form arrives pre-filled from the claim, so this costs the real
+  claimant nothing.
+- **The licence plate is never collected online.** A plate typed by a stranger
+  proves nothing and asking for one costs claims. Staff enter it on the
+  appointment when the car is in front of them — the first moment it is a fact —
+  and a plate that has already had its promotional wash is refused outright.
+  Refusal does not reprice anything; staff use "Change packages" (decision 21),
+  which is already the one audited place a booking's money moves.
+- **Spending the claim is conditional on it still being `issued`**, inside the
+  same transaction and under the same bay/staff locks as decision 3. Losing that
+  race rolls the whole booking back — no appointment, no customer, no vehicle —
+  exactly as losing the first-time re-check does.
+- **`isNewCustomer` is stricter than `isFirstTimeDetailCustomer`.** The older one
+  asks "have you had one of these packages before", which is right for an offer
+  on a package. This offer says *new customer*: somebody who had a $200 detail
+  last year is not new, whatever we have or have not washed for them.
+- **The landing page is outside the public layout.** A direct-response page has
+  one job, and the site header is nine ways to leave it before the form is
+  filled in. What is kept is the measurement — attribution and both pixels —
+  because a landing page that cannot be attributed is spend nobody can judge.
+- **Code delivery is transactional, and best effort.** The code is on the screen
+  before any message is attempted: SMS is not carrier-registered yet, and a
+  funnel that depends on a text arriving stops working the day the provider
+  does. The messages are `confirmation` kind (the customer asked for this), but
+  every body still names the sender, gives a phone number and offers a way out,
+  because CASL wants all three of any commercial message. The marketing tick-box
+  is separate, unticked, and never a condition of the offer.
+- **Unsubscribe links now resolve leads as well as campaign recipients.** Same
+  signed-token scheme, branched on the id prefix — somebody who gave us their
+  address directly has the same right to leave as somebody on a campaign list.
+
+**Revisit when:** a second simultaneous fixed-price offer is wanted → the
+settings blob becomes a row in a `campaigns` table and `offer_claims.offer_code`
+is already the foreign key it would need.

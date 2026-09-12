@@ -3,7 +3,16 @@ import { db, schema } from "@/db";
 import { Container, SectionHeading } from "@/components/ui";
 import { getSettings } from "@/lib/settings";
 import { activePromotion } from "@/lib/promotions";
-import { BookingWizard, type WizardAddon, type WizardBundleOffer, type WizardService } from "./wizard";
+import { activeWashOffer, formatClaimCode } from "@/lib/wash-offer";
+import { lookupClaim } from "@/lib/wash-offer-claims";
+import { formatInZone } from "@/lib/tz";
+import {
+  BookingWizard,
+  type WizardAddon,
+  type WizardBundleOffer,
+  type WizardService,
+  type WizardWashClaim,
+} from "./wizard";
 import { pageMetadata, SEO_PAGES } from "@/lib/seo";
 import {
   CERAMIC_CONDITION_DISCLAIMER_SHORT,
@@ -25,10 +34,46 @@ export default async function BookPage({
   // It is only a suggestion: priceBooking still refuses any add-on that is not
   // linked to the chosen service, so a stale ad URL cannot buy the discounted
   // price without the qualifying package.
-  searchParams: Promise<{ service?: string; offer?: string; addon?: string; bundle?: string }>;
+  // `claim` carries a new-customer wash code straight from the offer landing
+  // page. It is resolved here rather than trusted: the wizard only ever renders
+  // a claim the server has already confirmed is live.
+  searchParams: Promise<{ service?: string; offer?: string; addon?: string; bundle?: string; claim?: string }>;
 }) {
-  const { service: preselectSlug, offer, addon: preselectAddonSlug, bundle: preselectBundleSlug } = await searchParams;
+  const {
+    service: preselectSlugParam,
+    offer,
+    addon: preselectAddonSlug,
+    bundle: preselectBundleSlug,
+    claim: claimCode,
+  } = await searchParams;
   const settings = await getSettings();
+
+  // The wash claim, if the visitor is carrying a live one.
+  const washOffer = activeWashOffer(settings);
+  const claimLookup = washOffer && claimCode
+    ? await lookupClaim(db(), washOffer.code, claimCode)
+    : null;
+  const washClaim: WizardWashClaim | null =
+    washOffer && claimLookup?.ok
+      ? {
+          code: formatClaimCode(claimLookup.claim.code),
+          offerLabel: washOffer.label,
+          serviceSlug: washOffer.serviceSlug,
+          priceCentsByCategory: washOffer.priceCentsByCategory,
+          expiresLabel: formatInZone(claimLookup.claim.expiresAt, settings.timezone, {
+            weekday: "long",
+            month: "long",
+            day: "numeric",
+          }),
+          firstName: claimLookup.claim.firstName,
+          lastName: claimLookup.claim.lastName,
+          phone: claimLookup.claim.phone ?? "",
+          email: claimLookup.claim.email ?? "",
+          vehicleCategory: claimLookup.claim.vehicleSize === "suv" ? "suv_small" : "sedan",
+        }
+      : null;
+  // A claim implies its service even if the link lost the `service` parameter.
+  const preselectSlug = preselectSlugParam ?? (washClaim ? washClaim.serviceSlug : undefined);
   // Resolved server-side so the page can never advertise something the server
   // would refuse to honour. The wizard decides whether this visitor *claims*
   // it — from the URL, or from a code stored when they landed on an earlier
@@ -154,6 +199,7 @@ export default async function BookPage({
         offerFromUrl={offer}
         preselectAddonSlug={preselectAddonSlug}
         preselectBundleSlug={preselectBundleSlug}
+        washClaim={washClaim}
       />
     </Container>
   );

@@ -18,11 +18,11 @@ export async function confirmUnsubscribeAction(token: unknown): Promise<Unsubscr
   const recipientId = verifyUnsubscribeToken(token);
   if (!recipientId) return { ok: false, error: "This link is not valid." };
 
-  const [recipient] = await db()
-    .select()
-    .from(schema.outreachRecipients)
-    .where(eq(schema.outreachRecipients.id, recipientId))
-    .limit(1);
+  // A lead-signed token: somebody who gave us their address directly rather
+  // than through a campaign. Same right to leave, same one-click link.
+  const recipient = recipientId.startsWith("lead_")
+    ? await loadLeadRecipient(recipientId)
+    : await loadCampaignRecipient(recipientId);
   if (!recipient) return { ok: false, error: "This link is not valid." };
 
   try {
@@ -50,7 +50,7 @@ export async function confirmUnsubscribeAction(token: unknown): Promise<Unsubscr
       await audit(tx, {
         actorType: "customer",
         action: "marketing.unsubscribed",
-        entityType: "outreach_recipient",
+        entityType: recipient.entityType,
         entityId: recipient.id,
         after: { channel: "email", campaignId: recipient.campaignId },
       });
@@ -61,4 +61,44 @@ export async function confirmUnsubscribeAction(token: unknown): Promise<Unsubscr
   }
 
   return { ok: true };
+}
+
+/** The shape both token kinds reduce to, so the suppression path is one path. */
+type UnsubscribeTarget = {
+  id: string;
+  entityType: string;
+  destination: string;
+  leadId: string | null;
+  customerId: string | null;
+  campaignId: string | null;
+};
+
+async function loadCampaignRecipient(id: string): Promise<UnsubscribeTarget | null> {
+  const [row] = await db()
+    .select()
+    .from(schema.outreachRecipients)
+    .where(eq(schema.outreachRecipients.id, id))
+    .limit(1);
+  if (!row) return null;
+  return {
+    id: row.id,
+    entityType: "outreach_recipient",
+    destination: row.destination,
+    leadId: row.leadId,
+    customerId: row.customerId,
+    campaignId: row.campaignId,
+  };
+}
+
+async function loadLeadRecipient(id: string): Promise<UnsubscribeTarget | null> {
+  const [row] = await db().select().from(schema.leads).where(eq(schema.leads.id, id)).limit(1);
+  if (!row?.email) return null;
+  return {
+    id: row.id,
+    entityType: "lead",
+    destination: row.email,
+    leadId: row.id,
+    customerId: row.convertedCustomerId,
+    campaignId: null,
+  };
 }

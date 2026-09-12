@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import {
   pgTable,
   text,
@@ -1413,5 +1414,106 @@ export const outreachRecipients = pgTable(
     uniqueIndex("outreach_recipients_campaign_dest_uq").on(t.campaignId, t.destinationNormalized),
     index("outreach_recipients_dest_idx").on(t.destinationNormalized),
     index("outreach_recipients_appointment_idx").on(t.appointmentId),
+  ],
+);
+
+/* ------------------------------------------------------------------ */
+/* New-customer offer claims                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One claim of the new-customer wash offer.
+ *
+ * DECISIONS.md #14 set the condition for promoting the settings blob to a
+ * table: "several offers at once, usage caps, or per-campaign reporting". This
+ * offer needs a usage cap on two different keys — one wash per person, one per
+ * licence plate — so the claims live here while the offer's PRICES stay in
+ * business_settings, where staff can change them without a deploy.
+ *
+ * The two caps are enforced by partial unique indexes rather than by a query,
+ * because a query loses the race and an index cannot. See the migration for
+ * the `WHERE` clauses, which Drizzle's uniqueIndex().where() emits.
+ */
+export const offerClaims = pgTable(
+  "offer_claims",
+  {
+    id: id(),
+    /**
+     * Which campaign this claim belongs to, so a second offer later does not
+     * inherit this one's caps. Matches BusinessSettings.washOffer.code.
+     */
+    offerCode: text("offer_code").notNull(),
+    /** The code the customer holds, canonical form (no separator), e.g. PTW7QK2MB. */
+    code: text("code").notNull(),
+    firstName: text("first_name").notNull(),
+    lastName: text("last_name").notNull().default(""),
+    email: text("email"),
+    phone: text("phone"),
+    /**
+     * The two caps' keys. Same normalizers as everywhere else in the app
+     * (src/lib/phone.ts), so a number entered at the counter and a number
+     * typed on the landing page collide exactly when they are the same number.
+     */
+    phoneNormalized: text("phone_normalized"),
+    emailNormalized: text("email_normalized"),
+    /**
+     * Vehicle size as the CUSTOMER described it on the landing page. Advisory
+     * only — the price is settled from the real category chosen in the booking
+     * wizard, so somebody who picks "car" and arrives in a truck pays the truck
+     * price rather than being told the offer is void.
+     */
+    vehicleSize: text("vehicle_size").notNull().default("car"), // car | suv
+    marketingConsent: boolean("marketing_consent").notNull().default(false),
+    marketingConsentAt: timestamp("marketing_consent_at", { withTimezone: true }),
+    /**
+     * The offer terms as published when this code was issued. Snapshotted for
+     * the same reason tax_label is (decision 6): editing the terms later must
+     * not change what this customer agreed to.
+     */
+    termsVersion: text("terms_version").notNull().default(""),
+    attribution: jsonb("attribution").$type<Attribution>(),
+    /** issued | booked | redeemed | expired | void */
+    status: text("status").notNull().default("issued"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    leadId: text("lead_id").references(() => leads.id),
+    customerId: text("customer_id").references(() => customers.id),
+    appointmentId: text("appointment_id").references(() => appointments.id),
+    bookedAt: timestamp("booked_at", { withTimezone: true }),
+    /**
+     * The licence plate this offer was actually spent on, normalized.
+     *
+     * Deliberately NOT collected online: a plate typed by a stranger proves
+     * nothing and asking for one costs conversions. It is entered by staff when
+     * the car is in front of them, which is the only point at which it is a
+     * fact — and the partial unique index below is what then makes "one
+     * promotional wash per plate" true rather than merely intended.
+     */
+    redeemedPlateNormalized: text("redeemed_plate_normalized"),
+    redeemedAt: timestamp("redeemed_at", { withTimezone: true }),
+    redeemedByStaffId: text("redeemed_by_staff_id").references(() => staffUsers.id),
+    /** How many nudges have gone out, so the cron never repeats one. */
+    remindersSent: integer("reminders_sent").notNull().default(0),
+    lastReminderAt: timestamp("last_reminder_at", { withTimezone: true }),
+    voidReason: text("void_reason"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("offer_claims_code_uq").on(t.code),
+    // The caps. `void` is excluded so staff can release a claim taken in error
+    // — a duplicate, or a number typed wrong — and let that person claim again.
+    uniqueIndex("offer_claims_offer_phone_uq")
+      .on(t.offerCode, t.phoneNormalized)
+      .where(sql`${t.phoneNormalized} is not null and ${t.status} <> 'void'`),
+    uniqueIndex("offer_claims_offer_email_uq")
+      .on(t.offerCode, t.emailNormalized)
+      .where(sql`${t.emailNormalized} is not null and ${t.status} <> 'void'`),
+    // One promotional wash per plate, for the life of the campaign. Not scoped
+    // by status: a redeemed plate stays spent even if the claim is later voided.
+    uniqueIndex("offer_claims_offer_plate_uq")
+      .on(t.offerCode, t.redeemedPlateNormalized)
+      .where(sql`${t.redeemedPlateNormalized} is not null`),
+    index("offer_claims_status_idx").on(t.status, t.expiresAt),
+    index("offer_claims_appointment_idx").on(t.appointmentId),
   ],
 );

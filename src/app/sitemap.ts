@@ -2,6 +2,8 @@ import type { MetadataRoute } from "next";
 import { asc, desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { PUBLIC_SITE_URL } from "@/lib/seo";
+import { getSettings } from "@/lib/settings";
+import { activeWashOffer, FIRST_WASH_OFFER_PATH } from "@/lib/wash-offer";
 
 // Service URLs come from PostgreSQL and must be resolved after startup
 // migrations have initialized the production database.
@@ -50,10 +52,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       .orderBy(desc(schema.blogPosts.publishedAt)),
   ]);
 
+  // The wash offer's landing page is advertised only while it is running. It
+  // sets its own noindex when switched off, but a sitemap that still lists a
+  // page reading "this offer has finished" is pointing crawlers at a dead end.
+  const washOffer = activeWashOffer(await getSettings());
+
   const entries = [
     ...PUBLIC_ROUTES.map((route) => ({
       url: `${PUBLIC_SITE_URL}${route}`,
     })),
+    ...(washOffer?.acceptingClaims ? [{ url: `${PUBLIC_SITE_URL}${FIRST_WASH_OFFER_PATH}` }] : []),
     // /results 404s until a case study is published, so it is advertised only
     // once one is. See src/lib/results.ts.
     ...(caseStudies.length > 0 ? [{ url: `${PUBLIC_SITE_URL}/results` }] : []),

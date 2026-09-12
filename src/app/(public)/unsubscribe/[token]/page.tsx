@@ -20,12 +20,26 @@ export default async function UnsubscribePage({ params }: { params: Promise<{ to
   const recipientId = verifyUnsubscribeToken(token);
   if (!recipientId) notFound();
 
-  const [recipient] = await db()
-    .select({ destination: schema.outreachRecipients.destination })
-    .from(schema.outreachRecipients)
-    .where(eq(schema.outreachRecipients.id, recipientId))
-    .limit(1);
-  if (!recipient) notFound();
+  // Two kinds of id sign the same way. An outreach recipient is one row of one
+  // campaign; a lead is somebody who gave us their address directly — claiming
+  // the wash offer, say — and CASL gives them the same right to leave, from the
+  // same link, whether or not a campaign has ever been built around them.
+  const destination = recipientId.startsWith("lead_")
+    ? (
+        await db()
+          .select({ destination: schema.leads.email })
+          .from(schema.leads)
+          .where(eq(schema.leads.id, recipientId))
+          .limit(1)
+      )[0]?.destination
+    : (
+        await db()
+          .select({ destination: schema.outreachRecipients.destination })
+          .from(schema.outreachRecipients)
+          .where(eq(schema.outreachRecipients.id, recipientId))
+          .limit(1)
+      )[0]?.destination;
+  if (!destination) notFound();
 
   return (
     <Container className="py-16">
@@ -35,7 +49,7 @@ export default async function UnsubscribePage({ params }: { params: Promise<{ to
           One click and you are off our marketing list for good.
         </p>
         <div className="mt-6">
-          <UnsubscribeForm token={token} maskedEmail={maskEmail(recipient.destination)} />
+          <UnsubscribeForm token={token} maskedEmail={maskEmail(destination)} />
         </div>
       </div>
     </Container>

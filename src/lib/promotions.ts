@@ -153,16 +153,10 @@ export async function isFirstTimeDetailCustomer(
   contact: { email?: string | null; phone?: string | null },
   eligibleServiceIds: readonly string[],
 ): Promise<boolean> {
-  const email = contact.email?.trim().toLowerCase() || undefined;
-  const phone = contact.phone?.replace(/\D/g, "") || undefined;
+  const contactMatch = contactMatchClause(contact);
   // No way to identify them — treat as first-time; the booking itself requires
   // one of the two, so this only guards odd staff-side callers.
-  if (!email && !phone) return true;
-
-  const contactMatch = or(
-    email ? sql`lower(${schema.customers.email}) = ${email}` : undefined,
-    phone ? sql`regexp_replace(coalesce(${schema.customers.phone}, ''), '\\D', '', 'g') = ${phone}` : undefined,
-  );
+  if (!contactMatch) return true;
 
   // (a) A previous appointment for an eligible service that actually happened.
   // Jobs are the operational truth, but completedAt is checked too: job rows
@@ -197,6 +191,80 @@ export async function isFirstTimeDetailCustomer(
   // (b) They already hold a discounted booking that has not been fulfilled.
   // Without this a first-time customer could take the offer three times in one
   // sitting, since none of those bookings has happened yet.
+  const outstanding = await runner
+    .select({ id: schema.appointments.id })
+    .from(schema.appointments)
+    .innerJoin(schema.customers, eq(schema.appointments.customerId, schema.customers.id))
+    .where(
+      and(
+        isNull(schema.customers.anonymizedAt),
+        contactMatch,
+        gt(schema.appointments.discountCents, 0),
+        notInArray(schema.appointments.status, ["cancelled", "no_show"]),
+      ),
+    )
+    .limit(1);
+  return outstanding.length === 0;
+}
+
+/**
+ * Matches a customer row by contact details rather than by id.
+ *
+ * A public booking always inserts a FRESH customers row (DECISIONS.md #14
+ * refuses to look a stranger up by phone), so the same person is a different
+ * row every visit and the contact details are the only identity available.
+ * Email is compared case-insensitively and phone by digits only, because the
+ * same person types "905-679-0143" once and "(905) 679 0143" the next.
+ */
+function contactMatchClause(contact: { email?: string | null; phone?: string | null }) {
+  const email = contact.email?.trim().toLowerCase() || undefined;
+  const phone = contact.phone?.replace(/\D/g, "") || undefined;
+  if (!email && !phone) return undefined;
+  return or(
+    email ? sql`lower(${schema.customers.email}) = ${email}` : undefined,
+    phone ? sql`regexp_replace(coalesce(${schema.customers.phone}, ''), '\\D', '', 'g') = ${phone}` : undefined,
+  );
+}
+
+/**
+ * True when this contact has never bought ANYTHING from us.
+ *
+ * Stricter than isFirstTimeDetailCustomer, and deliberately so. That one asks
+ * "have you had one of these packages before", which is the right question for
+ * an offer on a specific package. The new-customer wash offer says *new
+ * customer*: somebody who had a $200 detail last year is not new, whatever they
+ * have or have not had washed.
+ *
+ * Same two limbs as its sibling, so the two offers agree about what "already a
+ * customer" means: a visit that actually happened, or a discounted booking
+ * still outstanding.
+ */
+export async function isNewCustomer(
+  runner: Pick<Db, "select">,
+  contact: { email?: string | null; phone?: string | null },
+): Promise<boolean> {
+  const contactMatch = contactMatchClause(contact);
+  if (!contactMatch) return true;
+
+  const fulfilled = await runner
+    .select({ id: schema.appointments.id })
+    .from(schema.appointments)
+    .innerJoin(schema.customers, eq(schema.appointments.customerId, schema.customers.id))
+    .leftJoin(schema.jobs, eq(schema.jobs.appointmentId, schema.appointments.id))
+    .where(
+      and(
+        isNull(schema.customers.anonymizedAt),
+        contactMatch,
+        or(
+          inArray(schema.jobs.status, ["ready_for_pickup", "completed"]),
+          sql`${schema.jobs.completedAt} is not null`,
+          eq(schema.appointments.status, "completed"),
+        ),
+      ),
+    )
+    .limit(1);
+  if (fulfilled.length > 0) return false;
+
   const outstanding = await runner
     .select({ id: schema.appointments.id })
     .from(schema.appointments)

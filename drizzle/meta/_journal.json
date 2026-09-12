@@ -162,6 +162,13 @@
       "when": 1788830286818,
       "tag": "0022_winback_campaigns",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "7",
+      "when": 1789173604325,
+      "tag": "0023_first_wash_offer_claims",
+      "breakpoints": true
     }
   ]
 }

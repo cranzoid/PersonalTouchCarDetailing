@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 import { generateRecurringBills } from "@/lib/books";
 import { syncOverdueInvoices } from "@/lib/invoices";
-import { sendDueAppointmentReminders, sendDueReviewRequests, sendDueMaintenanceReminders } from "@/lib/scheduling";
+import {
+  sendDueAppointmentReminders,
+  sendDueReviewRequests,
+  sendDueMaintenanceReminders,
+  sendDueOfferClaimReminders,
+} from "@/lib/scheduling";
 import { getPool } from "@/db";
 import { pruneExpiredRateLimits } from "@/lib/rate-limit";
 
@@ -45,6 +50,7 @@ async function runTick(req: Request) {
     const appointmentReminders = await sendDueAppointmentReminders();
     const reviewRequests = await sendDueReviewRequests();
     const maintenanceReminders = await sendDueMaintenanceReminders();
+    const offerClaims = await sendDueOfferClaimReminders();
     const recurringBills = await generateRecurringBills();
     const expiredRateLimitBuckets = await pruneExpiredRateLimits();
 
@@ -54,6 +60,8 @@ async function runTick(req: Request) {
       appointmentReminders,
       reviewRequests,
       maintenanceReminders,
+      offerClaimReminders: offerClaims.sent,
+      offerClaimsExpired: offerClaims.expired,
       recurringBills,
       expiredRateLimitBuckets,
     });

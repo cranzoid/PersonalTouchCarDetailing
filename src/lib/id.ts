@@ -53,7 +53,8 @@ export type IdPrefix =
   | "tsh" // timesheet day
   | "sup" // marketing suppression (do-not-contact)
   | "ocm" // outreach campaign
-  | "orc"; // outreach recipient
+  | "orc" // outreach recipient
+  | "ofc"; // new-customer offer claim
 
 export function newId(prefix: IdPrefix): string {
   return `${prefix}_${randomId()}`;

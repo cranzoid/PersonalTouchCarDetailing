@@ -9,7 +9,8 @@ import { DATE_ONLY_BOOKING_NOTICE, DATE_ONLY_BOOKING_NOTICE_SHORT } from "@/lib/
 import { formatCents } from "@/lib/money";
 import { localDateISO } from "@/lib/tz";
 import { SERVICE_PRESENTATION } from "@/lib/public-content";
-import { bestAllocation, bundleDiscountAllocations, bundlePerkFor } from "@/lib/bundle-offers";
+import { bestOfAllocations, bundleDiscountAllocations, bundlePerkFor } from "@/lib/bundle-offers";
+import { washOfferAllocation } from "@/lib/wash-offer";
 import {
   VEHICLE_CATEGORIES,
   VEHICLE_CATEGORY_LABELS,
@@ -82,6 +83,28 @@ export type WizardPromo = {
   eligibleServiceIds: string[];
 };
 
+/**
+ * A new-customer wash code the visitor arrived holding, already resolved
+ * server-side. Advisory here exactly as every other price is: the wizard shows
+ * what this claim is worth, and the server settles it again at submit.
+ */
+export type WizardWashClaim = {
+  /** Canonical code, sent back with the booking. */
+  code: string;
+  offerLabel: string;
+  /** The one catalogue service this claim buys. */
+  serviceSlug: string;
+  /** Promo price per vehicle category. A category absent from this is not covered. */
+  priceCentsByCategory: Partial<Record<VehicleCategory, number>>;
+  expiresLabel: string;
+  /** Prefill, so the booking carries the same contact the claim was issued to. */
+  firstName: string;
+  lastName: string;
+  phone: string;
+  email: string;
+  vehicleCategory: VehicleCategory;
+};
+
 export type WizardBundleOffer = {
   primaryServiceId: string;
   bundledServiceId: string;
@@ -110,6 +133,7 @@ export function BookingWizard({
   offerFromUrl,
   preselectAddonSlug,
   preselectBundleSlug,
+  washClaim = null,
 }: {
   services: WizardService[];
   addons: WizardAddon[];
@@ -127,6 +151,8 @@ export function BookingWizard({
   preselectAddonSlug?: string;
   /** Optional detailing package to add to an ad-driven ceramic cart. */
   preselectBundleSlug?: string;
+  /** A live new-customer wash claim, resolved on the server from ?claim=. */
+  washClaim?: WizardWashClaim | null;
 }) {
   const idPrefix = useId();
   const preselected = services.find((s) => s.slug === preselectSlug);
@@ -152,7 +178,12 @@ export function BookingWizard({
   // The bundle extra is something the customer asks for, not something we add
   // for them — it costs them nothing but it commits them to bringing a pen.
   const [perkOptIn, setPerkOptIn] = useState(false);
-  const [vehicleCategory, setVehicleCategory] = useState<VehicleCategory>("sedan");
+  // Seeded from the claim so the size the customer told us on the landing page
+  // is already selected — they can still change it, and the price follows the
+  // category they actually pick rather than the one they guessed.
+  const [vehicleCategory, setVehicleCategory] = useState<VehicleCategory>(
+    washClaim?.vehicleCategory ?? "sedan",
+  );
   const [vehicle, setVehicle] = useState({ year: "", make: "", model: "", colour: "" });
   const [selectedAddons, setSelectedAddons] = useState<string[]>(
     preselectedAddon ? [preselectedAddon.id] : [],
@@ -166,7 +197,15 @@ export function BookingWizard({
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
   const [startMs, setStartMs] = useState<number | null>(null);
-  const [contact, setContact] = useState({ firstName: "", lastName: "", email: "", phone: "", notes: "" });
+  const [contact, setContact] = useState({
+    firstName: washClaim?.firstName ?? "",
+    lastName: washClaim?.lastName ?? "",
+    email: washClaim?.email ?? "",
+    // The claim is bound to this number, so pre-filling it is not merely
+    // convenience: a typo here silently costs the customer their offer.
+    phone: washClaim?.phone ?? "",
+    notes: "",
+  });
   const [policiesAccepted, setPoliciesAccepted] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<BookingResult | null>(null);
@@ -194,6 +233,13 @@ export function BookingWizard({
   // A claim is worth something only against the offer the server is running.
   const claimsOffer =
     !!promo && !!claimedCode && claimedCode.trim().toUpperCase() === promo.code && !offerWithdrawn;
+  // What this claim is worth against the vehicle currently selected. Null when
+  // the wash is not in the cart, the size is not covered (commercial), or the
+  // server has already told us the claim no longer applies.
+  const washPriceCents =
+    washClaim && !offerWithdrawn && service?.slug === washClaim.serviceSlug
+      ? washClaim.priceCentsByCategory[vehicleCategory] ?? null
+      : null;
   const selectedServiceIds = useMemo(
     () => service ? [service.id, ...(bundleService ? [bundleService.id] : [])] : [],
     [service, bundleService],
@@ -279,17 +325,34 @@ export function BookingWizard({
         ? Math.min(line.priceCents, Math.round((line.priceCents * promo!.percentOffBp) / 10000))
         : 0,
     );
-    const resolved = bestAllocation(bundle.allocation, campaignAllocation);
+    // The wash claim, priced the same way the server prices it: the catalogue
+    // price for this vehicle, less the promo price for its size.
+    const washAllocation = washPriceCents !== null
+      ? washOfferAllocation(serviceLines, {
+          serviceId: serviceLines[0].serviceId,
+          promoPriceCents: washPriceCents,
+        }).allocation
+      : new Array(serviceLines.length).fill(0);
+    // Same precedence, and the same "never stack" rule, as priceBooking.
+    const resolved = bestOfAllocations([
+      { key: "wash", allocation: washAllocation },
+      { key: "bundle", allocation: bundle.allocation },
+      { key: "campaign", allocation: campaignAllocation },
+    ]);
+    const washApplied = resolved.contributing.has("wash");
+    const bundleApplied = resolved.contributing.has("bundle");
     const discount = resolved.allocation.reduce((sum, cents) => sum + cents, 0);
-    const discountLabel = resolved.bundleContributes
-      ? bundle.labels[0]
-      : resolved.campaignContributes
-        ? promo?.label
-        : null;
+    const discountLabel = washApplied
+      ? washClaim?.offerLabel
+      : bundleApplied
+        ? bundle.labels[0]
+        : resolved.contributing.has("campaign")
+          ? promo?.label
+          : null;
     const taxable = subtotal - discount;
     const tax = Math.round((taxable * taxRateBp) / 10000);
-    return { subtotal, discount, discountLabel, bundleApplied: resolved.bundleContributes, tax, total: taxable + tax, duration, serviceLines };
-  }, [service, bundleService, vehicleCategory, selectedAddons, addons, taxRateBp, claimsOffer, promo, bundleOffers]);
+    return { subtotal, discount, discountLabel, bundleApplied, washApplied, tax, total: taxable + tax, duration, serviceLines };
+  }, [service, bundleService, vehicleCategory, selectedAddons, addons, taxRateBp, claimsOffer, promo, bundleOffers, washPriceCents, washClaim]);
 
   async function loadSlots(date: string) {
     if (!service || !date) return;
@@ -338,6 +401,9 @@ export function BookingWizard({
       policiesAccepted: true as const,
       attribution: getStoredAttribution(),
       promoCode: claimsOffer ? claimedCode : undefined,
+      // Sent whenever we hold one. The server decides what it is worth — and
+      // whether it belongs to the phone number on this booking.
+      washClaimCode: washClaim?.code,
       // What the customer is looking at right now. If the server disagrees it
       // books nothing and returns the corrected total for them to confirm.
       expectedDiscountCents: preview?.discount ?? 0,
@@ -836,6 +902,18 @@ export function BookingWizard({
         <div className="overflow-hidden rounded-[2rem] border border-accent-500/25 bg-gradient-to-br from-[#0B2A4A] to-ink-950 p-6 shadow-2xl shadow-black/25">
           <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-300">Live estimate</p>
           <h3 className="mt-2 text-xl font-semibold text-white">Your booking</h3>
+          {preview?.washApplied && washClaim && (
+            <p className="mt-3 rounded-xl border border-emerald-400/40 bg-emerald-950/30 px-3 py-2 text-xs font-semibold text-emerald-200">
+              {washClaim.offerLabel} applied — code {washClaim.code}. Book by {washClaim.expiresLabel}.
+            </p>
+          )}
+          {washClaim && !preview?.washApplied && !offerWithdrawn && service && (
+            <p className="mt-3 rounded-xl border border-amber-400/30 bg-amber-950/20 px-3 py-2 text-xs text-amber-200">
+              {service.slug === washClaim.serviceSlug
+                ? "Your offer does not cover this vehicle type, so the regular price is shown."
+                : `Your ${washClaim.offerLabel} applies to the basic wash, so it does not come off this service.`}
+            </p>
+          )}
           {claimsOffer && serviceQualifies && (
             <p className="mt-3 rounded-xl border border-emerald-400/30 bg-emerald-950/25 px-3 py-2 text-xs font-medium text-emerald-200">
               Your {promo!.percentOffBp / 100}% campaign offer is active. We always apply the better saving if a bundle offer also qualifies.
@@ -916,9 +994,10 @@ export function BookingWizard({
               )}
               {offerWithdrawn && (
                 <p className="rounded-xl border border-amber-400/30 bg-amber-950/20 p-3 text-xs text-amber-200">
-                  The {promo?.label ?? "offer"} is for first-time detailing customers, so it
-                  doesn&apos;t apply to this booking. Nothing has been booked yet — the total above
-                  is what you&apos;ll pay.
+                  {result && !result.ok && result.kind === "offer_changed"
+                    ? result.error
+                    : `The ${promo?.label ?? "offer"} is for first-time customers, so it doesn't apply to this booking.`}{" "}
+                  Nothing has been booked yet — the total above is what you&apos;ll pay.
                 </p>
               )}
               {selectedAddons

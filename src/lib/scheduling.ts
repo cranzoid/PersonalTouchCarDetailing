@@ -4,6 +4,13 @@ import { getSettings } from "@/lib/settings";
 import { isTerminalTemplateDelivery, sendMessageTemplate } from "@/lib/messaging";
 import { formatInZone } from "@/lib/tz";
 import { getAppBaseUrl } from "@/lib/urls";
+import { activeWashOffer, OFFER_CLAIM_REMINDER_DAYS } from "@/lib/wash-offer";
+import {
+  claimsDueReminder,
+  expireStaleClaims,
+  recordClaimReminder,
+  sendClaimMessages,
+} from "@/lib/wash-offer-claims";
 
 /**
  * Time-driven background sends (Phase 5): appointment reminders, post-payment
@@ -203,4 +210,37 @@ export async function sendDueMaintenanceReminders(): Promise<number> {
     }
   }
   return sent;
+}
+
+/* ------------------------------------------------------------------ */
+/* New-customer wash offer                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Nudges claims that have a live code and no booking behind it, then tidies up
+ * the ones that ran out.
+ *
+ * Off unless the owner switches reminders on. That is deliberate: the SMS
+ * sender is not carrier-registered yet, and a reminder programme is the worst
+ * possible thing to have running blind against a provider that is silently
+ * dropping messages.
+ */
+export async function sendDueOfferClaimReminders(): Promise<{ sent: number; expired: number }> {
+  const settings = await getSettings();
+  const offer = activeWashOffer(settings);
+  const expired = await expireStaleClaims();
+  if (!offer?.remindersEnabled) return { sent: 0, expired };
+
+  const baseUrl = getAppBaseUrl();
+  const due = await claimsDueReminder(OFFER_CLAIM_REMINDER_DAYS);
+  let sent = 0;
+  for (const claim of due) {
+    // Stamped whatever the provider said. A claim whose number is unreachable
+    // must not be retried every hour for a fortnight — the customer still has
+    // the code on screen, and the shop has the claim in the admin list.
+    await sendClaimMessages({ claim, offer, settings, variant: "reminder", baseUrl });
+    await recordClaimReminder(claim.id);
+    sent += 1;
+  }
+  return { sent, expired };
 }
