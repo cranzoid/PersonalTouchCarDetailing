@@ -229,6 +229,13 @@ describe("washOfferTerms", () => {
     expect(pricing).not.toContain("the same whatever you drive");
     expect(pricing).toContain("$17.99 applies to an SUV, pickup or van");
   });
+
+  it("does not include floor-mat cleaning in the exterior-wash offer", () => {
+    const scope = washOfferTerms({ ...base, largeOfferLabel: "$15.99" })[2];
+    expect(scope).toContain("Floor-mat cleaning");
+    expect(scope).toContain("charged at the usual price");
+    expect(scope).not.toContain("dry and mats");
+  });
 });
 
 describe("claimExpiresAt", () => {

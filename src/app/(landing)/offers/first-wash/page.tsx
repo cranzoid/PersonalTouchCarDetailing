@@ -171,7 +171,7 @@ export default async function FirstWashOfferPage() {
                 <div className="absolute inset-x-0 bottom-0 flex flex-wrap justify-between gap-2 bg-gradient-to-t from-black/90 via-black/55 to-transparent px-5 pb-5 pt-16 text-xs font-bold sm:px-6 sm:pb-6 sm:text-sm">
                   <span>✓ Exterior hand wash</span>
                   <span>✓ Hand dry</span>
-                  <span>✓ Mats cleaned</span>
+                  <span>✓ Wheels &amp; tyres rinsed</span>
                 </div>
               </div>
             </div>
@@ -226,7 +226,7 @@ export default async function FirstWashOfferPage() {
               <p className="text-xs font-black uppercase tracking-[0.18em] text-[#4DE3F2]">Included</p>
               <h2 className="mt-3 text-3xl font-black">The essentials, done by hand.</h2>
               <ul className="mt-6 grid gap-3 text-sm sm:grid-cols-2">
-                {["Full exterior hand wash", "Careful hand dry", "Floor mats cleaned", "Wheels and tyres rinsed"].map((item) => (
+                {["Full exterior hand wash", "Careful hand dry", "Wheels and tyres rinsed"].map((item) => (
                   <li key={item} className="flex gap-2"><span className="text-[#DFFF45]">●</span>{item}</li>
                 ))}
               </ul>
@@ -234,7 +234,7 @@ export default async function FirstWashOfferPage() {
             <div className="p-1 sm:p-5">
               <p className="text-xs font-black uppercase tracking-[0.18em] text-[#087B87]">Good to know</p>
               <h2 className="mt-3 text-3xl font-black">No surprise extras.</h2>
-              <p className="mt-4 leading-7 text-[#3E5055]">Interior cleaning, waxing, paint correction and engine-bay cleaning are not included. You can add services during booking and see their prices first. Commercial vehicles are quoted separately.</p>
+              <p className="mt-4 leading-7 text-[#3E5055]">Floor-mat and other interior cleaning, waxing, paint correction and engine-bay cleaning are not included. You can add services during booking and see their prices first. Commercial vehicles are quoted separately.</p>
               <a href="#claim" className="mt-6 inline-flex min-h-12 items-center rounded-full bg-[#071419] px-6 font-black text-white transition hover:bg-[#14373D]">Claim my code ↑</a>
             </div>
           </div>

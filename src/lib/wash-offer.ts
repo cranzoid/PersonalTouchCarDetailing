@@ -300,7 +300,7 @@ export function washOfferTerms(input: {
     onePrice
       ? `${input.carOfferLabel} is the price for any coupe, sedan, SUV, pickup or van — the same whatever you drive — against regular prices of ${input.carRegularLabel} for a car and ${input.largeRegularLabel} for an SUV, pickup or van. Commercial vehicles are quoted individually and are not included.`
       : `${input.carOfferLabel} applies to a coupe or sedan, regularly ${input.carRegularLabel}. ${input.largeOfferLabel} applies to an SUV, pickup or van, regularly ${input.largeRegularLabel}. Commercial vehicles are quoted individually and are not included.`,
-    "Covers the basic exterior wash only: a hand wash, dry and mats. Interior cleaning, waxing and any other extra is charged at the usual price.",
+    "Covers the basic exterior wash only: a hand wash and dry, with the wheels and tyres rinsed. Floor-mat cleaning, other interior cleaning, waxing and any other extra is charged at the usual price.",
     "100% hand wash. No automatic brushes are used on any vehicle, on this offer or otherwise.",
     `Prices exclude ${input.taxLabel}. Cash and Interac e-transfer pay the listed price; card and cheque add ${input.taxLabel} (${input.cardPriceLabel}${onePrice ? " in total" : " for a car"}).`,
     `Book your appointment within ${input.claimValidDays} days of claiming. Appointments are subject to availability and the offer cannot be used as a walk-in without one.`,
