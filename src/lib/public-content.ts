@@ -12,6 +12,23 @@ export const POPULAR_SERVICE_SLUGS = [
   "interior-detail",
 ] as const;
 
+/**
+ * The interior checklist, shared verbatim by all three detailing packages.
+ *
+ * It is one constant rather than three copies because the three lists ARE the
+ * same promise — Ultimate and Signature add exterior work on top of an Interior
+ * Detail, they do not do different interior work. Owner-set on 2026-09-16, when
+ * seat shampoo left these packages and became a paid add-on: nothing here
+ * claims a shampoo or a deep clean, because that is now what the extra buys.
+ */
+const INTERIOR_CHECKLIST = [
+  "Detailed clean of seats, carpets and mats",
+  "Clean, buff and polish interior surfaces",
+  "Clean interior glass",
+  "Disinfect air vents",
+  "Vacuum trunk and refresh the cabin scent",
+] as const;
+
 export type ServicePresentation = {
   publicName: string;
   image: string;
@@ -31,13 +48,8 @@ export const SERVICE_PRESENTATION: Record<string, ServicePresentation> = {
     publicName: "Ultimate Detail",
     image: "/images/services/hand-wash.png",
     imageAlt: "A vehicle being carefully washed by hand inside a professional detailing bay",
-    highlights: ["Complete inside-and-out reset", "Deep seat and carpet clean", "Engine bay fine detail"],
-    interior: [
-      "Deep-clean seats, carpets and mats",
-      "Vacuum cabin and trunk",
-      "Clean and buff interior surfaces",
-      "Clean interior glass",
-    ],
+    highlights: ["Complete inside-and-out reset", "Seats, carpets and mats detailed", "Engine bay fine detail"],
+    interior: INTERIOR_CHECKLIST,
     exterior: [
       "Brush-free hand wash and dry",
       "Rims cleaned and tires dressed",
@@ -48,13 +60,8 @@ export const SERVICE_PRESENTATION: Record<string, ServicePresentation> = {
     publicName: "Signature Detail",
     image: "/images/detailing-studio-hero.png",
     imageAlt: "A dark blue vehicle receiving a careful professional detail",
-    highlights: ["Full interior deep clean", "Hand-washed exterior", "Rims and tires finished"],
-    interior: [
-      "Deep-clean seats, carpets and mats",
-      "Vacuum cabin and trunk",
-      "Clean and buff interior surfaces",
-      "Clean interior glass",
-    ],
+    highlights: ["Full interior detail", "Hand-washed exterior", "Rims and tires finished"],
+    interior: INTERIOR_CHECKLIST,
     exterior: [
       "Brush-free hand wash and dry",
       "Rims cleaned and tires dressed",
@@ -64,13 +71,8 @@ export const SERVICE_PRESENTATION: Record<string, ServicePresentation> = {
     publicName: "Interior Detail",
     image: "/images/services/interior-detail.png",
     imageAlt: "A detailer deep-cleaning a vehicle seat and centre console without showing their face",
-    highlights: ["Seats and carpets deep-cleaned", "Cabin surfaces refreshed", "Interior glass cleaned"],
-    interior: [
-      "Vacuum seats, carpets and trunk",
-      "Deep-clean seats, carpets and mats",
-      "Clean and buff interior surfaces",
-      "Clean interior glass",
-    ],
+    highlights: ["Seats, carpets and mats detailed", "Surfaces cleaned and polished", "Air vents disinfected"],
+    interior: INTERIOR_CHECKLIST,
     exterior: [],
   },
   "ceramic-coating-crystal": {

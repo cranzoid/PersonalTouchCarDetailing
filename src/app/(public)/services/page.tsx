@@ -22,7 +22,7 @@ const CATEGORY_GUIDES: Record<string, { href: string; label: string }[]> = {
 
 const COMPARISON_ROWS = [
   ["Brush-free exterior hand wash", true, true, false],
-  ["Interior deep clean", true, true, true],
+  ["Full interior detail", true, true, true],
   ["Seats, carpets and mats", true, true, true],
   ["Rims cleaned and tires dressed", true, true, false],
   ["Engine bay fine detail", true, false, false],
@@ -209,7 +209,7 @@ export default async function ServicesPage() {
           <div className="grid gap-5 md:grid-cols-3">
             {[
               ["/images/services/hand-wash.png", "Brush-free hand wash", "Hand washing keeps automatic brushes away from the finish."],
-              ["/images/services/interior-detail.png", "Interior deep clean", "Focused tools and products reach seats, carpets, trim and tight cabin areas."],
+              ["/images/services/interior-detail.png", "Interior detail", "Focused tools and products reach seats, carpets, trim and tight cabin areas."],
               ["/images/services/ceramic-coating.png", "Ceramic application", "Prepared paint receives a precise, panel-by-panel protective application."],
             ].map(([src, title, body]) => (
               <figure key={title} className="overflow-hidden rounded-[1.25rem] border border-[#DED8CE] bg-[#FFFEFB]">

@@ -11,10 +11,12 @@ loadEnv();
 /**
  * Idempotent seed: safe to re-run; skips anything that already exists.
  *
- * Detailing-package prices come from the owner's current printed flyer
- * (pictures/WhatsApp Image 2026-07-13 at 21.13.19.jpeg). Flyer prices are
- * ranges by vehicle class (Sedan vs SUV/Truck/Van); per the owner's direction,
- * we seed the upper bound for each vehicle class. Durations are the
+ * Detailing-package prices started from the owner's printed flyer
+ * (pictures/WhatsApp Image 2026-07-13 at 21.13.19.jpeg), which quotes ranges by
+ * vehicle class (Sedan vs SUV/Truck/Van) and from which we seed the upper bound
+ * for each class. The three detailing packages have since moved below the flyer
+ * (drizzle/0025): seat shampoo was taken out of them and sold as an add-on, so
+ * each package price dropped by what the shampoo costs. Durations are the
  * owner-confirmed booking times. Ceramic protection and the three ceramic
  * coating packages carry owner-confirmed prices too; the remaining non-flyer
  * work (paint correction, PPF, tint, styling) stays quote-only because its
@@ -47,11 +49,11 @@ const CATALOG: { category: string; slug: string; description: string; services: 
       "Our signature detailing packages — from a basic hand wash to a complete inside-and-out detail with engine bay.",
     services: [
       // Flyer "Car Detailing Package #1"
-      { name: "Complete Detail + Engine", slug: "complete-detail-engine", short: "Engine fine detail, rim clean and tire shine, deep-cleaned seats and carpet, full interior clean and buff, hand wash and dry.", priceCents: 20000, durationMin: 150, mode: "bookable", featured: true, largeVehicleDeltaCents: 5000 },
+      { name: "Complete Detail + Engine", slug: "complete-detail-engine", short: "Engine fine detail, rim clean and tire shine, detailed clean of seats, carpets and mats, full interior clean, buff and polish, hand wash and dry.", priceCents: 16000, durationMin: 150, mode: "bookable", featured: true, largeVehicleDeltaCents: 4000 },
       // Flyer "Car Detailing Package #2 — The Works Package"
-      { name: "The Works Package", slug: "the-works", short: "Rim clean and tire shine, deep-cleaned seats, carpet and mats, full interior clean and buff, hand wash and dry.", priceCents: 17500, durationMin: 120, mode: "bookable", featured: true, largeVehicleDeltaCents: 5000 },
+      { name: "The Works Package", slug: "the-works", short: "Rim clean and tire shine, detailed clean of seats, carpets and mats, full interior clean, buff and polish, hand wash and dry.", priceCents: 13500, durationMin: 120, mode: "bookable", featured: true, largeVehicleDeltaCents: 4000 },
       // Flyer "Car Detailing Package #3 — Interior Detail"
-      { name: "Interior Detail", slug: "interior-detail", short: "Vacuum carpets and seats, clean mats and interior windows, deep-clean seats and carpets, clean and buff all interior surfaces.", priceCents: 15000, durationMin: 90, mode: "bookable", largeVehicleDeltaCents: 2500 },
+      { name: "Interior Detail", slug: "interior-detail", short: "Detailed clean of seats, carpets and mats, interior surfaces cleaned, buffed and polished, interior glass cleaned, air vents disinfected, trunk vacuumed.", priceCents: 9900, durationMin: 90, mode: "bookable", largeVehicleDeltaCents: 2600 },
       // Flyer "Car Detailing Package #6 — Basic Car Wash + Basic Interior Clean"
       { name: "Wash & Interior Refresh", slug: "wash-interior-refresh", short: "Exterior hand wash and dry plus a basic interior clean — our maintenance combo.", priceCents: 7000, durationMin: 90, mode: "bookable", largeVehicleDeltaCents: 2000 },
       // Flyer "Car Detailing Package #5 — Basic Interior Clean"
@@ -143,7 +145,15 @@ const INTERIOR_PACKAGE_SLUGS = [
   "basic-interior-clean",
 ];
 
-/** Packages with exterior paint work where wax/buff can be performed. */
+/**
+ * The three detailing packages the public menu leads with. Seat shampoo was
+ * taken out of these three and sold back as an add-on, so it is offered on
+ * exactly these and nowhere else — on the two basic packages a $39.99 shampoo
+ * would cost more than half of what it sits under.
+ */
+const DETAIL_PACKAGE_SLUGS = ["complete-detail-engine", "the-works", "interior-detail"];
+
+/** Packages with exterior paint work, where wax and headlight work can be done. */
 const EXTERIOR_PACKAGE_SLUGS = [
   "complete-detail-engine",
   "the-works",
@@ -174,8 +184,16 @@ const ADDONS: {
   largeVehicleDeltaMin?: number;
 }[] = [
   { name: "Dog Hair Clean", description: "Removal of embedded pet hair (for interior clean-up packages).", priceCents: 5000, durationMin: 30, serviceSlugs: INTERIOR_PACKAGE_SLUGS },
-  { name: "Wax / Buff", description: "Machine wax and buff for added gloss and protection.", priceCents: 12000, durationMin: 120, serviceSlugs: EXTERIOR_PACKAGE_SLUGS },
-  { name: "Salt Stain Removal", description: "Winter salt stain extraction from carpets and mats.", priceCents: 5000, durationMin: 30, serviceSlugs: INTERIOR_PACKAGE_SLUGS },
+  // "Wax / Buff" until 2026-09-16. The buff was never performed — the name
+  // described work the shop does not sell — so it is just a wax, at $69.
+  { name: "Wax", description: "Machine wax for added gloss and protection.", priceCents: 6900, durationMin: 120, serviceSlugs: EXTERIOR_PACKAGE_SLUGS },
+  { name: "Salt Stain Removal", description: "Winter salt stain extraction from carpets and mats.", priceCents: 3999, durationMin: 30, serviceSlugs: INTERIOR_PACKAGE_SLUGS },
+  // The work that came out of the three detailing packages, sold back at the
+  // price that was deducted from them: $39.99 sedan, $49.99 SUV/truck/van.
+  { name: "Seat Shampoo", slug: "seat-shampoo", description: "Shampoo extraction of the seats, lifting staining that a detailed clean leaves behind.", priceCents: 3999, durationMin: 45, serviceSlugs: DETAIL_PACKAGE_SLUGS, largeVehicleDeltaCents: 1000, largeVehicleDeltaMin: 15 },
+  // One flat price for every vehicle: the lenses are the same job on a sedan
+  // and on a pickup, so this carries no vehicle adjustment.
+  { name: "Headlight Restoration", slug: "headlight-restoration", description: "Sanding, polishing and sealing of clouded or yellowed headlight lenses.", priceCents: 9900, durationMin: 60, serviceSlugs: EXTERIOR_PACKAGE_SLUGS },
   {
     name: "Ceramic Protection - Ultimate Detail Add-On",
     slug: "ceramic-protection-ultimate",

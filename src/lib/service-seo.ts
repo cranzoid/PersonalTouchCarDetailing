@@ -22,7 +22,7 @@ export const SERVICE_SEO: Record<string, ServiceSeoContent> = {
     introduction:
       "Hamilton commutes, winter salt, family use and everyday spills can leave more behind than a quick vacuum can remove. Our interior detail is a methodical reset for the cabin, with the scope and price explained before work begins.",
     benefits: [
-      { title: "A deeper cabin clean", body: "Carpets, seats, mats, glass and frequently touched surfaces are worked through in a deliberate sequence." },
+      { title: "A deeper cabin clean", body: "Carpets, seats, mats, glass, air vents and frequently touched surfaces are worked through in a deliberate sequence." },
       { title: "Condition-aware service", body: "Pet hair, heavy staining and unusual odours are assessed rather than hidden inside a one-size-fits-all promise." },
       { title: "Clear vehicle-size pricing", body: "The booking flow shows the applicable adjustment for SUVs, trucks and vans before you confirm." },
     ],
@@ -35,6 +35,7 @@ export const SERVICE_SEO: Record<string, ServiceSeoContent> = {
     aftercare:
       "Allow freshly cleaned fabric to dry fully, keep absorbent mats out until dry, and address new spills promptly rather than letting them set.",
     faqs: [
+      { question: "Is seat shampoo included?", answer: "No. The interior detail covers a detailed clean of the seats, carpets and mats. Shampoo extraction, which lifts staining that a detailed clean leaves behind, is a separate add-on you can select during booking, with its price for your vehicle size shown before you confirm." },
       { question: "Can every stain be removed?", answer: "No responsible detailer can guarantee that. Results depend on the material, age of the stain and products previously used, so we explain realistic expectations after inspection." },
       { question: "Does the price change for SUVs or trucks?", answer: "Yes. Larger cabins require more time and material, and the applicable size adjustment is shown in the booking flow before confirmation." },
       { question: "Should I remove child seats and belongings?", answer: "Yes. Please remove valuables and personal belongings. Child seats should be removed before arrival because we cannot reinstall them for liability reasons." },

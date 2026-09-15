@@ -176,6 +176,13 @@
       "when": 1789195204325,
       "tag": "0024_flat_first_wash_price",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1789198804325,
+      "tag": "0025_interior_detail_unbundled",
+      "breakpoints": true
     }
   ]
 }

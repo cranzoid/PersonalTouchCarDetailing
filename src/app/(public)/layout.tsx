@@ -51,8 +51,8 @@ const SERVICE_NAV_GROUPS = [
     label: "Detailing",
     items: [
       { href: "/services/complete-detail-engine", label: "Ultimate Detail", detail: "Inside, out and engine bay" },
-      { href: "/services/the-works", label: "Signature Detail", detail: "Interior and exterior deep clean" },
-      { href: "/services/interior-detail", label: "Interior Detail", detail: "Deep cabin cleaning" },
+      { href: "/services/the-works", label: "Signature Detail", detail: "Full interior and exterior detail" },
+      { href: "/services/interior-detail", label: "Interior Detail", detail: "Complete cabin detail" },
       { href: "/services/wash-interior-refresh", label: "Wash & Interior Refresh", detail: "Our maintenance combo" },
       { href: "/services/basic-car-wash", label: "Basic Car Wash", detail: "Hand wash, dry and mats" },
     ],

@@ -705,7 +705,7 @@ allowed to read as the price of a coating.
   goes through the existing additional-work approval flow. The disclaimer sits
   next to the estimate in the booking summary, not buried in an FAQ.
 - **Only ceramic-relevant extras.** The interior extras (pet hair, salt stains)
-  and Wax / Buff are linked to the detailing packages only. The seed used to
+  and the wax are linked to the detailing packages only. The seed used to
   link every add-on to every bookable service, which would have offered pet-hair
   removal on a $1,399 coating.
 - **The old `ceramic-coating` service row is deactivated, not deleted** — past
@@ -1058,3 +1058,61 @@ Consequential choices:
 **Revisit when:** a second simultaneous fixed-price offer is wanted → the
 settings blob becomes a row in a `campaigns` table and `offer_claims.offer_code`
 is already the foreign key it would need.
+
+## 34. Unbundling the detail: seat shampoo becomes the extra, and the packages come down
+On 2026-09-16 the owners took seat shampoo out of all three detailing packages
+and sold it back as an add-on. Every package price fell by what the shampoo now
+costs — $40 off a sedan, $50 off an SUV, truck or van — and Interior Detail was
+cut past that to a flat $99 headline.
+
+| slug | sedan | large | was |
+| --- | --- | --- | --- |
+| `complete-detail-engine` | $160 | $200 | $200 / $250 |
+| `the-works` | $135 | $175 | $175 / $225 |
+| `interior-detail` | $99 | $125 | $150 / $175 |
+
+Consequential choices:
+
+- **The checklist came out of the packages too, not just the price.** All three
+  packages now render one shared `INTERIOR_CHECKLIST`, and the word every list
+  lost is "deep-clean". Dropping $40 while still promising a deep clean of the
+  seats would have sold the shampoo twice — once inside the package and once as
+  the extra — so the copy, the seeded `short_description`s and the nav subtitles
+  all now say "detailed clean", and `/services/interior-detail` answers "is seat
+  shampoo included?" in as many words. The three lists are one constant because
+  they are one promise: Ultimate and Signature add exterior work on top of an
+  Interior Detail, they do not do different interior work.
+- **The large-vehicle uplift moved, in both directions.** A $49.99 shampoo came
+  off a price that was only $39.99 lower for a sedan, so Ultimate's and
+  Signature's uplift narrows from $50 to $40. Interior Detail's WIDENS, $25 to
+  $26, purely because its sedan price was cut to a round $99 rather than to the
+  $110 the rule gives. Both are the ordinary `service_vehicle_adjustments`
+  delta; neither is a second pricing rule.
+- **Seat shampoo is linked to exactly the three packages it left.** Not to Wash
+  & Interior Refresh ($70) or Basic Interior Clean ($50), where a $39.99 extra
+  would cost more than half of what it sits under. `priceBooking` refuses an
+  add-on that is not linked to a selected service, so this is a server rule, not
+  a hidden option. Headlight restoration ($99, no size adjustment — the lenses
+  are the same job on any vehicle) is linked to the four packages with exterior
+  work, the same set the wax is on.
+- **"Wax / Buff" was a name for work the shop does not do.** The buff was never
+  performed; only the wax was. The add-on is now "Wax" at $69, down from $120.
+  Renaming a row the owners can edit in Admin is normally forbidden (decision
+  25's rule that migrations address rows by slug and never write `name`) — the
+  exception is that removing "Buff" *is* the correction, and the migration is
+  guarded to fire only while the name is still the seeded one.
+- **Durations were deliberately left alone.** Interior Detail still holds 90
+  minutes of bay time at $99, and the wax still holds two hours at $69. How much
+  shop capacity a cheaper package should occupy is a scheduling decision the
+  owners make against real jobs, and guessing it here would quietly change what
+  the slot engine can offer. The seat shampoo add-on's own 45 minutes (+15 for a
+  large vehicle) is a new row and had to be given some value.
+- **A migration, not a seed change.** `runSeed` writes the catalogue only when
+  `service_categories` is empty, so on an installation that already has one the
+  seed is a no-op forever and a deploy alone would have left production on the
+  old prices. `drizzle/0025` carries the change; the seed is updated in the same
+  commit so a fresh database starts in the same place.
+
+**Revisit when:** a second package gets unbundled the same way → the shared
+`INTERIOR_CHECKLIST` needs to become per-package data again, most naturally the
+`long_description` column that already exists and is owner-editable.
