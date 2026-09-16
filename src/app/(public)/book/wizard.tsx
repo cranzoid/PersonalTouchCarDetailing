@@ -451,6 +451,9 @@ export function BookingWizard({
   }
 
   if (result?.ok) {
+    const deliveryLabel = result.confirmationDelivery.length
+      ? result.confirmationDelivery.map((channel) => (channel === "sms" ? "text message" : "email")).join(" and ")
+      : null;
     return (
       <div role="status" aria-live="polite" className="mx-auto max-w-xl rounded-[2rem] border border-accent-500/40 bg-gradient-to-br from-ink-900 to-ink-950 p-8 text-center shadow-2xl shadow-black/20 sm:p-10">
         <div aria-hidden="true" className="mx-auto grid size-14 place-items-center rounded-full bg-accent-400 text-2xl font-bold text-ink-950">✓</div>
@@ -479,10 +482,10 @@ export function BookingWizard({
           </div>
         )}
         <p className="mt-4 text-sm text-ink-400">
-          {result.confirmationDelivery
+          {deliveryLabel
             ? result.depositUrl
-              ? `The secure payment link was also sent by ${result.confirmationDelivery}. `
-              : `A confirmation was sent by ${result.confirmationDelivery}. `
+              ? `The secure payment link was also sent by ${deliveryLabel}. `
+              : `A confirmation was sent by ${deliveryLabel}. `
             : result.depositUrl
               ? "Please use the secure payment button above and save this reference. "
               : "We could not send a confirmation, so please save this reference. "}

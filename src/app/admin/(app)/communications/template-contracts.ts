@@ -7,17 +7,8 @@ import { z } from "zod";
  */
 export const TEMPLATE_VARIABLES: Readonly<Record<string, readonly string[]>> = {
   lead_ack: ["businessName", "firstName"],
-  booking_confirmation: [
-    "businessName",
-    "firstName",
-    "date",
-    "time",
-    "services",
-    "vehicle",
-    // Renders the promotional discount line, or nothing when none applied.
-    "discountLine",
-    "total",
-  ],
+  booking_confirmation: ["businessName", "firstName", "date", "time", "services", "vehicle"],
+  booking_confirmation_sms: ["businessName", "date", "time", "services", "vehicle"],
   appointment_reminder: ["businessName", "date", "time"],
   estimate_sent: ["businessName", "firstName", "estimateNumber", "link", "expiry"],
   additional_work_request: ["businessName", "firstName", "description", "price", "link"],

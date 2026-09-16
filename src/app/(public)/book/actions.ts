@@ -153,7 +153,7 @@ export type BookingResult =
       totalLabel: string;
       depositLabel: string | null;
       depositUrl: string | null;
-      confirmationDelivery: "email" | "sms" | null;
+      confirmationDelivery: Array<"email" | "sms">;
     }
   | {
       /**
@@ -272,7 +272,7 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
     const dateLabel = formatInZone(result.startsAt, settings.timezone, dateLabelOptions);
 
     let depositUrl: string | null = null;
-    let delivery: "email" | "sms" | null = null;
+    const delivery: Array<"email" | "sms"> = [];
     try {
       if (pricing.depositRequiredCents > 0) {
         if (!result.depositAccessToken || !baseUrl) {
@@ -280,37 +280,43 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
         }
         depositUrl = `${baseUrl}/portal/deposits/${result.depositAccessToken}`;
         const request = await sendAppointmentDepositRequest(result.appointmentId, depositUrl);
-        delivery = request.sent ? (request.channel ?? null) : null;
+        if (request.sent && request.channel) delivery.push(request.channel);
       } else {
         // Only deposit-free bookings are confirmed immediately. Deposit-backed
-        // bookings receive their confirmation after payment succeeds.
-        const confirmation = await sendMessageTemplate({
+        // bookings receive their confirmation after payment succeeds. The
+        // confirmation intentionally does not quote a price — it tells the
+        // customer what they booked, not what it costs.
+        const confirmationVariables = {
+          businessName: settings.businessName,
+          firstName: input.customer.firstName,
+          // The template reads "on {{date}} at {{time}}". A timed booking has
+          // always carried the whole thing in {{date}}; a date-only one puts
+          // the promise to call where the time would have been.
+          date: result.timeToBeConfirmed ? dateLabel : whenLabel,
+          time: result.timeToBeConfirmed ? "a time we will confirm with you" : "",
+          services: pricing.lines.map((l) => l.description).join(", "),
+          vehicle: `${input.vehicle.make} ${input.vehicle.model}`,
+        };
+        const email = await sendMessageTemplate({
           templateKey: "booking_confirmation",
           recipient: input.customer,
           customerId: result.customerId,
           kind: "confirmation",
-          variables: {
-            businessName: settings.businessName,
-            firstName: input.customer.firstName,
-            // The template reads "on {{date}} at {{time}}". A timed booking has
-            // always carried the whole thing in {{date}}; a date-only one puts
-            // the promise to call where the time would have been.
-            date: result.timeToBeConfirmed ? dateLabel : whenLabel,
-            time: result.timeToBeConfirmed ? "a time we will confirm with you" : "",
-            services: pricing.lines.map((l) => l.description).join(", "),
-            vehicle: `${input.vehicle.make} ${input.vehicle.model}`,
-            // Empty when no offer applied, so the template renders cleanly
-            // either way — same idiom as {{balanceLine}} on receipts.
-            discountLine:
-              pricing.discountCents > 0
-                ? `${pricing.promoLabel}: -${formatCents(pricing.discountCents)}\n`
-                : "",
-            total: formatCents(pricing.totalCents),
-          },
+          variables: confirmationVariables,
           relatedEntityType: "appointment",
           relatedEntityId: result.appointmentId,
         });
-        delivery = confirmation.sent ? (confirmation.channel ?? null) : null;
+        if (email.sent && email.channel) delivery.push(email.channel);
+        const sms = await sendMessageTemplate({
+          templateKey: "booking_confirmation_sms",
+          recipient: input.customer,
+          customerId: result.customerId,
+          kind: "confirmation",
+          variables: confirmationVariables,
+          relatedEntityType: "appointment",
+          relatedEntityId: result.appointmentId,
+        });
+        if (sms.sent && sms.channel) delivery.push(sms.channel);
       }
     } catch {
       // The secure link remains visible in the success UI even when message
