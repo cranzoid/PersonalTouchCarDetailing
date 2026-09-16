@@ -1,4 +1,7 @@
 import { z } from "zod";
+import { NUDGE_PLACEHOLDERS, NUDGE_TEMPLATE_KEYS } from "@/lib/wash-offer-nudge-message";
+
+const NUDGE_VARIABLES = NUDGE_PLACEHOLDERS.map((p) => p.key);
 
 /**
  * Variables actually supplied by the existing call site for each seeded
@@ -18,6 +21,8 @@ export const TEMPLATE_VARIABLES: Readonly<Record<string, readonly string[]>> = {
   receipt: ["businessName", "firstName", "amount", "invoiceNumber", "balanceLine"],
   review_request: ["businessName", "firstName", "reviewUrl"],
   maintenance: ["businessName", "firstName", "vehicle", "bookingUrl"],
+  [NUDGE_TEMPLATE_KEYS.sms]: NUDGE_VARIABLES,
+  [NUDGE_TEMPLATE_KEYS.email]: NUDGE_VARIABLES,
 };
 
 export const messageTemplateUpdateSchema = z.object({

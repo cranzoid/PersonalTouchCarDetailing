@@ -216,7 +216,7 @@ export const leads = pgTable(
     phone: text("phone"),
     message: text("message"),
     kind: text("kind").notNull().default("general"), // general | quote | booking | fleet | contact
-    status: text("status").notNull().default("new"), // new | contacted | qualified | converted | lost
+    status: text("status").notNull().default("new"), // new | contacted | qualified | converted | completed | lost
     /**
      * The business a fleet contact represents. Only ever set for leads we
      * entered ourselves (a card collected at a shop or depot); public forms ask
@@ -1494,6 +1494,19 @@ export const offerClaims = pgTable(
     /** How many nudges have gone out, so the cron never repeats one. */
     remindersSent: integer("reminders_sent").notNull().default(0),
     lastReminderAt: timestamp("last_reminder_at", { withTimezone: true }),
+    /**
+     * Nudges staff sent by hand from Outreach → First-wash nudges, counted
+     * apart from `remindersSent` so a manual text never moves the automatic
+     * schedule along. Counted only once the provider accepted the message.
+     *
+     * The `last_*` stamps are also the one-a-day guard: they are set by a
+     * conditional UPDATE before anything is sent, so two staff pressing send
+     * on the same person at the same moment text them once.
+     */
+    smsNudgesSent: integer("sms_nudges_sent").notNull().default(0),
+    emailNudgesSent: integer("email_nudges_sent").notNull().default(0),
+    lastSmsNudgeAt: timestamp("last_sms_nudge_at", { withTimezone: true }),
+    lastEmailNudgeAt: timestamp("last_email_nudge_at", { withTimezone: true }),
     voidReason: text("void_reason"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),

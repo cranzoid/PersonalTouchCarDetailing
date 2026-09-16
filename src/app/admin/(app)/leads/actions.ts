@@ -11,7 +11,7 @@ import { normalizePhone } from "@/lib/phone";
 
 const leadStatusInput = z.object({
   leadId: z.string().min(1),
-  status: z.enum(["new", "contacted", "qualified", "converted", "lost"]),
+  status: z.enum(["new", "contacted", "qualified", "converted", "completed", "lost"]),
 });
 
 export type ActionResult<T extends object = Record<never, never>> =
@@ -248,7 +248,10 @@ export async function setLeadStatusAction(raw: unknown): Promise<ActionResult> {
       if (status === "converted" && !lead.convertedCustomerId) {
         return { ok: false, error: "Use the conversion workflow to create the linked customer" };
       }
-      if (lead.convertedCustomerId && status !== "converted") {
+      // Completed is the step after converted — the work has been done — so a
+      // lead linked to a customer may move between the two, but not back to
+      // an earlier stage that would read as "never became a customer".
+      if (lead.convertedCustomerId && status !== "converted" && status !== "completed") {
         return { ok: false, error: "Converted leads must remain linked to their customer" };
       }
       if (lead.status === status) return { ok: true };

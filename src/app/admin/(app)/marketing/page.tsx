@@ -68,6 +68,13 @@ export default async function MarketingPage() {
             can check as you go.
           </p>
         </div>
+        <div className="flex flex-wrap gap-2">
+        <Link
+          href="/admin/marketing/wash-nudges"
+          className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[#D9E1EA] bg-white px-3.5 text-xs font-semibold text-[#42536A] shadow-sm transition hover:border-[#0B2A4A]/30 hover:text-[#0B2A4A]"
+        >
+          First-wash nudges
+        </Link>
         <Link
           href="/admin/marketing/do-not-contact"
           className="inline-flex min-h-10 items-center gap-2 rounded-xl border border-[#D9E1EA] bg-white px-3.5 text-xs font-semibold text-[#42536A] shadow-sm transition hover:border-[#0B2A4A]/30 hover:text-[#0B2A4A]"
@@ -75,6 +82,7 @@ export default async function MarketingPage() {
           Do-not-contact list
           <span className="rounded-full bg-[#EEF2F6] px-2 py-0.5 text-[10px] font-bold text-[#4C5F73]">{suppressed}</span>
         </Link>
+        </div>
       </header>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">

@@ -5,6 +5,12 @@ import * as schema from "./schema";
 import { newId } from "../lib/id";
 import { loadEnv } from "../lib/load-env";
 import { DEFAULT_EXPENSE_CATEGORIES } from "../lib/types";
+import {
+  DEFAULT_NUDGE_EMAIL_BODY,
+  DEFAULT_NUDGE_EMAIL_SUBJECT,
+  DEFAULT_NUDGE_SMS,
+  NUDGE_TEMPLATE_KEYS,
+} from "../lib/wash-offer-nudge-message";
 
 loadEnv();
 
@@ -246,6 +252,13 @@ const MESSAGE_TEMPLATES = [
   { key: "offer_claim_code_email", channel: "email", subject: "Your {{price}} first wash code: {{code}}", body: "Hi {{firstName}},\n\nHere is your {{offerLabel}} code.\n\n  {{code}}\n\nIt is worth a {{price}} hand wash on your first visit, and it is valid until {{expires}}.\n\nBook your time here:\n{{link}}\n\nOr call us on {{phone}} and we will book it for you.\n\nOne promotional wash per customer and per vehicle. Full terms are on the offer page.\n\n— {{businessName}}\n{{address}}\n{{phone}} · {{email}}\n\nDon't want emails from us? Unsubscribe here: {{unsubscribe}}" },
   { key: "offer_claim_reminder_sms", channel: "sms", subject: null, body: "{{businessName}}: your {{price}} first wash code {{code}} expires {{expires}}. Grab a time: {{link}}\nCall {{phone}}. Reply STOP to opt out." },
   { key: "offer_claim_reminder_email", channel: "email", subject: "Your {{price}} wash code expires {{expires}}", body: "Hi {{firstName}},\n\nYour {{offerLabel}} code {{code}} is still unused. It is worth a {{price}} hand wash and it expires on {{expires}}.\n\nBook a time here:\n{{link}}\n\nOr call us on {{phone}}.\n\n— {{businessName}}\n{{address}}\n{{phone}} · {{email}}\n\nDon't want emails from us? Unsubscribe here: {{unsubscribe}}" },
+  /*
+   * Hand-sent nudges (Outreach → First-wash nudges). Staff edit these on that
+   * screen before each send; the email's address and unsubscribe footer is
+   * appended by the sender, so it is not in the body to be edited away.
+   */
+  { key: NUDGE_TEMPLATE_KEYS.sms, channel: "sms", subject: null, body: DEFAULT_NUDGE_SMS },
+  { key: NUDGE_TEMPLATE_KEYS.email, channel: "email", subject: DEFAULT_NUDGE_EMAIL_SUBJECT, body: DEFAULT_NUDGE_EMAIL_BODY },
 ];
 
 export async function runSeed() {

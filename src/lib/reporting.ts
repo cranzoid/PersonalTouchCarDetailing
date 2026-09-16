@@ -387,12 +387,20 @@ export function computeLeadFunnel(input: FunnelInput): LeadFunnel {
 
   const leadByCustomerId = new Map<string, string>();
   const convertedLeadIds = new Set<string>();
+  const completedStatusLeadIds = new Set<string>();
   for (const lead of input.leads) {
     if (lead.convertedCustomerId) {
       leadByCustomerId.set(lead.convertedCustomerId, lead.id);
       convertedLeadIds.add(lead.id);
     }
     if (lead.status === "converted") convertedLeadIds.add(lead.id);
+    // Completed is set when the work is done without passing through the
+    // booking book — a first-wash code redeemed at the counter. It counts at
+    // every stage so the funnel never shows more completions than bookings.
+    if (lead.status === "completed") {
+      convertedLeadIds.add(lead.id);
+      completedStatusLeadIds.add(lead.id);
+    }
   }
   for (const customer of input.customers) {
     if (customer.sourceLeadId && leadIds.has(customer.sourceLeadId)) {
@@ -418,6 +426,10 @@ export function computeLeadFunnel(input: FunnelInput): LeadFunnel {
     if (job.status !== "completed" || !job.appointmentId) continue;
     const leadId = leadByAppointmentId.get(job.appointmentId);
     if (leadId) completedLeadIds.add(leadId);
+  }
+  for (const leadId of completedStatusLeadIds) {
+    bookedLeadIds.add(leadId);
+    completedLeadIds.add(leadId);
   }
 
   const counts = [

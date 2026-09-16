@@ -41,17 +41,33 @@ export default async function OfferClaimsPage() {
 
   return (
     <div className="max-w-[78rem]">
-      <header>
-        <Link href="/admin/marketing" className="text-xs font-semibold text-[#8A681F] hover:underline">
-          ← All campaigns
-        </Link>
-        <h1 className="mt-1 text-2xl font-bold text-[#0B2A4A]">Offer claims</h1>
-        <p className={`mt-1 max-w-3xl ${subtle}`}>
-          Everyone who has claimed the new-customer wash. A code becomes <strong>Booked</strong> when
-          it is spent on an appointment, and <strong>Washed</strong> once the licence plate is
-          recorded at the counter — which is what stops the same vehicle coming back for a second
-          promotional wash.
-        </p>
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <Link href="/admin/marketing" className="text-xs font-semibold text-[#8A681F] hover:underline">
+            ← All campaigns
+          </Link>
+          <h1 className="mt-1 text-2xl font-bold text-[#0B2A4A]">Offer claims</h1>
+          <p className={`mt-1 max-w-3xl ${subtle}`}>
+            Everyone who has claimed the new-customer wash. A code becomes <strong>Booked</strong> when
+            it is spent on an appointment, and <strong>Washed</strong> once the licence plate is
+            recorded — on the appointment, or on the redeem screen for someone who walks in with a
+            code. That is what stops the same vehicle coming back for a second promotional wash.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Link
+            href="/admin/marketing/offer-claims/redeem"
+            className="inline-flex min-h-10 items-center rounded-xl bg-[#0B2A4A] px-3.5 text-xs font-semibold text-white shadow-sm admin-on-dark transition hover:bg-[#123B63]"
+          >
+            Redeem a code
+          </Link>
+          <Link
+            href="/admin/marketing/wash-nudges"
+            className="inline-flex min-h-10 items-center rounded-xl border border-[#D9E1EA] bg-white px-3.5 text-xs font-semibold text-[#42536A] shadow-sm transition hover:border-[#0B2A4A]/30 hover:text-[#0B2A4A]"
+          >
+            Send nudges
+          </Link>
+        </div>
       </header>
 
       {!offer && (
@@ -139,6 +155,15 @@ export default async function OfferClaimsPage() {
                       )}
                       {claim.voidReason && (
                         <span className="mt-1 block text-xs text-[#8592A0]">{claim.voidReason}</span>
+                      )}
+                      {claim.smsNudgesSent + claim.emailNudgesSent > 0 && (
+                        <span className="mt-1 block text-xs text-[#8592A0]">
+                          Nudged: {claim.smsNudgesSent} text{claim.smsNudgesSent === 1 ? "" : "s"},{" "}
+                          {claim.emailNudgesSent} email{claim.emailNudgesSent === 1 ? "" : "s"}
+                        </span>
+                      )}
+                      {claim.redeemedPlateNormalized && !claim.appointmentId && (
+                        <span className="mt-1 block text-xs text-[#8592A0]">Walk-in</span>
                       )}
                     </td>
                     <td className="py-3 pr-4 text-xs text-[#5A6B7D]">{date(claim.createdAt)}</td>

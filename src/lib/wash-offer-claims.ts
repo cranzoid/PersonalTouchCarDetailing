@@ -3,6 +3,7 @@ import "server-only";
 import { randomBytes } from "crypto";
 import { and, asc, eq, isNull, lte, ne, or, sql } from "drizzle-orm";
 import { db, schema, type Db } from "@/db";
+import { audit } from "@/lib/audit";
 import { newId } from "@/lib/id";
 import { normalizePhone } from "@/lib/phone";
 import { formatCents } from "@/lib/money";
@@ -329,6 +330,12 @@ export async function redeemClaimAgainstPlate(input: {
   claimId: string;
   rawPlate: string;
   staffId: string;
+  /**
+   * The customer this wash was for, when staff linked one at the counter. Only
+   * fills a gap: a claim spent on a booking already names its customer, and
+   * that link is never overwritten.
+   */
+  customerId?: string;
   nowMs?: number;
 }): Promise<PlateRedemptionResult> {
   const plate = normalizePlate(input.rawPlate);
@@ -352,6 +359,7 @@ export async function redeemClaimAgainstPlate(input: {
         redeemedPlateNormalized: plate,
         redeemedAt: now,
         redeemedByStaffId: input.staffId,
+        customerId: claim.customerId ?? input.customerId ?? null,
         updatedAt: now,
       })
       .where(and(eq(schema.offerClaims.id, input.claimId), isNull(schema.offerClaims.redeemedPlateNormalized)))
@@ -381,6 +389,57 @@ export async function redeemClaimAgainstPlate(input: {
       },
     };
   }
+}
+
+/**
+ * Marks the claimant's lead Completed once the wash has actually happened.
+ *
+ * The claim form puts everyone into Leads as "new", and until now nothing
+ * moved them on — so a lead list full of people who had already been washed
+ * read exactly like one full of people nobody had called. Called after a
+ * successful plate redemption, by the booking path and the walk-in path alike.
+ *
+ * Links the customer too when the lead has none yet, which is what lets the
+ * lead funnel in Reports follow the lead to its invoice. An existing link is
+ * left alone: it was made on purpose, by a conversion or a booking.
+ */
+export async function markClaimLeadCompleted(
+  runner: Pick<Db, "select" | "update" | "insert">,
+  input: { claim: OfferClaim; customerId?: string | null; staffId: string; nowMs?: number },
+): Promise<boolean> {
+  const leadId = input.claim.leadId;
+  if (!leadId) return false;
+  const [lead] = await runner
+    .select({
+      id: schema.leads.id,
+      status: schema.leads.status,
+      convertedCustomerId: schema.leads.convertedCustomerId,
+      anonymizedAt: schema.leads.anonymizedAt,
+    })
+    .from(schema.leads)
+    .where(eq(schema.leads.id, leadId))
+    .limit(1);
+  if (!lead || lead.anonymizedAt) return false;
+
+  const customerId = lead.convertedCustomerId ?? input.customerId ?? input.claim.customerId ?? null;
+  if (lead.status === "completed" && lead.convertedCustomerId === customerId) return false;
+
+  const now = new Date(input.nowMs ?? Date.now());
+  await runner
+    .update(schema.leads)
+    .set({ status: "completed", convertedCustomerId: customerId, updatedAt: now })
+    .where(eq(schema.leads.id, lead.id));
+  await audit(runner, {
+    actorType: "staff",
+    actorId: input.staffId,
+    action: "lead.status_changed",
+    entityType: "lead",
+    entityId: lead.id,
+    before: { status: lead.status, convertedCustomerId: lead.convertedCustomerId },
+    after: { status: "completed", convertedCustomerId: customerId },
+    reason: `First-wash code ${formatClaimCode(input.claim.code)} redeemed`,
+  });
+  return true;
 }
 
 /**
@@ -479,8 +538,42 @@ export async function sendClaimMessages(input: {
   baseUrl: string;
 }): Promise<("sms" | "email")[]> {
   const { claim, offer, settings, baseUrl } = input;
+  const variables = claimMessageVariables({ claim, offer, settings, baseUrl });
+
+  const sent: ("sms" | "email")[] = [];
+  for (const channel of ["sms", "email"] as const) {
+    try {
+      const delivery = await sendMessageTemplate({
+        templateKey: `offer_claim_${input.variant === "code" ? "code" : "reminder"}_${channel}`,
+        recipient: { phone: claim.phone, email: claim.email },
+        leadId: claim.leadId ?? undefined,
+        kind: "confirmation",
+        variables,
+        relatedEntityType: "offer_claim",
+        relatedEntityId: claim.id,
+      });
+      if (delivery.sent) sent.push(channel);
+    } catch {
+      console.error(`Offer claim ${input.variant} could not be queued on ${channel}`);
+    }
+  }
+  return sent;
+}
+
+/**
+ * The values every message about a claim is written from — the code texts, the
+ * automatic reminders and the nudges staff send by hand — so all three always
+ * quote the same code, price, expiry and link.
+ */
+export function claimMessageVariables(input: {
+  claim: OfferClaim;
+  offer: ResolvedWashOffer;
+  settings: BusinessSettings;
+  baseUrl: string;
+}): Record<string, string> {
+  const { claim, offer, settings, baseUrl } = input;
   const priceCents = washOfferPriceCents(offer, claim.vehicleSize === "suv" ? "suv_small" : "sedan");
-  const variables = {
+  return {
     businessName: settings.businessName,
     firstName: claim.firstName,
     code: formatClaimCode(claim.code),
@@ -503,23 +596,4 @@ export async function sendClaimMessages(input: {
     // over the lead id rather than a stored row (see marketing/unsubscribe.ts).
     unsubscribe: claim.leadId ? `${baseUrl}/unsubscribe/${unsubscribeToken(claim.leadId)}` : baseUrl,
   };
-
-  const sent: ("sms" | "email")[] = [];
-  for (const channel of ["sms", "email"] as const) {
-    try {
-      const delivery = await sendMessageTemplate({
-        templateKey: `offer_claim_${input.variant === "code" ? "code" : "reminder"}_${channel}`,
-        recipient: { phone: claim.phone, email: claim.email },
-        leadId: claim.leadId ?? undefined,
-        kind: "confirmation",
-        variables,
-        relatedEntityType: "offer_claim",
-        relatedEntityId: claim.id,
-      });
-      if (delivery.sent) sent.push(channel);
-    } catch {
-      console.error(`Offer claim ${input.variant} could not be queued on ${channel}`);
-    }
-  }
-  return sent;
 }

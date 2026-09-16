@@ -87,7 +87,7 @@ export default async function LeadsPage({
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      <LeadStatusSelect leadId={l.id} status={l.status} />
+                      <LeadStatusSelect leadId={l.id} status={l.status} linkedToCustomer={Boolean(l.convertedCustomerId)} />
                     </td>
                   </tr>
                 );

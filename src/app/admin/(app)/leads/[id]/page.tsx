@@ -6,6 +6,7 @@ import { StatusBadge } from "@/components/admin";
 import { requirePageStaff } from "@/lib/auth/page";
 import { isFirstTimeDetailCustomer } from "@/lib/promotions";
 import { getSettings } from "@/lib/settings";
+import { formatClaimCode } from "@/lib/wash-offer";
 import { LeadStatusSelect } from "../status-select";
 import { LeadOperations } from "./lead-operations";
 
@@ -46,6 +47,12 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
     .from(schema.auditLog)
     .where(and(eq(schema.auditLog.entityType, "lead"), eq(schema.auditLog.entityId, lead.id)))
     .orderBy(desc(schema.auditLog.createdAt));
+  const [washClaim] = await db()
+    .select()
+    .from(schema.offerClaims)
+    .where(eq(schema.offerClaims.leadId, lead.id))
+    .orderBy(desc(schema.offerClaims.createdAt))
+    .limit(1);
   const quotes = await db()
     .select({
       id: schema.quoteRequests.id,
@@ -103,7 +110,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         </div>
         <div className="flex items-center gap-3">
           <StatusBadge status={lead.status} />
-          <LeadStatusSelect leadId={lead.id} status={lead.status} />
+          <LeadStatusSelect leadId={lead.id} status={lead.status} linkedToCustomer={Boolean(lead.convertedCustomerId)} />
         </div>
       </div>
 
@@ -165,6 +172,48 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
         }}
       />
 
+      {washClaim && (
+        <section className="mt-8 rounded-xl border border-ink-800 p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-400">First-wash code</h2>
+            <span className="rounded-full border border-slate-200 bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+              {WASH_CLAIM_LABELS[washClaimStatus(washClaim)] ?? washClaimStatus(washClaim)}
+            </span>
+          </div>
+          <p className="mt-2 font-mono text-base font-bold text-white">{formatClaimCode(washClaim.code)}</p>
+          <p className="mt-1 text-sm text-ink-300">
+            {washClaim.redeemedPlateNormalized
+              ? `Washed — plate ${washClaim.redeemedPlateNormalized}.`
+              : washClaim.status === "booked"
+                ? "Booked, not yet washed."
+                : washClaimStatus(washClaim) === "expired"
+                  ? "Expired without being used."
+                  : washClaim.status === "void"
+                    ? "Released."
+                    : `Not booked yet — valid until ${washClaim.expiresAt.toISOString().slice(0, 10)}.`}{" "}
+            Nudges sent: {washClaim.smsNudgesSent} text{washClaim.smsNudgesSent === 1 ? "" : "s"},{" "}
+            {washClaim.emailNudgesSent} email{washClaim.emailNudgesSent === 1 ? "" : "s"}.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-3 text-sm">
+            {washClaim.appointmentId && (
+              <Link href={`/admin/appointments/${washClaim.appointmentId}`} className="text-accent-300 hover:underline">
+                View appointment →
+              </Link>
+            )}
+            {!washClaim.redeemedPlateNormalized && washClaim.status !== "void" && (
+              <Link href="/admin/marketing/offer-claims/redeem" className="text-accent-300 hover:underline">
+                Redeem at the counter →
+              </Link>
+            )}
+            {washClaimStatus(washClaim) === "issued" && (
+              <Link href="/admin/marketing/wash-nudges" className="text-accent-300 hover:underline">
+                Send a nudge →
+              </Link>
+            )}
+          </div>
+        </section>
+      )}
+
       {lead.attribution?.promo && (
         <section
           className={`mt-8 rounded-xl border p-5 ${
@@ -214,4 +263,17 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       </section>
     </div>
   );
+}
+
+const WASH_CLAIM_LABELS: Record<string, string> = {
+  issued: "Code not used",
+  booked: "Booked",
+  redeemed: "Washed",
+  expired: "Expired",
+  void: "Released",
+};
+
+/** The claim's status as staff should read it: an out-of-date code is expired. */
+function washClaimStatus(claim: { status: string; expiresAt: Date }): string {
+  return claim.status === "issued" && claim.expiresAt.getTime() <= Date.now() ? "expired" : claim.status;
 }

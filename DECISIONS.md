@@ -1137,3 +1137,63 @@ Consequential choices:
 **Revisit when:** a second package gets unbundled the same way → the shared
 `INTERIOR_CHECKLIST` needs to become per-package data again, most naturally the
 `long_description` column that already exists and is owner-editable.
+
+## 35. First-wash codes at the counter, "completed" leads, and nudges that are not a campaign
+Two gaps showed up in the first week of the live wash offer (decision 33). A
+customer walked in holding a code they had never booked, so the only place a
+plate could be recorded — the appointment — did not exist; staff washed and
+invoiced the car by hand and the code stayed live. And most claimants take the
+code and do not book, with no tool to follow up with them except a marketing
+campaign built for pasted lists.
+
+Consequential choices:
+
+- **Walk-in redemption records the plate, not the price.** Workflow → Redeem
+  wash code goes through the same `redeemClaimAgainstPlate` and the same
+  partial unique index as the appointment path, so a plate is spent however
+  the car arrived. Money is left to the invoice, exactly as decision 33 left it
+  to "Change packages" on a booking: one audited place moves money, and this is
+  not it. Reception can use the screen (`manage_bookings`); it only records
+  facts about a car in front of them.
+- **It tells staff whether the claimant is already a customer.** The public
+  claim form must never answer that (decision 14); the counter needs it before
+  honouring a new-customer offer, and the answer never leaves the admin. The
+  matches are suggestions with their history, not a refusal — the most common
+  match is the record staff created for this very visit.
+- **The customer is created before the plate is checked.** The car is being
+  washed either way, and the record is needed for the invoice whichever price
+  applies, so a refused plate does not roll it back.
+- **An expired code needs an explicit "honour it anyway".** The terms say it
+  lapsed; the owner may still choose to accept it, and the audit row says so.
+- **Leads gain `completed`**, set automatically when a claim is redeemed on
+  either path and selectable by hand. It is the step after `converted`, so a
+  lead linked to a customer may move between those two but not back to an
+  earlier stage. The reporting funnel counts a completed lead at every stage,
+  because a walk-in reaches "completed" without ever being "booked" and the
+  funnel must not show more completions than bookings.
+- **Nudges are their own screen, not a campaign.** A campaign is a pasted list
+  worked through in batches; this list is "whoever holds an unbooked code" and
+  changes by the hour, so it is a live view over `offer_claims`. What it keeps
+  from campaigns is everything that protects the shop: sent as `marketing`, so
+  the consent gate and the do-not-contact list apply centrally; the email footer
+  is appended by the sender; the STOP line is required; 9am–8pm only.
+- **Only a live, unbooked code can be nudged.** A booked claim already gets the
+  appointment reminder, and the short link only works for a bookable code.
+- **One nudge per person per channel per 20 hours, claimed by a conditional
+  UPDATE** on `last_sms_nudge_at` / `last_email_nudge_at` before the provider
+  is called — the same claim-then-send shape as campaign batches, so two staff
+  pressing send together text somebody once. A send that does not go out gives
+  the stamp back.
+- **Manual nudge counters are separate from `reminders_sent`**, which indexes
+  the automatic day-3/7/12 schedule; a text sent by hand must not move it.
+  Counters increment only on provider acceptance. The per-person history is
+  read from `communications` by lead, so code texts, automatic reminders,
+  nudges and replies appear together.
+- **The wording is two ordinary message templates** (`offer_claim_nudge_sms`,
+  `offer_claim_nudge_email`) inserted by the idempotent seed, with the same
+  camelCase placeholders as the other offer-claim templates. The composer sends
+  what is on screen, so a one-off edit does not change the default.
+
+**Revisit when:** a second fixed-price offer runs → the nudge list should filter
+by `offer_code` rather than assume the one configured offer.
+

@@ -4,13 +4,29 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { setLeadStatusAction, setQuoteRequestStatusAction } from "./actions";
 
-const LEAD_STATUSES = ["new", "contacted", "qualified", "lost"] as const;
+/**
+ * "Completed" means the work the lead asked for has been done — a first wash
+ * redeemed at the counter sets it automatically. "Converted" is only ever set
+ * by the conversion workflow, because it needs a linked customer.
+ */
+const LEAD_STATUSES = ["new", "contacted", "qualified", "completed", "lost"] as const;
+const LINKED_LEAD_STATUSES = ["converted", "completed"] as const;
 const QUOTE_STATUSES = ["new", "reviewing", "estimated", "closed"] as const;
 
-export function LeadStatusSelect({ leadId, status }: { leadId: string; status: string }) {
+export function LeadStatusSelect({
+  leadId,
+  status,
+  linkedToCustomer = false,
+}: {
+  leadId: string;
+  status: string;
+  /** A lead with a customer can only be converted or completed. */
+  linkedToCustomer?: boolean;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const statuses = status === "converted" ? (["converted"] as const) : LEAD_STATUSES;
+  const statuses: readonly string[] =
+    linkedToCustomer || status === "converted" ? LINKED_LEAD_STATUSES : LEAD_STATUSES;
   return (
     <select
       value={status}

@@ -145,6 +145,24 @@ describe("computeLeadFunnel", () => {
     expect(funnel.leadToBookingRate).toBe(0.5);
     expect(funnel.leadToCompletionRate).toBe(0.5);
   });
+
+  it("counts a lead marked completed at every stage, so a walk-in never inverts the funnel", () => {
+    const funnel = computeLeadFunnel({
+      leads: [
+        // A first-wash code redeemed at the counter: no booking behind it.
+        { id: "lead_walk_in", status: "completed", convertedCustomerId: "cus_1" },
+        { id: "lead_new", status: "new", convertedCustomerId: null },
+      ],
+      quotes: [],
+      estimates: [],
+      customers: [],
+      appointments: [],
+      jobs: [],
+    });
+
+    expect(funnel.stages.map((stage) => stage.count)).toEqual([2, 1, 1, 1]);
+    expect(funnel.leadToCompletionRate).toBe(0.5);
+  });
 });
 
 describe("computeResourceUtilization", () => {

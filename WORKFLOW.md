@@ -511,6 +511,26 @@ Shipped 2026-09-12, **switched off**. To launch it:
    registration is finished. The reminders (days 3, 7 and 12) run from the
    existing cron tick and send nothing while the toggle is off.
 
+Day to day (added 2026-09-17):
+
+- **Someone walks in with a code and no booking** — Workflow → Redeem wash code
+  (reception can use it). Enter the code, type the plate, pick the customer:
+  the screen suggests any customer already on file with the claim's phone or
+  email, which is also how you spot a returning customer, or it creates one
+  from the claim. Redeeming spends the plate for good and marks the lead
+  **Completed**. Charge the offer price on the invoice as you would any walk-in;
+  the screen never touches money.
+- **A car you already washed and invoiced by hand** (the 2026-09-16 walk-in):
+  same screen. Enter their code and plate and choose "Someone else already on
+  file" to pick the customer you created — search by name, phone or plate.
+- **Nudging people who claimed but have not booked** — Business → First-wash
+  nudges. Tick people (25 at a time), check or edit the text or email (the
+  `{{placeholders}}` fill in per person), send. Each person can get one text
+  and one email per day, 9am–8pm only; anyone who replied STOP or unsubscribed
+  is skipped. "Save as default wording" keeps an edit for next time; the same
+  two templates also appear in Admin → Messages. Texts are subject to the same
+  10DLC caveat as below — send yourself a test first.
+
 Owner decisions still outstanding:
 
 - **The regular price is $30 for a coupe/sedan and $35 for anything larger**,
