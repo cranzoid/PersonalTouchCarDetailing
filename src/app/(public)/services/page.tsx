@@ -20,10 +20,20 @@ const CATEGORY_GUIDES: Record<string, { href: string; label: string }[]> = {
   "paint-correction": [{ href: "/services/paint-correction", label: "Compare correction levels" }],
 };
 
-const COMPARISON_ROWS = [
+/**
+ * `true` and `false` are included and not included. "addon" is the third state:
+ * work the package does not contain but can be bought beside it. Seat shampoo
+ * is why it exists — it left all three packages on 2026-09-16 (DECISIONS #34),
+ * so a tick would promise what none of them now does, and a dash would hide
+ * that it is available at all.
+ */
+type Inclusion = boolean | "addon";
+
+const COMPARISON_ROWS: readonly (readonly [string, Inclusion, Inclusion, Inclusion])[] = [
   ["Brush-free exterior hand wash", true, true, false],
   ["Full interior detail", true, true, true],
   ["Seats, carpets and mats", true, true, true],
+  ["Seat shampoo", "addon", "addon", "addon"],
   ["Rims cleaned and tires dressed", true, true, false],
   ["Engine bay fine detail", true, false, false],
 ] as const;
@@ -90,15 +100,23 @@ export default async function ServicesPage() {
                 <article key={service.id} className="group overflow-hidden rounded-[1.5rem] border border-[#DED8CE] bg-[#FFFEFB] shadow-[0_18px_50px_rgba(11,42,74,0.085)]">
                   <ServiceImage slug={service.slug} name={presentation.publicName} className="aspect-[16/9]" />
                   <div className="p-6 sm:p-8">
-                    <div className="flex flex-wrap items-start justify-between gap-4">
-                      <div>
-                        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-600">Most requested {String(index + 1).padStart(2, "0")}</p>
-                        <h2 className="mt-3 font-display text-[2rem] leading-tight text-ink-900">{presentation.publicName}</h2>
-                      </div>
-                      <span className="rounded-full bg-ink-900 px-4 py-2 text-sm font-semibold text-white">
+                    {/* The eyebrow and the price share the top row; the title
+                        gets a row to itself. Three-up, a card's content box is
+                        ~318px — narrower than the widest title plus the price
+                        pill — so pairing the title with the price wrapped the
+                        pill under the title on some cards and left it in the
+                        top corner on others, purely on how long the name and
+                        the price happened to be. The three cards then disagreed
+                        about where the price lived. Here the pill never shrinks
+                        and the eyebrow gives way instead, so every card puts its
+                        price in the same place at every width. */}
+                    <div className="flex items-center justify-between gap-4">
+                      <p className="min-w-0 text-xs font-semibold uppercase tracking-[0.2em] text-accent-600">Most requested {String(index + 1).padStart(2, "0")}</p>
+                      <span className="shrink-0 rounded-full bg-ink-900 px-4 py-2 text-sm font-semibold text-white">
                         {service.basePriceCents !== null ? `From ${formatCents(service.basePriceCents)}` : "By quote"}
                       </span>
                     </div>
+                    <h2 className="mt-3 font-display text-[2rem] leading-tight text-ink-900">{presentation.publicName}</h2>
                     <div className="mt-6"><CheckList items={presentation.highlights} tone="light" /></div>
                     <div className="mt-7 flex flex-wrap gap-3 border-t border-[#E5E0D7] pt-5">
                       <ButtonLink href={`/services/${service.slug}`}>See What&apos;s Included</ButtonLink>
@@ -170,7 +188,13 @@ export default async function ServicesPage() {
                   <tr key={label} className="border-b border-[#ECE7DE] last:border-0">
                     <th scope="row" className="p-5 text-sm font-medium text-slate-700 sm:p-6">{label}</th>
                     {[ultimate, signature, interior].map((included, index) => (
-                      <td key={index} className="p-5 text-center sm:p-6"><span className={included ? "text-lg font-black text-accent-600" : "text-slate-300"} aria-label={included ? "Included" : "Not included"}>{included ? "✓" : "—"}</span></td>
+                      <td key={index} className="p-5 text-center sm:p-6">
+                        {included === "addon" ? (
+                          <span className="inline-block rounded-full border border-[#DCD5CA] bg-[#F6F2EA] px-3 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-600">Add-on</span>
+                        ) : (
+                          <span className={included ? "text-lg font-black text-accent-600" : "text-slate-300"} aria-label={included ? "Included" : "Not included"}>{included ? "✓" : "—"}</span>
+                        )}
+                      </td>
                     ))}
                   </tr>
                 ))}

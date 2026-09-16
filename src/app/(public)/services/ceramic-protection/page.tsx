@@ -278,7 +278,7 @@ export default async function CeramicProtectionPage() {
         </section>
 
         {/* The single most important distinction on the site: this is not a
-            ceramic coating, and the $120 figure is not a coating price. */}
+            ceramic coating, and the add-on figure is not a coating price. */}
         <Card className="mt-12 border-accent-500/30">
           <h2 className="font-semibold text-accent-300">Ceramic protection is not a ceramic coating</h2>
           <p className="mt-2 text-sm leading-6 text-ink-300">

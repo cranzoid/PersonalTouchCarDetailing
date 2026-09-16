@@ -159,7 +159,7 @@ export const SERVICE_SEO: Record<string, ServiceSeoContent> = {
   "ceramic-protection": {
     title: "Ceramic Protection Hamilton, ON | Personal Touch",
     description:
-      "Ceramic protection in Hamilton from $120 when added to an Ultimate Detail, or $199 standalone for a sedan. See vehicle pricing and book online.",
+      "Ceramic protection in Hamilton from $99 when added to an Ultimate Detail, or $149 standalone for a sedan. See vehicle pricing and book online.",
     path: "/services/ceramic-protection",
     h1: "Ceramic protection in Hamilton",
     eyebrow: "Ceramic protection",

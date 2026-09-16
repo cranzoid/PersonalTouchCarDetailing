@@ -84,9 +84,9 @@ const CATALOG: { category: string; slug: string; description: string; services: 
       // Ceramic protection is ONE layer of ceramic protection and is not a
       // ceramic coating package. Sold standalone here; the discounted
       // Ultimate Detail version is the add-on below, never this row.
-      // Owner-confirmed: $199 sedan, $229 for SUVs, trucks and vans — a $30
-      // delta, not the $100 the coating packages carry.
-      { name: "Ceramic Protection - Standalone", slug: "ceramic-protection", short: "A single layer of ceramic protection applied on its own, without a detailing package.", priceCents: 19900, durationMin: 120, mode: "bookable", largeVehicleDeltaCents: 3000, largeVehicleDeltaMin: 30 },
+      // Owner-confirmed 2026-09-16: $149 sedan, $199 for SUVs, trucks and vans
+      // — a $50 delta, not the $100 the coating packages carry.
+      { name: "Ceramic Protection - Standalone", slug: "ceramic-protection", short: "A single layer of ceramic protection applied on its own, without a detailing package.", priceCents: 14900, durationMin: 120, mode: "bookable", largeVehicleDeltaCents: 5000, largeVehicleDeltaMin: 30 },
       // The three ceramic coating packages. Durations fit inside the 9-5 day
       // once the 15+15 setup/cleanup buffers are added — over that, the slot
       // engine can never offer an appointment at all.
@@ -198,10 +198,10 @@ const ADDONS: {
     name: "Ceramic Protection - Ultimate Detail Add-On",
     slug: "ceramic-protection-ultimate",
     description: "A single layer of ceramic protection, added to your Ultimate Detail.",
-    priceCents: 12000,
+    priceCents: 9900,
     durationMin: 45,
     serviceSlugs: ["complete-detail-engine"],
-    largeVehicleDeltaCents: 7900,
+    largeVehicleDeltaCents: 3000,
     largeVehicleDeltaMin: 15,
   },
 ];

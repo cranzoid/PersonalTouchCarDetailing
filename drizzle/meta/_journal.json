@@ -183,6 +183,13 @@
       "when": 1789198804325,
       "tag": "0025_interior_detail_unbundled",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789202404325,
+      "tag": "0026_ceramic_protection_reprice",
+      "breakpoints": true
     }
   ]
 }

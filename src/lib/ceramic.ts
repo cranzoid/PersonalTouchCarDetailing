@@ -122,7 +122,7 @@ export const CERAMIC_CONDITION_DISCLAIMER_SHORT =
 
 /**
  * The qualification that must travel with the discounted add-on price
- * everywhere it is shown. The $120 figure is never allowed to appear as the
+ * everywhere it is shown. The add-on figure is never allowed to appear as the
  * price of a ceramic coating, and never without this sentence beside it.
  */
 export const CERAMIC_PROTECTION_ADDON_QUALIFIER =
@@ -281,7 +281,7 @@ export type ResolvedCeramicMenuProduct = {
   /**
    * Set when the headline price depends on something. Non-null means the
    * price MUST be rendered with an asterisk and this note beside it — the
-   * $120 figure is never allowed to stand on its own.
+   * conditional add-on figure is never allowed to stand on its own.
    */
   priceNote: string | null;
 };

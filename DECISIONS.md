@@ -672,8 +672,8 @@ enquiry became a manual quote. It is now priced and bookable — but the owner
 sells *two* ceramic things, and the expensive way to get this wrong is to blur
 them. **Ceramic protection** is a single layer of ceramic protection.
 **Ceramic coating** is the premium service, in three packages. They are never
-described, priced or labelled interchangeably, and the $120 figure is never
-allowed to read as the price of a coating.
+described, priced or labelled interchangeably, and the discounted add-on figure
+is never allowed to read as the price of a coating.
 
 - **No second pricing system.** All five products are ordinary `services` /
   `addons` rows with `service_vehicle_adjustments`, priced by `priceBooking`
@@ -681,7 +681,15 @@ allowed to read as the price of a coating.
   cannot: which slugs are ceramic, the editorial content, and the disclaimer.
   Every price on the ceramic pages is read from the catalogue per request, so
   Admin → Services still moves them without a deploy.
-- **The $120 rule is a foreign key, not a UI rule.** Ceramic protection at the
+- **Repriced 2026-09-16** (`drizzle/0026`): standalone $199/$229 → **$149/$199**
+  sedan/large, add-on $120/$199 → **$99/$129**. The shape mattered more than the
+  amounts — the add-on's large-vehicle price used to land exactly on the
+  standalone large price ($199), so for an SUV "cheaper with a detail" was not
+  true, while every page said it was. It is now cheaper in every category. The
+  figures live only in the catalogue and in the `/services/ceramic-protection`
+  meta description; comments that used to quote $120 now name the rule instead,
+  because that number has gone stale twice.
+- **The add-on rule is a foreign key, not a UI rule.** Ceramic protection at the
   discounted price is an add-on linked *only* to Ultimate Detail. `priceBooking`
   already refuses an add-on that is not linked to a selected service, so the
   qualification is enforced server-side and a hand-written URL cannot buy it
@@ -1112,6 +1120,19 @@ Consequential choices:
   seed is a no-op forever and a deploy alone would have left production on the
   old prices. `drizzle/0025` carries the change; the seed is updated in the same
   commit so a fresh database starts in the same place.
+
+- **The comparison table grew a third state.** `COMPARISON_ROWS` was pairs of
+  booleans; seat shampoo is neither included nor unavailable, so "addon" renders
+  a badge instead of a tick or a dash. A tick would promise what no package now
+  does, and a dash would hide that it can be bought at all.
+- **The package cards stopped letting text decide their layout.** The price pill
+  shared a flex row with the title, and three-up the card's content box (318px)
+  is narrower than the widest title plus the pill — so the pill wrapped under the
+  title on Ultimate and Signature and sat in the top corner on Interior, purely
+  because "Interior Detail" and "$99.00" are a few pixels shorter. The pill now
+  shares the top row with the eyebrow, never shrinks, and the title has a row to
+  itself, so the three cards agree at every width regardless of what the names
+  and prices happen to measure.
 
 **Revisit when:** a second package gets unbundled the same way → the shared
 `INTERIOR_CHECKLIST` needs to become per-package data again, most naturally the
