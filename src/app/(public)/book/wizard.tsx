@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
 import { getStoredAttribution } from "@/components/attribution";
 import { trackMetaEvent, trackMetaLead } from "@/components/meta-pixel";
-import { trackBookAppointmentConversion } from "@/components/google-tag";
+import { trackBookAppointmentConversion, trackGa4Event } from "@/components/google-tag";
 import { DATE_ONLY_BOOKING_NOTICE, DATE_ONLY_BOOKING_NOTICE_SHORT } from "@/lib/ceramic";
 import { formatCents } from "@/lib/money";
 import { localDateISO } from "@/lib/tz";
@@ -222,6 +222,11 @@ export function BookingWizard({
   }, [claimedCode]);
 
   const service = services.find((s) => s.id === serviceId) ?? null;
+  useEffect(() => {
+    if (service?.slug !== "ceramic-protection") return;
+    trackGa4Event("ceramic_booking_step", { service: service.slug, step: STEPS[step].toLowerCase() });
+  }, [service?.slug, step]);
+
   const bundleService = services.find((s) => s.id === bundleServiceId) ?? null;
   // Commercial vehicles are quoted, never priced from the catalogue — the
   // public price tables say so, and the booking flow has to agree rather than
@@ -369,6 +374,11 @@ export function BookingWizard({
     setSlotsLoading(false);
     if (res.ok) setSlots(res.slots);
     else setSlotsError(res.error);
+    if (service?.slug === "ceramic-protection") {
+      trackGa4Event("ceramic_availability_result", {
+        status: res.ok ? (res.slots.length > 0 ? "available" : "no_slots") : "error",
+      });
+    }
   }
 
   async function submit() {
@@ -409,6 +419,11 @@ export function BookingWizard({
       expectedDiscountCents: preview?.discount ?? 0,
     });
     setSubmitting(false);
+    if (service.slug === "ceramic-protection") {
+      trackGa4Event(res.ok ? "ceramic_booking_success" : "ceramic_booking_error", {
+        service: service.slug,
+      });
+    }
     // Nothing was booked: drop the discount from the preview so the button and
     // the summary show the real price before they press confirm again.
     if (!res.ok && res.kind === "offer_changed") {

@@ -119,6 +119,27 @@ describe("quote requests carrying an ad offer", () => {
     eligibleServiceIds: ["svc_detail"],
   };
 
+  it("persists a phone-only ceramic callback with attribution and no marketing consent", async () => {
+    const fd = new FormData();
+    fd.set("payload", JSON.stringify({
+      name: "Ceramic callback test",
+      phone: "+19055550123",
+      serviceIds: [],
+      vehicleCategory: "suv_large",
+      conditionDescription: "Ceramic protection callback request. Please confirm price and available appointments.",
+      marketingConsent: false,
+      attribution: { source: "facebook", campaign: "ceramic149", fbclid: "test-click", enquiryType: "ceramic_callback", enquiryPage: "/services/ceramic-protection" },
+    }));
+    const response = await submitQuoteAction(fd);
+    expect(response.ok).toBe(true);
+    if (!response.ok) return;
+    const [quote] = await db().select().from(schema.quoteRequests).where(eq(schema.quoteRequests.id, response.reference));
+    const [lead] = await db().select().from(schema.leads).where(eq(schema.leads.id, quote.leadId!));
+    expect(quote.vehicleInfo).toMatchObject({ category: "suv_large" });
+    expect(lead).toMatchObject({ email: null, phone: "+19055550123", status: "new", marketingConsent: false, marketingConsentAt: null });
+    expect(lead.attribution).toMatchObject({ source: "facebook", campaign: "ceramic149", fbclid: "test-click", enquiryType: "ceramic_callback" });
+  });
+
   it("records the offer the business is actually running, not the raw claim", async () => {
     await setPromotion(running);
     const res = await submitQuoteWithOffer("first10aug26");

@@ -2,9 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { ButtonLink, Card, Container } from "@/components/ui";
+import { ButtonLink, Container } from "@/components/ui";
 import { GoogleReviewStrip, ServiceImage } from "@/components/public-sections";
 import { StructuredData } from "@/components/structured-data";
+import { CeramicEnquiry } from "./enquiry";
 import { formatCents } from "@/lib/money";
 import { hasPublishedResults } from "@/lib/results";
 import { getSettings } from "@/lib/settings";
@@ -109,20 +110,19 @@ export default async function CeramicProtectionPage() {
         ? addonAdjustments.find((a) => a.vehicleCategory === category)?.priceDeltaCents ?? 0
         : 0);
   };
-  /** A cell in the vehicle-size table: a price, or the quote-only fallback. */
-  const priceCell = (cents: number | null) =>
-    cents === null ? <span className="text-ink-400">By quote</span> : formatCents(cents);
-
-  // Base row plus every category either price actually adjusts, in canonical
-  // order — derived rather than assumed, so a later price change still shows.
-  const adjustedCategories = VEHICLE_CATEGORIES.filter(
-    (category) =>
-      serviceAdjustments.some((a) => a.vehicleCategory === category) ||
-      addonAdjustments.some((a) => a.vehicleCategory === category),
-  );
-  const rows: { label: string; category: VehicleCategory | null }[] = [
-    { label: "Coupe / Sedan", category: null },
-    ...adjustedCategories.map((category) => ({ label: VEHICLE_CATEGORY_LABELS[category], category })),
+  const vehiclePrices = VEHICLE_CATEGORIES.map((category) => ({
+    category,
+    label: VEHICLE_CATEGORY_LABELS[category],
+    priceCents: standalonePrice(category),
+  }));
+  const price = (cents: number) => formatCents(cents, settings.currency).replace(/\.00$/, "");
+  const faqs = [
+    { question: `What does the ${price(standalone.basePriceCents)} starting price include?`, answer: `For a coupe or sedan, the standalone service includes washing and drying the paint, one layer of ceramic protection applied by hand, and initial setting before collection. No detailing package purchase is required. Prices are before ${settings.taxLabel}.` },
+    { question: "Is this a multi-year ceramic coating?", answer: "This service applies a single layer of ceramic protection for water beading and easier washing. Our Crystal, Pro and Max ceramic coating packages are separate services with more preparation and longer protection; Pro and Max include warranties. No multi-year warranty is included with this service." },
+    { question: "Will it remove scratches or swirl marks?", answer: "Ceramic protection adds a protective layer; it does not correct scratches or swirl marks. If your paint needs extra preparation or correction, we discuss the work and price with you before it begins." },
+    { question: "What happens after I request a callback?", answer: "We contact you about your vehicle, confirm the appropriate price and discuss available appointments. A callback request does not reserve a time or require payment. You can also book online if you are ready to choose an appointment." },
+    { question: "How long does the protection last?", answer: "Durability depends on your vehicle, exposure and wash routine. We will explain the protection and suitable aftercare for your vehicle before you book. This service is not sold with a multi-year protection promise." },
+    { question: "How should I look after it?", answer: definition.aftercare },
   ];
 
   const addonBookUrl = `/book?service=${ULTIMATE_DETAIL_SLUG}&addon=${CERAMIC_PROTECTION_ADDON_SLUG}`;
@@ -157,7 +157,7 @@ export default async function CeramicProtectionPage() {
       },
       {
         "@type": "FAQPage",
-        mainEntity: definition.faqs.map((faq) => ({
+        mainEntity: faqs.map((faq) => ({
           "@type": "Question",
           name: faq.question,
           acceptedAnswer: { "@type": "Answer", text: faq.answer },
@@ -169,196 +169,127 @@ export default async function CeramicProtectionPage() {
   return (
     <>
       <StructuredData data={jsonLd} />
-      <Container className="py-20 sm:py-28">
-        <nav aria-label="Breadcrumb" className="text-sm text-ink-400">
-          <ol className="flex items-center gap-2">
-            <li><Link className="hover:text-accent-300" href="/">Home</Link></li>
-            <li aria-hidden="true">/</li>
-            <li><Link className="hover:text-accent-300" href="/services">Services</Link></li>
-            <li aria-hidden="true">/</li>
-            <li aria-current="page" className="text-ink-200">Ceramic protection</li>
-          </ol>
-        </nav>
-
-        <div className="mt-8 max-w-3xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-accent-300">{definition.eyebrow}</p>
-          <h1 className="mt-5 font-display text-5xl leading-[1.02] tracking-[-0.03em] text-white sm:text-6xl">{definition.h1}</h1>
-          <p className="mt-6 text-lg leading-8 text-ink-200">{definition.introduction}</p>
-        </div>
-        <div className="group mt-9 max-w-5xl overflow-hidden rounded-[1.5rem] border border-white/10">
-          <ServiceImage slug="ceramic-protection" name="Ceramic protection" priority className="aspect-[16/8]" />
-        </div>
-        <GoogleReviewStrip settings={settings} tone="dark" className="mt-5 max-w-5xl" />
-
-        <section className="mt-12" aria-labelledby="ways-heading">
-          <h2 id="ways-heading" className="font-display text-3xl text-white">Two ways to buy it</h2>
-          <div className="mt-6 grid gap-5 md:grid-cols-2">
-            {offerAvailable && (
-              <Card className="flex flex-col border-accent-400/25">
-                <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-300">
-                  Added to an {ULTIMATE_DETAIL_LABEL}
-                </p>
-                <p className="mt-4 font-display text-5xl text-white">
-                  {formatCents(addonPrice(null)!)}
-                  <span aria-hidden="true" className="align-super text-2xl text-accent-300">*</span>
-                </p>
-                {/* The asterisk is answered immediately, in the same card. The
-                    price is never allowed to travel without this sentence. */}
-                <p className="mt-3 text-sm leading-6 text-ink-300">
-                  <span aria-hidden="true">*</span> Available at this price when added to an{" "}
-                  {ULTIMATE_DETAIL_LABEL}. Shown for a coupe or sedan before {settings.taxLabel}; larger
-                  vehicles are {formatCents(addonPrice("suv_large")!)}.
-                </p>
-                <p className="mt-3 flex-1 text-sm leading-6 text-ink-400">
-                  Your vehicle is already washed and prepared as part of the detail, so the layer goes
-                  on at the point it works best — and costs less than booking it on its own.
-                </p>
-                <ButtonLink className="mt-6" href={addonBookUrl}>
-                  Add to Your {ULTIMATE_DETAIL_LABEL}
-                </ButtonLink>
-              </Card>
-            )}
-            <Card className="flex flex-col">
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-300">On its own</p>
-              <p className="mt-4 font-display text-5xl text-white">{formatCents(standalonePrice(null)!)}</p>
-              <p className="mt-3 text-sm leading-6 text-ink-300">
-                For a coupe or sedan before {settings.taxLabel}; larger vehicles are{" "}
-                {formatCents(standalonePrice("suv_large")!)}.
-              </p>
-              <p className="mt-3 flex-1 text-sm leading-6 text-ink-400">
-                Booked without a detailing package. The preparation has to be done from scratch, which
-                is why the standalone price is higher than the add-on.
-              </p>
-              <ButtonLink className="mt-6" href={`/book?service=${CERAMIC_PROTECTION_SLUG}`}>
-                Book Ceramic Protection
-              </ButtonLink>
-            </Card>
-          </div>
+      <div className="pb-24 md:pb-0">
+        <section className="relative overflow-hidden bg-[#0B2A4A]" aria-labelledby="ceramic-title">
+          <Container className="relative py-8 sm:py-12 lg:py-16">
+            <nav aria-label="Breadcrumb" className="mb-7 text-xs text-ink-300">
+              <Link href="/services" className="hover:text-white">Services</Link><span aria-hidden="true"> / </span><span>Ceramic protection</span>
+            </nav>
+            <div className="grid items-start gap-8 lg:grid-cols-[1.12fr_0.88fr] lg:gap-14">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-accent-300">Hamilton, Ontario · {settings.yearsInBusinessLabel} of car care</p>
+                <h1 id="ceramic-title" className="mt-4 text-[2.65rem] font-extrabold leading-[1.08] tracking-[-0.045em] text-white sm:text-6xl">
+                  Ceramic protection.<br />
+                  <span className="text-accent-300">From {price(standalone.basePriceCents)}.</span>
+                </h1>
+                <p className="mt-3 text-sm font-semibold text-ink-200">Coupe / sedan · {settings.currency} · before {settings.taxLabel}</p>
+                <p className="mt-5 max-w-xl text-lg leading-7 text-ink-100">Water that beads. Easier washes. A freshly protected finish.</p>
+                <p className="mt-3 max-w-xl text-sm leading-6 text-ink-300">One layer of ceramic protection, applied by hand to clean paint. Wash and preparation included. No detailing package required.</p>
+                <div className="mt-6 flex flex-wrap gap-3">
+                  <ButtonLink href="#ceramic-enquiry">Get my price &amp; availability →</ButtonLink>
+                  <a href={`tel:${settings.phone}`} className="inline-flex min-h-12 items-center px-2 text-sm font-semibold text-white">Call {settings.phone}</a>
+                </div>
+                <p className="mt-3 text-xs leading-5 text-ink-300">Single-layer protection. Multi-year ceramic coating packages are a separate service.</p>
+                <div className="group relative mt-7 hidden overflow-hidden rounded-2xl border border-white/15 lg:block">
+                  <ServiceImage slug="ceramic-protection" name="Ceramic protection application" priority className="aspect-[16/8]" />
+                  <p className="absolute bottom-4 left-5 text-xs font-semibold text-white">Clean paint. Careful application. Personal touch.</p>
+                </div>
+              </div>
+              <CeramicEnquiry serviceId={standalone.id} vehiclePrices={vehiclePrices} taxLabel={settings.taxLabel} currency={settings.currency} phone={settings.phone} bookable={standalone.bookingMode === "bookable"} />
+            </div>
+            <GoogleReviewStrip settings={settings} tone="dark" className="mt-8" />
+          </Container>
         </section>
 
-        <section className="mt-14" aria-labelledby="pricing-heading">
-          <h2 id="pricing-heading" className="font-display text-3xl text-white">Pricing by vehicle size</h2>
-          <div className="mt-5 overflow-x-auto">
-            <table className="w-full min-w-[30rem] max-w-2xl text-sm">
-              <caption className="sr-only">Ceramic protection prices by vehicle category</caption>
-              <thead>
-                <tr className="border-b border-white/10 text-xs uppercase tracking-wider text-ink-500">
-                  <th scope="col" className="py-2 text-left font-medium">Vehicle</th>
-                  {offerAvailable && (
-                    <th scope="col" className="py-2 text-right font-medium">
-                      With an {ULTIMATE_DETAIL_LABEL}
-                    </th>
-                  )}
-                  <th scope="col" className="py-2 text-right font-medium">Standalone</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={row.label} className="border-b border-white/10">
-                    <th scope="row" className="py-2 text-left font-normal text-ink-300">{row.label}</th>
-                    {offerAvailable && (
-                      <td className="py-2 text-right text-accent-300">{priceCell(addonPrice(row.category))}</td>
-                    )}
-                    <td className="py-2 text-right text-accent-300">{priceCell(standalonePrice(row.category))}</td>
-                  </tr>
+        <section className="bg-[#F8F5EE] py-12 text-[#1C2026] sm:py-16" aria-labelledby="included-heading">
+          <Container>
+            <div className="grid items-start gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:gap-16">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#80570F]">A straightforward service</p>
+                <h2 id="included-heading" className="mt-3 text-3xl font-bold leading-tight tracking-tight sm:text-4xl">Everyday protection.<br />Without the guesswork.</h2>
+                <p className="mt-4 text-base leading-7 text-slate-600">For drivers who want water beading and easier maintenance, with a clear price before booking.</p>
+                <p className="mt-4 text-sm leading-6 text-slate-600">Paint correction and condition-dependent extra preparation are quoted separately and approved by you before work begins.</p>
+                {resultsPublished && <Link href="/results" className="mt-5 inline-flex min-h-11 items-center font-semibold text-[#0B2A4A] underline underline-offset-4">See our customer vehicles →</Link>}
+              </div>
+              <ol className="grid gap-4 sm:grid-cols-3">
+                {definition.process.map((step, index) => (
+                  <li key={step.title} className="rounded-2xl border border-[#DED8CE] bg-white p-5">
+                    <span className="flex size-10 items-center justify-center rounded-full bg-[#F7EACA] text-sm font-bold text-[#0B2A4A]">0{index + 1}</span>
+                    <h3 className="mt-5 text-lg font-bold text-[#0B2A4A]">{step.title}</h3>
+                    <p className="mt-3 text-sm leading-6 text-slate-600">{step.body}</p>
+                  </li>
                 ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="mt-3 text-xs text-ink-500">
-            {offerAvailable && (
-              <>
-                The {ULTIMATE_DETAIL_LABEL} column applies only when ceramic protection is added to an{" "}
-                {ULTIMATE_DETAIL_LABEL} booking; the package itself is priced separately.{" "}
-              </>
-            )}
-            Prices are before {settings.taxLabel}, which is added when you book. Commercial vehicles are
-            quoted individually. The exact figure for your vehicle is shown before booking confirmation.
-          </p>
+              </ol>
+            </div>
+          </Container>
         </section>
 
-        {/* The single most important distinction on the site: this is not a
-            ceramic coating, and the add-on figure is not a coating price. */}
-        <Card className="mt-12 border-accent-500/30">
-          <h2 className="font-semibold text-accent-300">Ceramic protection is not a ceramic coating</h2>
-          <p className="mt-2 text-sm leading-6 text-ink-300">
-            Ceramic protection is a single layer of ceramic protection. Our ceramic coating packages —
-            Crystal, Pro and Max — are a separate, more involved service with dedicated preparation, a
-            considerably longer service life, and a warranty on Pro and Max. If you want multi-year
-            protection, compare the coating packages instead.
-          </p>
-          <Link className="mt-4 inline-flex text-sm font-semibold text-accent-300 hover:text-accent-200" href={CERAMIC_COATING_HUB_PATH}>
-            Compare ceramic coating packages →
-          </Link>
-        </Card>
-
-        <section className="mt-14" aria-labelledby="benefits-heading">
-          <h2 id="benefits-heading" className="font-display text-3xl text-white">What ceramic protection does</h2>
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
-            {definition.benefits.map((benefit) => (
-              <Card key={benefit.title} className="p-5">
-                <h3 className="font-semibold text-white">{benefit.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-ink-300">{benefit.body}</p>
-              </Card>
-            ))}
-          </div>
+        <section className="bg-white py-12 text-[#1C2026] sm:py-16" aria-labelledby="pricing-heading">
+          <Container>
+            <div className="grid gap-8 lg:grid-cols-2 lg:gap-16">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-[#80570F]">Your vehicle. Your price.</p>
+                <h2 id="pricing-heading" className="mt-3 text-3xl font-bold tracking-tight">Ceramic protection on its own</h2>
+                <p className="mt-3 text-sm leading-6 text-slate-600">No package purchase needed. Prices in {settings.currency}, before {settings.taxLabel}. Your vehicle category and any extra preparation are confirmed before booking.</p>
+                <dl className="mt-5 divide-y divide-[#DED8CE]">
+                  {vehiclePrices.map((row) => (
+                    <div key={row.category} className="flex items-center justify-between gap-4 py-3 text-sm">
+                      <dt>{row.label}</dt><dd className="shrink-0 font-bold text-[#0B2A4A]">{row.priceCents === null ? "By quote" : price(row.priceCents)}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+              <div className="space-y-5">
+                {offerAvailable && (
+                  <div className="rounded-2xl border border-[#DED8CE] bg-[#F8F5EE] p-6 sm:p-8">
+                    <p className="text-xs font-bold uppercase tracking-[0.15em] text-[#80570F]">Already planning a full detail?</p>
+                    <h3 className="mt-3 text-2xl font-bold text-[#0B2A4A]">Add protection for {price(addonPrice(null)!)}*</h3>
+                    <p className="mt-3 text-sm leading-6 text-slate-600">*Coupe / sedan, only with an {ULTIMATE_DETAIL_LABEL} purchase. The detail costs extra. Larger vehicles: {price(addonPrice("suv_large")!)} for the add-on. Before {settings.taxLabel}.</p>
+                    <Link href={addonBookUrl} className="mt-4 inline-flex min-h-12 items-center font-bold text-[#0B2A4A] underline underline-offset-4">Build my detail + protection →</Link>
+                  </div>
+                )}
+                <div className="rounded-2xl border border-[#DED8CE] p-6 sm:p-8">
+                  <h3 className="text-xl font-bold text-[#0B2A4A]">Looking for multi-year protection?</h3>
+                  <p className="mt-3 text-sm leading-6 text-slate-600">Explore Crystal, Pro and Max ceramic coatings. These have dedicated preparation and longer protection, with warranties on Pro and Max.</p>
+                  <Link href={CERAMIC_COATING_HUB_PATH} className="mt-4 inline-flex min-h-11 items-center font-semibold text-[#0B2A4A] underline underline-offset-4">Compare ceramic coatings →</Link>
+                </div>
+              </div>
+            </div>
+          </Container>
         </section>
 
-        <section className="mt-14" aria-labelledby="process-heading">
-          <h2 id="process-heading" className="font-display text-3xl text-white">How the work runs</h2>
-          <ol className="mt-5 grid gap-4 md:grid-cols-3">
-            {definition.process.map((step, index) => (
-              <li key={step.title} className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
-                <span className="text-xs font-semibold uppercase tracking-wider text-accent-300">Step {index + 1}</span>
-                <h3 className="mt-2 font-semibold text-white">{step.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-ink-300">{step.body}</p>
-              </li>
-            ))}
-          </ol>
+        <section className="bg-[#F8F5EE] py-12 text-[#1C2026] sm:py-16" aria-labelledby="faq-heading">
+          <Container>
+            <div className="mx-auto max-w-3xl">
+              <h2 id="faq-heading" className="text-3xl font-bold tracking-tight">A few things you might be wondering</h2>
+              <div className="mt-6 space-y-3">
+                {faqs.map((faq) => (
+                  <details key={faq.question} className="group rounded-xl border border-[#DED8CE] bg-white p-5">
+                    <summary className="flex min-h-8 cursor-pointer items-center justify-between gap-4 font-semibold text-[#0B2A4A]">{faq.question}<span aria-hidden="true" className="text-xl group-open:rotate-45">+</span></summary>
+                    <p className="mt-3 text-sm leading-7 text-slate-600">{faq.answer}</p>
+                  </details>
+                ))}
+              </div>
+            </div>
+          </Container>
         </section>
 
-        <section className="mt-14 grid gap-5 md:grid-cols-2">
-          <Card>
-            <h2 className="font-display text-2xl text-white">Who it is a good fit for</h2>
-            <ul className="mt-4 space-y-2 text-sm leading-6 text-ink-300">
-              {definition.idealFor.map((item) => <li key={item}>• {item}</li>)}
-            </ul>
-          </Card>
-          <Card>
-            <h2 className="font-display text-2xl text-white">Aftercare</h2>
-            <p className="mt-4 text-sm leading-6 text-ink-300">{definition.aftercare}</p>
-          </Card>
+        <section className="bg-[#0B2A4A] py-12 text-center sm:py-16">
+          <Container>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-accent-300">Personal Touch Car Detailing · Hamilton</p>
+            <h2 className="mt-4 text-3xl font-bold text-white sm:text-4xl">Ready for that freshly protected feeling?</h2>
+            <p className="mt-4 text-ink-200">{settings.addressLine1}, {settings.city} · {settings.phone}</p>
+            <div className="mt-6 flex flex-wrap justify-center gap-3">
+              <ButtonLink href="#ceramic-enquiry">Get my price &amp; availability →</ButtonLink>
+              <ButtonLink href={`/book?service=${CERAMIC_PROTECTION_SLUG}`} variant="outline">Book online</ButtonLink>
+            </div>
+          </Container>
         </section>
-
-        <section className="mt-14" aria-labelledby="faq-heading">
-          <h2 id="faq-heading" className="font-display text-3xl text-white">Frequently asked questions</h2>
-          <div className="mt-5 space-y-3">
-            {definition.faqs.map((faq) => (
-              <details key={faq.question} className="rounded-2xl border border-white/10 bg-white/[0.03] p-5">
-                <summary className="cursor-pointer font-semibold text-white">{faq.question}</summary>
-                <p className="mt-3 max-w-3xl text-sm leading-6 text-ink-300">{faq.answer}</p>
-              </details>
-            ))}
-          </div>
-        </section>
-
-        <section className="mt-14" aria-labelledby="related-heading">
-          <h2 id="related-heading" className="font-display text-3xl text-white">Related Hamilton vehicle-care services</h2>
-          <div className="mt-5 flex flex-wrap gap-3">
-            {definition.relatedServices.map((service) => (
-              <Link key={service.slug} href={`/services/${service.slug}`} className="rounded-full border border-white/15 px-4 py-2 text-sm text-ink-200 transition hover:border-accent-400 hover:text-accent-300">
-                {service.label}
-              </Link>
-            ))}
-            {resultsPublished && <Link href="/results" className="rounded-full border border-white/15 px-4 py-2 text-sm text-ink-200 transition hover:border-accent-400 hover:text-accent-300">View real results</Link>}
-          </div>
-        </section>
-
-        <div className="mt-12 flex flex-wrap gap-3">
-          <ButtonLink href={`/book?service=${CERAMIC_PROTECTION_SLUG}`}>Book Ceramic Protection</ButtonLink>
-          <ButtonLink href={`/quote?service=${CERAMIC_PROTECTION_SLUG}`} variant="outline">Ask a Question</ButtonLink>
+        <div className="fixed inset-x-0 bottom-0 z-40 flex items-center gap-3 border-t border-[#DED8CE] bg-white px-5 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] shadow-[0_-4px_24px_#00000015] md:hidden">
+          <div className="shrink-0 text-[#0B2A4A]"><p className="text-xs">Ceramic protection</p><p className="text-lg font-extrabold">From {price(standalone.basePriceCents)} <span className="text-xs font-normal">+ {settings.taxLabel}</span></p><p className="text-[10px]">Coupe / sedan · {settings.currency}</p></div>
+          <ButtonLink href="#ceramic-enquiry" className="flex-1 px-3 text-center text-sm">Get started →</ButtonLink>
         </div>
-      </Container>
+      </div>
     </>
   );
 }
