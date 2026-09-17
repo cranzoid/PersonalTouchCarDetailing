@@ -291,3 +291,95 @@ async function alreadyOnACampaign(destinations: readonly string[]): Promise<Set<
     );
   return new Set(rows.map((r) => r.destination));
 }
+
+/* ------------------------------------------------------------------ */
+/* Both channels at once, for the outreach workspace                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One missed appointment with BOTH channels annotated, because the composer
+ * switches between text and email without leaving the page and each channel
+ * has its own destination, its own do-not-contact list and its own answer to
+ * "have we already messaged them".
+ */
+export type DualChannelCandidate = Omit<
+  AudienceCandidate,
+  "destination" | "destinationNormalized" | "blockedReason" | "alreadyContacted"
+> & {
+  sms: { destination: string; blockedReason: string | null; alreadyContacted: boolean };
+  email: { destination: string; blockedReason: string | null; alreadyContacted: boolean };
+};
+
+export type DualChannelAudience = {
+  rows: DualChannelCandidate[];
+  totals: {
+    scanned: number;
+    sms: { eligible: number; blocked: number };
+    email: { eligible: number; blocked: number };
+  };
+};
+
+/**
+ * The same list findMissedAppointments builds, resolved for text and email
+ * together.
+ *
+ * Deliberately two calls rather than a channel-aware rewrite of the query: the
+ * per-channel answer depends on four different lookups and the version above is
+ * the one the CASL behaviour is tested against. They run in parallel, so the
+ * screen waits for one round trip, not two, and this is an admin page a handful
+ * of people open — the duplicated reads cost less than a second source of truth
+ * for who may be messaged.
+ */
+export async function findMissedAudience(input: {
+  filter: AudienceFilter;
+  withinDays: number;
+  timezone: string;
+  limit?: number;
+}): Promise<DualChannelAudience> {
+  const [sms, email] = await Promise.all([
+    findMissedAppointments({ ...input, channel: "sms" }),
+    findMissedAppointments({ ...input, channel: "email" }),
+  ]);
+
+  const emailById = new Map(email.candidates.map((c) => [c.appointmentId, c]));
+  const rows = sms.candidates.map((row) => {
+    const other = emailById.get(row.appointmentId);
+    return {
+      appointmentId: row.appointmentId,
+      customerId: row.customerId,
+      firstName: row.firstName,
+      companyName: row.companyName,
+      outcome: row.outcome,
+      reason: row.reason,
+      missedAt: row.missedAt,
+      missedOnLabel: row.missedOnLabel,
+      services: row.services,
+      totalCents: row.totalCents,
+      footing: row.footing,
+      sms: {
+        destination: row.destination,
+        blockedReason: row.blockedReason,
+        alreadyContacted: row.alreadyContacted,
+      },
+      // `null` here means "nothing blocking them", so the missing-row fallback
+      // has to be chosen by whether the row exists — not by `??`, which would
+      // read a clear verdict as an absent one and block everybody.
+      email: other
+        ? {
+            destination: other.destination,
+            blockedReason: other.blockedReason,
+            alreadyContacted: other.alreadyContacted,
+          }
+        : { destination: "", blockedReason: "No email address on file", alreadyContacted: false },
+    };
+  });
+
+  return {
+    rows,
+    totals: {
+      scanned: sms.totals.scanned,
+      sms: { eligible: sms.totals.eligible, blocked: sms.totals.blocked },
+      email: { eligible: email.totals.eligible, blocked: email.totals.blocked },
+    },
+  };
+}

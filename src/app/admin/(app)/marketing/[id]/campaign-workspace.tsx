@@ -14,7 +14,6 @@ import {
   updateCampaignAction,
 } from "../actions";
 import { card, heading, input, label, primaryButton, secondaryButton, subtle, textarea } from "../ui";
-import { AudiencePanel, type AudienceFilterValue, type AudienceRow } from "./audience-panel";
 
 type Recipient = {
   id: string;
@@ -78,19 +77,12 @@ export function CampaignWorkspace({
   issues,
   sendWindow,
   businessName,
-  audience,
 }: {
   campaign: Campaign;
   recipients: Recipient[];
   issues: ComplianceIssue[];
   sendWindow: { allowed: boolean; localHour: number };
   businessName: string;
-  audience: {
-    filter: AudienceFilterValue;
-    withinDays: number;
-    totals: { eligible: number; blocked: number; scanned: number };
-    rows: AudienceRow[];
-  };
 }) {
   const router = useRouter();
   const [batch, setBatch] = useState<BatchResult | null>(null);
@@ -148,14 +140,6 @@ export function CampaignWorkspace({
           onChanged={() => router.refresh()}
         />
         <Composer campaign={campaign} locked={locked} businessName={businessName} onSaved={() => router.refresh()} />
-        <AudiencePanel
-          campaignId={campaign.id}
-          channel={campaign.channel}
-          rows={audience.rows}
-          totals={audience.totals}
-          filter={audience.filter}
-          withinDays={audience.withinDays}
-        />
         <ImportPanel campaignId={campaign.id} channel={campaign.channel} onImported={() => router.refresh()} />
         <RecipientTable campaignId={campaign.id} recipients={recipients} onChanged={() => router.refresh()} />
       </div>

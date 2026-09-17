@@ -2,18 +2,22 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { createCampaignAction } from "./actions";
-import { card, heading, input, label, primaryButton, subtle, textarea } from "./ui";
+import { createCampaignAction } from "../actions";
+import { card, heading, input, label, primaryButton, subtle, textarea } from "../ui";
 
 /**
- * Starting points, not finished copy — the owner edits before anything sends.
- * All of them carry the opt-out line the compliance check requires, so the
- * default state of a new campaign is a compliant one.
+ * A starting point, not finished copy — the owner edits before anything sends.
+ * It carries the opt-out line the compliance check requires, so the default
+ * state of a new campaign is a compliant one.
+ *
+ * There used to be a win-back starter here too. Win-backs moved to the Outreach
+ * screen, where the people are already in the system and the message is written
+ * beside the list it is going to; what is left is the case this screen is for —
+ * a list of strangers somebody pasted in.
  */
-const TEMPLATES = {
-  fleet: {
-    sms: `Hi {{FirstName}}, it's [your name] from Personal Touch Car Detailing in Hamilton. Great meeting you. We're under new ownership and would love to work with {{Company}} — we offer preferred fleet pricing. Reply here if you'd like a quote. Reply STOP to opt out.`,
-    email: `Hi {{FirstName}},
+const FLEET_TEMPLATES = {
+  sms: `Hi {{FirstName}}, it's [your name] from Personal Touch Car Detailing in Hamilton. Great meeting you. We're under new ownership and would love to work with {{Company}} — we offer preferred fleet pricing. Reply here if you'd like a quote. Reply STOP to opt out.`,
+  email: `Hi {{FirstName}},
 
 It was great meeting you. I'm [your name] from Personal Touch Car Detailing here in Hamilton.
 
@@ -23,51 +27,26 @@ If you'd like a quote, just reply to this email and I'll put one together.
 
 Thanks,
 [your name]`,
-  },
-  winback: {
-    sms: `Hi {{FirstName}}, it's Personal Touch Car Detailing in Hamilton. We had you booked in on {{LastVisit}} and never got you back in — happy to find you a new slot whenever suits. Reply here or call us. Reply STOP to opt out.`,
-    email: `Hi {{FirstName}},
-
-We had you booked in with us on {{LastVisit}} and it didn't end up going ahead — no problem at all.
-
-If you'd still like the work done, just reply to this email and we'll find a time that suits you better. We can usually fit something in within the week.
-
-Thanks,
-Personal Touch Car Detailing`,
-  },
 } as const;
 
-const PURPOSES = [
-  { value: "winback", label: "Win back a no-show or cancellation" },
-  { value: "fleet", label: "New fleet or commercial prospect" },
-] as const;
-
-type Purpose = (typeof PURPOSES)[number]["value"];
-
-/** True while the box still holds an untouched starter, in any combination. */
+/** True while the box still holds an untouched starter, on either channel. */
 function isUntouched(body: string): boolean {
   if (body.trim().length === 0) return true;
-  return PURPOSES.some((p) => body === TEMPLATES[p.value].sms || body === TEMPLATES[p.value].email);
+  return body === FLEET_TEMPLATES.sms || body === FLEET_TEMPLATES.email;
 }
 
 export function CampaignCreateForm() {
   const router = useRouter();
   const [channel, setChannel] = useState<"sms" | "email">("sms");
-  const [purpose, setPurpose] = useState<Purpose>("winback");
-  const [body, setBody] = useState<string>(TEMPLATES.winback.sms);
+  const [body, setBody] = useState<string>(FLEET_TEMPLATES.sms);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Only ever replaces copy that is still an untouched starter, so switching
-  // channel or purpose by accident cannot discard something the owner wrote.
+  // channel by accident cannot discard something the owner wrote.
   function switchChannel(next: "sms" | "email") {
     setChannel(next);
-    if (isUntouched(body)) setBody(TEMPLATES[purpose][next]);
-  }
-
-  function switchPurpose(next: Purpose) {
-    setPurpose(next);
-    if (isUntouched(body)) setBody(TEMPLATES[next][channel]);
+    if (isUntouched(body)) setBody(FLEET_TEMPLATES[next]);
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -91,32 +70,9 @@ export function CampaignCreateForm() {
     <form onSubmit={submit} className={card}>
       <h2 className={heading}>New campaign</h2>
       <p className={`mt-1 ${subtle}`}>
-        Write the message first. You add contacts, test it on your own phone, and send in batches on
-        the next screen.
+        Write the message first. You paste the contacts in, test it on your own phone, and send in
+        batches on the next screen.
       </p>
-
-      <fieldset className="mt-4">
-        <legend className={label}>What is this for?</legend>
-        <div className="mt-1.5 flex flex-wrap gap-2">
-          {PURPOSES.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() => switchPurpose(option.value)}
-              className={`min-h-10 rounded-xl border px-3.5 text-xs font-semibold transition ${
-                purpose === option.value
-                  ? "border-[#0B2A4A] bg-[#0B2A4A] text-white admin-on-dark"
-                  : "border-[#D5DEE7] bg-white text-[#42536A] hover:border-[#0B2A4A]/30"
-              }`}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-        <span className="mt-1.5 block text-[11px] text-[#5A6B7D]">
-          Only changes the starting wording. You pick who it goes to on the next screen.
-        </span>
-      </fieldset>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <label className={label}>

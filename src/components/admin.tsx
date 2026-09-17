@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -15,11 +16,13 @@ export type AdminNavIcon =
   | "reports"
   | "expenses"
   | "messages"
+  | "megaphone"
   | "blog"
   | "services"
   | "staff"
   | "settings"
-  | "ticket";
+  | "ticket"
+  | "claims";
 
 export type AdminNavItem = {
   href: string;
@@ -27,45 +30,165 @@ export type AdminNavItem = {
   icon: AdminNavIcon;
 };
 
-/** Active-route-aware navigation shared by the desktop rail and mobile menu. */
-export function AdminNavLinks({ items, mobile = false }: { items: AdminNavItem[]; mobile?: boolean }) {
-  const pathname = usePathname();
-  // Nested routes such as /admin/reports/payroll used to highlight both
-  // "Reports" and "Payroll". Prefer the most specific matching destination so
-  // the navigation always communicates one current location.
-  const activeHref = items
-    .filter((item) =>
-      item.href === "/admin" ? pathname === item.href : pathname.startsWith(item.href),
-    )
+export type AdminNavSection = {
+  label: string;
+  items: AdminNavItem[];
+};
+
+/**
+ * Nested routes such as /admin/reports/payroll match both "Reports" and
+ * "Payroll". Prefer the most specific destination so the navigation always
+ * communicates exactly one current location.
+ */
+function activeHrefFor(sections: AdminNavSection[], pathname: string): string | undefined {
+  return sections
+    .flatMap((section) => section.items)
+    .filter((item) => (item.href === "/admin" ? pathname === item.href : pathname.startsWith(item.href)))
     .sort((a, b) => b.href.length - a.href.length)[0]?.href;
+}
+
+/**
+ * The admin rail, as collapsible groups.
+ *
+ * Every release has added another destination and the flat list had grown past
+ * a laptop screen, so reaching Settings meant scrolling past nine things nobody
+ * on the counter uses. Sections now collapse, and only the one holding the
+ * current page is open — which keeps the whole rail visible without scrolling
+ * and makes the grouping do some work rather than just labelling a long list.
+ *
+ * Open/closed is deliberately NOT persisted. The sidebar lives in the layout,
+ * so a section a staff member opens stays open for the rest of the visit; what
+ * survives a reload is the rule, not one person's leftover state.
+ */
+export function AdminNav({
+  sections,
+  mobile = false,
+}: {
+  sections: AdminNavSection[];
+  mobile?: boolean;
+}) {
+  const pathname = usePathname();
+  const activeHref = activeHrefFor(sections, pathname);
+  const activeSection = sections.find((section) =>
+    section.items.some((item) => item.href === activeHref),
+  )?.label;
+
+  const [open, setOpen] = useState<string[]>(() => (activeSection ? [activeSection] : []));
+
+  // Navigating into a collapsed section opens it. Without this, following a
+  // link from inside a page — "Redeem a code" from the nudges screen, say —
+  // would leave the rail pointing nowhere.
+  useEffect(() => {
+    if (activeSection) setOpen((prev) => (prev.includes(activeSection) ? prev : [...prev, activeSection]));
+  }, [activeSection]);
 
   return (
-    <nav aria-label={mobile ? "Mobile admin navigation" : "Admin navigation"} className={mobile ? "grid grid-cols-2 gap-1.5" : "space-y-1"}>
-      {items.map((item) => {
-        const active = item.href === activeHref;
+    <nav aria-label={mobile ? "Mobile admin navigation" : "Admin navigation"} className="space-y-1">
+      {sections.map((section) => {
+        const expanded = open.includes(section.label);
+        const holdsActive = section.label === activeSection;
         return (
-          <Link
-            key={item.href}
-            href={item.href}
-            aria-current={active ? "page" : undefined}
-            className={`group flex min-h-11 items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium outline-none transition focus-visible:ring-2 focus-visible:ring-[#E0A93B] ${
-              active
-                ? mobile
-                  ? "bg-[#0B2A4A] text-[#FFFFFF] shadow-sm"
-                  : "bg-white/12 text-[#FFFFFF] shadow-[inset_3px_0_0_#E0A93B]"
-                : mobile
-                  ? "text-[#445468] hover:bg-[#F4F6FA] hover:text-[#0B2A4A]"
-                  : "text-white/65 hover:bg-white/8 hover:text-white"
-            }`}
-          >
-            <span className={`grid h-8 w-8 shrink-0 place-items-center rounded-md transition ${active ? "bg-[#E0A93B] text-[#0B2A4A]" : mobile ? "bg-[#EEF2F7] text-[#5A6B7D] group-hover:text-[#0B2A4A]" : "bg-white/7 text-white/70 group-hover:bg-white/10 group-hover:text-white"}`}>
-              <AdminIcon name={item.icon} />
-            </span>
-            <span className="truncate">{item.label}</span>
-          </Link>
+          <section key={section.label}>
+            <h2>
+              <button
+                type="button"
+                aria-expanded={expanded}
+                onClick={() =>
+                  setOpen((prev) =>
+                    prev.includes(section.label)
+                      ? prev.filter((label) => label !== section.label)
+                      : [...prev, section.label],
+                  )
+                }
+                className={`flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-[10px] font-bold uppercase tracking-[0.18em] outline-none transition focus-visible:ring-2 focus-visible:ring-[#E0A93B] ${
+                  mobile
+                    ? "text-[#5A6B7D] hover:bg-[#F4F6FA] hover:text-[#0B2A4A]"
+                    : "text-white/45 hover:bg-white/8 hover:text-white/75"
+                }`}
+              >
+                <Chevron open={expanded} />
+                <span className="truncate">{section.label}</span>
+                {/* A collapsed section still has to say "you are in here". */}
+                {holdsActive && !expanded && (
+                  <span
+                    aria-hidden="true"
+                    className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-[#E0A93B]"
+                  />
+                )}
+                <span className="sr-only">{holdsActive ? "(contains the current page)" : ""}</span>
+              </button>
+            </h2>
+            {expanded && (
+              <ul className={mobile ? "mt-1 mb-2 grid gap-1 sm:grid-cols-2" : "mt-1 mb-2 space-y-1"}>
+                {section.items.map((item) => (
+                  <li key={item.href}>
+                    <AdminNavLink item={item} active={item.href === activeHref} mobile={mobile} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
         );
       })}
     </nav>
+  );
+}
+
+function AdminNavLink({
+  item,
+  active,
+  mobile,
+}: {
+  item: AdminNavItem;
+  active: boolean;
+  mobile: boolean;
+}) {
+  return (
+    <Link
+      href={item.href}
+      aria-current={active ? "page" : undefined}
+      className={`group flex min-h-11 items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium outline-none transition focus-visible:ring-2 focus-visible:ring-[#E0A93B] ${
+        active
+          ? mobile
+            ? "bg-[#0B2A4A] text-[#FFFFFF] shadow-sm"
+            : "bg-white/12 text-[#FFFFFF] shadow-[inset_3px_0_0_#E0A93B]"
+          : mobile
+            ? "text-[#445468] hover:bg-[#F4F6FA] hover:text-[#0B2A4A]"
+            : "text-white/65 hover:bg-white/8 hover:text-white"
+      }`}
+    >
+      <span
+        className={`grid h-8 w-8 shrink-0 place-items-center rounded-md transition ${
+          active
+            ? "bg-[#E0A93B] text-[#0B2A4A]"
+            : mobile
+              ? "bg-[#EEF2F7] text-[#5A6B7D] group-hover:text-[#0B2A4A]"
+              : "bg-white/7 text-white/70 group-hover:bg-white/10 group-hover:text-white"
+        }`}
+      >
+        <AdminIcon name={item.icon} />
+      </span>
+      <span className="truncate">{item.label}</span>
+    </Link>
+  );
+}
+
+function Chevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={`shrink-0 transition-transform ${open ? "rotate-90" : ""}`}
+    >
+      <path d="m9 6 6 6-6 6" />
+    </svg>
   );
 }
 
@@ -102,6 +225,10 @@ function AdminIcon({ name }: { name: AdminNavIcon }) {
       return <svg {...common}><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/><path d="m18 4 1 1 2-2"/></svg>;
     case "ticket":
       return <svg {...common}><path d="M3 8a2 2 0 0 0 2-2h14a2 2 0 0 0 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 0-2 2H5a2 2 0 0 0-2-2v-2a2 2 0 0 0 0-4z"/><path d="M14 6v12" strokeDasharray="2 2"/></svg>;
+    case "megaphone":
+      return <svg {...common}><path d="M3 11v2a1 1 0 0 0 1 1h2l4 4V6L6 10H4a1 1 0 0 0-1 1Z"/><path d="M14 9a4 4 0 0 1 0 6"/><path d="M17 6a8 8 0 0 1 0 12"/></svg>;
+    case "claims":
+      return <svg {...common}><path d="M20 12.5 12.5 20a2 2 0 0 1-2.8 0l-6-6a2 2 0 0 1-.6-1.4V5a2 2 0 0 1 2-2h7.6a2 2 0 0 1 1.4.6l5.9 5.9a2 2 0 0 1 0 2.8Z"/><path d="M7.5 7.5h.01"/></svg>;
     case "settings":
       return <svg {...common}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"/></svg>;
   }

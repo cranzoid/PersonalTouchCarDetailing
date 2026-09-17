@@ -2,13 +2,22 @@ import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
-import { AdminNavLinks, type AdminNavIcon } from "@/components/admin";
+import { AdminNav, type AdminNavIcon } from "@/components/admin";
 import { getStaff } from "@/lib/auth/session";
 import { roleHas, type Permission } from "@/lib/auth/permissions";
 import { logoutAction } from "../login/actions";
 
 type NavItem = { href: string; label: string; permission: Permission; icon: AdminNavIcon };
 
+/**
+ * The rail, grouped the way the shop works rather than the way the code is laid
+ * out. Two audiences use this screen: whoever is on the counter, who needs the
+ * job in front of them, and the owner, who needs everything else. "Workflow"
+ * and "Clients & money" are the counter's day; "Admin" is the owner's.
+ *
+ * Order inside a section matters — redeeming a wash code and looking a claim up
+ * are the same task ten seconds apart, so they sit together.
+ */
 const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
   {
     label: "Overview",
@@ -22,16 +31,17 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
       { href: "/admin/appointments", label: "Appointments", permission: "manage_bookings", icon: "calendar" },
       { href: "/admin/leads", label: "Leads", permission: "manage_customers", icon: "leads" },
       { href: "/admin/marketing/offer-claims/redeem", label: "Redeem wash code", permission: "manage_bookings", icon: "ticket" },
+      { href: "/admin/marketing/offer-claims", label: "Offer claims", permission: "manage_marketing", icon: "claims" },
       { href: "/admin/estimates", label: "Estimates", permission: "manage_estimates", icon: "estimate" },
       { href: "/admin/jobs", label: "Jobs", permission: "work_jobs", icon: "jobs" },
     ],
   },
   {
-    label: "Clients & revenue",
+    label: "Clients & money",
     items: [
-      { href: "/admin/invoices", label: "Invoices", permission: "record_payments", icon: "invoice" },
       { href: "/admin/customers", label: "Customers", permission: "manage_customers", icon: "customers" },
       { href: "/admin/fleet", label: "Fleet accounts", permission: "manage_customers", icon: "fleet" },
+      { href: "/admin/invoices", label: "Invoices", permission: "record_payments", icon: "invoice" },
       { href: "/admin/expenses", label: "Expenses", permission: "manage_expenses", icon: "expenses" },
       { href: "/admin/timesheets", label: "Hours", permission: "manage_timesheets", icon: "calendar" },
       { href: "/admin/reports", label: "Reports", permission: "view_financial_reports", icon: "reports" },
@@ -39,15 +49,19 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
     ],
   },
   {
-    label: "Business",
+    label: "Website",
     items: [
-      { href: "/admin/communications", label: "Messages", permission: "manage_settings", icon: "messages" },
-      { href: "/admin/marketing", label: "Outreach", permission: "manage_marketing", icon: "messages" },
-      { href: "/admin/marketing/offer-claims", label: "Offer claims", permission: "manage_marketing", icon: "leads" },
-      { href: "/admin/marketing/wash-nudges", label: "First-wash nudges", permission: "manage_marketing", icon: "messages" },
       { href: "/admin/results", label: "Case studies", permission: "manage_marketing", icon: "services" },
       { href: "/admin/blog", label: "Blog", permission: "manage_marketing", icon: "blog" },
+    ],
+  },
+  {
+    label: "Admin",
+    items: [
+      { href: "/admin/marketing", label: "Outreach", permission: "manage_marketing", icon: "megaphone" },
+      { href: "/admin/marketing/wash-nudges", label: "First-wash nudges", permission: "manage_marketing", icon: "messages" },
       { href: "/admin/services", label: "Services", permission: "manage_services", icon: "services" },
+      { href: "/admin/communications", label: "Message templates", permission: "manage_settings", icon: "messages" },
       { href: "/admin/staff", label: "Staff", permission: "manage_staff", icon: "staff" },
       { href: "/admin/settings", label: "Settings", permission: "manage_settings", icon: "settings" },
       { href: "/admin/settings/bookkeeping", label: "Categories & bills", permission: "manage_expenses", icon: "expenses" },
@@ -67,7 +81,6 @@ export default async function AdminLayout({ children }: { children: ReactNode })
       .filter((item) => roleHas(staff.role, item.permission))
       .map(({ href, label, icon }) => ({ href, label, icon })),
   })).filter((section) => section.items.length > 0);
-  const visibleNav = visibleSections.flatMap((section) => section.items);
   const initial = staff.name.trim().charAt(0).toUpperCase() || "S";
 
   return (
@@ -77,14 +90,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
           <BrandLockup />
 
           <div className="mt-7 flex-1">
-            {visibleSections.map((section) => (
-              <section key={section.label} className="mb-5">
-                <p className="mb-2 px-3 text-[9px] font-bold uppercase tracking-[0.22em] text-white/38">
-                  {section.label}
-                </p>
-                <AdminNavLinks items={section.items} />
-              </section>
-            ))}
+            <AdminNav sections={visibleSections} />
           </div>
 
           <div className="mt-6 rounded-2xl border border-white/10 bg-white/[0.06] p-3.5">
@@ -128,7 +134,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
                     <span className="grid h-9 w-9 place-items-center rounded-lg bg-[#E0A93B] text-sm font-bold text-[#0B2A4A]">{initial}</span>
                     <span className="min-w-0"><span className="block truncate text-sm font-semibold text-[#0B2A4A]">{staff.name}</span><span className="block text-[10px] font-bold uppercase tracking-wider text-[#77869A]">{staff.role}</span></span>
                   </div>
-                  <AdminNavLinks items={visibleNav} mobile />
+                  <AdminNav sections={visibleSections} mobile />
                   <div className="mt-3 flex items-center justify-between border-t border-[#E3E8EF] pt-3">
                     <a href="/" target="_blank" rel="noopener noreferrer" className="text-xs font-semibold text-[#0B2A4A]">Open website ↗</a>
                     <form action={logoutAction}><button className="rounded-lg px-2 py-1 text-xs font-semibold text-[#8A3340] outline-none focus-visible:ring-2 focus-visible:ring-[#E0A93B]">Sign out</button></form>

@@ -7,12 +7,8 @@ import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { AuthError, requireStaff } from "@/lib/auth/session";
 import { newId } from "@/lib/id";
-import {
-  describeFooting,
-  findMissedAppointments,
-  type AudienceFilter,
-} from "@/lib/marketing/audience";
-import { checkCampaignCompliance } from "@/lib/marketing/compliance";
+import type { AudienceFilter } from "@/lib/marketing/audience";
+import { checkCampaignCompliance, emailComplianceFooter } from "@/lib/marketing/compliance";
 import { checkCampaignHtml, htmlToPlainText } from "@/lib/marketing/html-email";
 import { parseContactPaste } from "@/lib/marketing/import";
 import {
@@ -31,9 +27,16 @@ import {
   removeSuppression,
   type MarketingChannel,
 } from "@/lib/marketing/suppressions";
+import {
+  MAX_WINBACK_BATCH,
+  WINBACK_LIMITS,
+  WINBACK_TEMPLATE_KEYS,
+} from "@/lib/marketing/winback-message";
+import { sendWinbackMessages, type WinbackOutcome } from "@/lib/marketing/winback";
 import { sendMessage } from "@/lib/messaging";
 import { normalizePhone } from "@/lib/phone";
 import { getSettings } from "@/lib/settings";
+import { getAppBaseUrl } from "@/lib/urls";
 
 export type ActionResult<T extends object = Record<never, never>> =
   | ({ ok: true } & T)
@@ -484,149 +487,6 @@ export async function importContactsAction(raw: unknown): Promise<
 /* Win-back audience                                                   */
 /* ------------------------------------------------------------------ */
 
-const queueAudienceInput = z.object({
-  campaignId: z.string().min(1),
-  filter: z.enum(["cancelled", "no_show", "missed"]),
-  withinDays: z.number().int().min(1).max(1095),
-  /** The rows the owner actually ticked. Never "everything that matched". */
-  appointmentIds: z.array(z.string().min(1)).min(1).max(500),
-});
-
-/**
- * Adds the selected cancelled / no-show customers to a campaign.
- *
- * Two things deserve to be deliberate here.
- *
- * CONSENT IS RECORDED, NOT ASSUMED. `sendMessage` refuses a marketing message
- * to anyone without `marketing_consent` (DECISIONS.md #8), so queueing these
- * rows without recording a basis would produce a campaign where every row comes
- * back "skipped" — technically safe, completely useless. The basis written here
- * is the one the audience builder computed from the shop's own records: a
- * purchase inside two years, or the missed booking itself inside six months.
- * Rows with no footing are refused rather than consented into existence.
- *
- * THE SELECTION IS RE-CHECKED SERVER-SIDE. The ids arrive from a list the
- * browser rendered some minutes ago; an appointment that has since been
- * rebooked, or a customer who has since opted out, must not be queued because
- * a stale checkbox said so.
- */
-export async function queueAudienceAction(raw: unknown): Promise<
-  ActionResult<{
-    queued: number;
-    duplicates: number;
-    invalid: number;
-    refused: { name: string; reason: string }[];
-  }>
-> {
-  try {
-    const staff = await requireStaff("manage_marketing");
-    const parsed = queueAudienceInput.safeParse(raw);
-    if (!parsed.success) return { ok: false, error: "Select at least one contact to add." };
-    const input = parsed.data;
-
-    const campaign = await loadCampaign(input.campaignId);
-    if (!campaign) return { ok: false, error: "Campaign not found." };
-    if (campaign.status === "completed" || campaign.status === "cancelled") {
-      return { ok: false, error: "This campaign is closed — create a new one to message more contacts." };
-    }
-    const campaignChannel = campaign.channel as MarketingChannel;
-    const settings = await getSettings();
-
-    const { candidates } = await findMissedAppointments({
-      filter: input.filter as AudienceFilter,
-      channel: campaignChannel,
-      withinDays: input.withinDays,
-      timezone: settings.timezone,
-      limit: 1000,
-    });
-
-    const wanted = new Set(input.appointmentIds);
-    const selected = candidates.filter((c) => wanted.has(c.appointmentId));
-    if (selected.length === 0) {
-      return { ok: false, error: "Those bookings are no longer on the list — reload and try again." };
-    }
-
-    const refused: { name: string; reason: string }[] = [];
-    const outcome = await db().transaction(async (tx) => {
-      const queueable: Parameters<typeof queueRecipients>[2][number][] = [];
-      const now = new Date();
-
-      for (const candidate of selected) {
-        if (candidate.blockedReason) {
-          refused.push({ name: candidate.firstName, reason: candidate.blockedReason });
-          continue;
-        }
-
-        // Express consent already on file is left exactly as it is — overwriting
-        // it with a weaker implied basis would lose the stronger record.
-        if (candidate.footing !== "express") {
-          await tx
-            .update(schema.customers)
-            .set({
-              marketingConsent: true,
-              marketingConsentAt: now,
-              marketingConsentSource: `winback:${candidate.footing}`,
-              updatedAt: now,
-            })
-            .where(eq(schema.customers.id, candidate.customerId));
-        }
-
-        queueable.push({
-          customerId: candidate.customerId,
-          destination: candidate.destination,
-          firstName: candidate.firstName,
-          companyName: candidate.companyName,
-          appointmentId: candidate.appointmentId,
-          contextNote: [
-            candidate.outcome === "no_show" ? "No-show" : "Cancelled",
-            candidate.missedOnLabel,
-            candidate.reason ? `— ${candidate.reason}` : "— no reason recorded",
-          ].join(" "),
-          lastVisitLabel: candidate.missedOnLabel,
-        });
-      }
-
-      const queueResult = await queueRecipients(
-        tx,
-        { id: campaign.id, channel: campaignChannel },
-        queueable,
-      );
-
-      if (!campaign.audience) {
-        await tx
-          .update(schema.outreachCampaigns)
-          .set({ audience: input.filter, updatedAt: now })
-          .where(eq(schema.outreachCampaigns.id, campaign.id));
-      }
-
-      await audit(tx, {
-        actorType: "staff",
-        actorId: staff.id,
-        action: "outreach_campaign.audience_queued",
-        entityType: "outreach_campaign",
-        entityId: campaign.id,
-        after: {
-          filter: input.filter,
-          withinDays: input.withinDays,
-          selected: selected.length,
-          queued: queueResult.queued,
-          refused: refused.length,
-          bases: [...new Set(selected.map((c) => describeFooting(c.footing)))],
-        },
-      });
-
-      return queueResult;
-    });
-
-    revalidatePath(`/admin/marketing/${input.campaignId}`);
-    return { ok: true, ...outcome, refused };
-  } catch (error) {
-    if (error instanceof AuthError) return { ok: false, error: error.message };
-    console.error("queueAudienceAction failed", error);
-    return { ok: false, error: "Something went wrong adding those contacts." };
-  }
-}
-
 /** Confirms the provider this campaign needs is actually configured. */
 async function providerReady(campaignChannel: MarketingChannel): Promise<boolean> {
   const { getIntegrationSecret } = await import("@/lib/integrations");
@@ -966,5 +826,252 @@ export async function removeSuppressionAction(raw: unknown): Promise<ActionResul
     if (error instanceof AuthError) return { ok: false, error: error.message };
     console.error("removeSuppressionAction failed", error);
     return { ok: false, error: "Something went wrong removing that entry." };
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Win-back outreach — pick people, write once, send                   */
+/* ------------------------------------------------------------------ */
+
+const winbackWordingInput = z.object({
+  channel,
+  subject: z.string().trim().max(WINBACK_LIMITS.emailSubject).default(""),
+  body: z.string().trim().min(1).max(WINBACK_LIMITS.emailBody),
+});
+
+const winbackSendInput = winbackWordingInput.extend({
+  appointmentIds: z.array(z.string().trim().min(1).max(64)).min(1).max(MAX_WINBACK_BATCH),
+  filter: z.enum(["cancelled", "no_show", "missed"]),
+  withinDays: z.number().int().min(1).max(1095),
+  allowRecontact: z.boolean().default(false),
+  acknowledgeWarnings: z.boolean().default(false),
+});
+
+const winbackTestInput = winbackWordingInput.extend({
+  destination: z.string().trim().min(3).max(200),
+});
+
+/**
+ * Compliance for a win-back message, judged on the text a customer would read.
+ *
+ * The merge fields are rendered with obvious sample values first: "{{FirstName}}"
+ * is not a name, and a rule about how long a text is has to measure the text
+ * that actually goes out.
+ */
+async function validateWinbackContent(input: {
+  channel: MarketingChannel;
+  subject: string;
+  body: string;
+}): Promise<{ errors: string[]; warnings: string[] }> {
+  const settings = await getSettings();
+  const sample = { firstName: "Dave", companyName: "Hamilton Plumbing", lastVisit: "12 Aug 2026" };
+  const issues = checkCampaignCompliance({
+    channel: input.channel,
+    subject: input.channel === "email" ? renderOutreachBody(input.subject, sample) : null,
+    body: renderOutreachBody(input.body, sample),
+    businessName: settings.businessName,
+  });
+  const errors = issues.filter((i) => i.level === "error").map((i) => i.message);
+  const warnings = issues.filter((i) => i.level === "warning").map((i) => i.message);
+
+  const unknown = [...new Set([...unknownMergeFields(input.body), ...unknownMergeFields(input.subject)])];
+  if (unknown.length > 0) {
+    errors.unshift(
+      `Unknown placeholder${unknown.length > 1 ? "s" : ""} ${unknown.map((f) => `{{${f}}}`).join(", ")} — only {{FirstName}}, {{Company}} and {{LastVisit}} can be filled in.`,
+    );
+  }
+  if (input.channel === "sms" && input.body.length > WINBACK_LIMITS.smsBody) {
+    errors.push(`A text can be at most ${WINBACK_LIMITS.smsBody} characters.`);
+  }
+  return { errors, warnings };
+}
+
+/** Sends the win-back message to the people ticked on the outreach screen. */
+export async function sendWinbackAction(raw: unknown): Promise<
+  ActionResult<{
+    campaignId: string | null;
+    outcomes: WinbackOutcome[];
+    sent: number;
+    skipped: number;
+    failed: number;
+  }>
+> {
+  try {
+    const staff = await requireStaff("manage_marketing");
+    const parsed = winbackSendInput.safeParse(raw);
+    if (!parsed.success) {
+      return { ok: false, error: `Tick between 1 and ${MAX_WINBACK_BATCH} people, and write a message.` };
+    }
+    const input = parsed.data;
+
+    const { errors, warnings } = await validateWinbackContent(input);
+    if (errors.length > 0) return { ok: false, error: errors[0] };
+    if (warnings.length > 0 && !input.acknowledgeWarnings) {
+      return { ok: false, error: `${warnings[0]} Review the message, then send again to confirm.` };
+    }
+
+    const settings = await getSettings();
+    const window = withinSendWindow(new Date(), settings.timezone);
+    if (!window.allowed) {
+      return {
+        ok: false,
+        error: `It is ${window.localHour}:00 locally — marketing messages only go out between 9am and 8pm.`,
+      };
+    }
+    // Checked BEFORE any row is queued: a missing credential would otherwise
+    // burn the whole selection into `failed` for a reason that has nothing to
+    // do with them.
+    if (!(await providerReady(input.channel))) {
+      return {
+        ok: false,
+        error:
+          input.channel === "sms"
+            ? "Twilio is not configured yet — add the credentials in Settings → Integrations."
+            : "Resend is not configured yet — add the credentials in Settings → Integrations.",
+      };
+    }
+
+    const { campaignId, outcomes } = await sendWinbackMessages({
+      appointmentIds: input.appointmentIds,
+      filter: input.filter as AudienceFilter,
+      withinDays: input.withinDays,
+      channel: input.channel,
+      subject: input.subject,
+      body: input.body,
+      allowRecontact: input.allowRecontact,
+      staffId: staff.id,
+      settings,
+    });
+
+    revalidatePath("/admin/marketing");
+    revalidatePath("/admin/marketing/campaigns");
+    const count = (status: WinbackOutcome["status"]) => outcomes.filter((o) => o.status === status).length;
+    return {
+      ok: true,
+      campaignId,
+      outcomes,
+      sent: count("sent"),
+      skipped: count("skipped"),
+      failed: count("failed"),
+    };
+  } catch (error) {
+    if (error instanceof AuthError) return { ok: false, error: error.message };
+    console.error("sendWinbackAction failed", error);
+    return { ok: false, error: "Something went wrong — check the list before sending again." };
+  }
+}
+
+/** Saves the composer's wording as the default the outreach screen opens with. */
+export async function saveWinbackWordingAction(raw: unknown): Promise<ActionResult> {
+  try {
+    const staff = await requireStaff("manage_marketing");
+    const parsed = winbackWordingInput.safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Write a message before saving." };
+    const input = parsed.data;
+
+    const { errors } = await validateWinbackContent(input);
+    if (errors.length > 0) return { ok: false, error: errors[0] };
+
+    const key = WINBACK_TEMPLATE_KEYS[input.channel];
+    const subject = input.channel === "email" ? input.subject : null;
+    await db().transaction(async (tx) => {
+      const [before] = await tx
+        .select()
+        .from(schema.messageTemplates)
+        .where(eq(schema.messageTemplates.key, key))
+        .for("update");
+      if (before) {
+        await tx
+          .update(schema.messageTemplates)
+          .set({ subject, body: input.body, updatedAt: new Date() })
+          .where(eq(schema.messageTemplates.id, before.id));
+      } else {
+        await tx.insert(schema.messageTemplates).values({
+          id: newId("tpl"),
+          key,
+          channel: input.channel,
+          subject,
+          body: input.body,
+        });
+      }
+      await audit(tx, {
+        actorType: "staff",
+        actorId: staff.id,
+        action: "message_template.updated",
+        entityType: "message_template",
+        entityId: before?.id ?? key,
+        before: before ? { subject: before.subject, body: before.body } : null,
+        after: { subject, body: input.body },
+      });
+    });
+
+    revalidatePath("/admin/marketing");
+    revalidatePath("/admin/communications");
+    return { ok: true };
+  } catch (error) {
+    if (error instanceof AuthError) return { ok: false, error: error.message };
+    console.error("saveWinbackWordingAction failed", error);
+    return { ok: false, error: "Something went wrong saving that wording." };
+  }
+}
+
+/**
+ * Sends the current wording to the person pressing the button, filled in with
+ * sample values. Goes out as a `staff_alert` — the owner's own phone has no
+ * consent record and should not need one — and outside the send-window check,
+ * because testing at 10pm bothers nobody else.
+ */
+export async function sendWinbackTestAction(raw: unknown): Promise<TestSendResult> {
+  try {
+    await requireStaff("manage_marketing");
+    const parsed = winbackTestInput.safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Enter your own number or email to test with." };
+    const input = parsed.data;
+
+    const destination = normalizeDestination(input.channel, input.destination);
+    if (!destination) {
+      return {
+        ok: false,
+        error: input.channel === "sms" ? "That is not a usable phone number." : "That is not a usable email address.",
+      };
+    }
+
+    const { errors } = await validateWinbackContent(input);
+    if (errors.length > 0) return { ok: false, error: errors[0] };
+    if (!(await providerReady(input.channel))) {
+      return {
+        ok: false,
+        error:
+          input.channel === "sms"
+            ? "Twilio is not configured yet — add the credentials in Settings → Integrations."
+            : "Resend is not configured yet — add the credentials in Settings → Integrations.",
+      };
+    }
+
+    const sample = { firstName: "Dave", companyName: "Hamilton Plumbing", lastVisit: "12 Aug 2026" };
+    const settings = await getSettings();
+    const body = renderOutreachBody(input.body, sample);
+    const result = await sendMessage({
+      channel: input.channel,
+      kind: "staff_alert",
+      to: input.destination,
+      subject:
+        input.channel === "email" ? `[TEST] ${renderOutreachBody(input.subject, sample)}` : undefined,
+      body:
+        input.channel === "email"
+          ? `${body}\n${emailComplianceFooter(settings, `${getAppBaseUrl()}/unsubscribe/sample`)}`
+          : body,
+    });
+    return result.sent
+      ? { ok: true }
+      : {
+          ok: false,
+          error: "The test could not be sent — check Settings → Integrations.",
+          detail: result.detail,
+        };
+  } catch (error) {
+    if (error instanceof AuthError) return { ok: false, error: error.message };
+    console.error("sendWinbackTestAction failed", error);
+    return { ok: false, error: "Something went wrong sending that test." };
   }
 }

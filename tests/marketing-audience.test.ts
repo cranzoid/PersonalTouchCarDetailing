@@ -5,6 +5,7 @@ import { newId } from "../src/lib/id";
 import {
   FOOTING_WINDOW_DAYS,
   findMissedAppointments,
+  findMissedAudience,
   resolveFooting,
 } from "../src/lib/marketing/audience";
 import { addSuppression } from "../src/lib/marketing/suppressions";
@@ -362,5 +363,51 @@ describe("findMissedAppointments", () => {
     });
     expect(candidates[0].services).toBe("Full Detail");
     expect(candidates[0].missedOnLabel).toMatch(/\d{4}/);
+  });
+});
+
+/**
+ * The outreach workspace switches between text and email without reloading, so
+ * every row arrives carrying both verdicts. What is easy to get wrong here is
+ * the difference between "this row has no email answer" and "this row's email
+ * answer is: nothing is blocking them" — one blocks the send, the other is the
+ * whole point of the screen.
+ */
+describe("findMissedAudience", () => {
+  beforeEach(resetDb);
+
+  it("answers for text and email in one pass", async () => {
+    const customerId = await addCustomer({ phone: "905 555 1234", email: "dave@example.com" });
+    await addMissedAppointment({ customerId, status: "no_show", startsAt: daysAgo(10) });
+
+    const { rows, totals } = await findMissedAudience({ filter: "missed", withinDays: 90, timezone: TZ });
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0].sms).toMatchObject({ destination: "905 555 1234", blockedReason: null });
+    expect(rows[0].email).toMatchObject({ destination: "dave@example.com", blockedReason: null });
+    expect(totals).toMatchObject({ scanned: 1, sms: { eligible: 1 }, email: { eligible: 1 } });
+  });
+
+  it("blocks only the channel that is missing", async () => {
+    const customerId = await addCustomer({ phone: "905 555 1234", email: null });
+    await addMissedAppointment({ customerId, status: "cancelled", startsAt: daysAgo(10) });
+
+    const { rows, totals } = await findMissedAudience({ filter: "missed", withinDays: 90, timezone: TZ });
+
+    expect(rows[0].sms.blockedReason).toBeNull();
+    expect(rows[0].email.blockedReason).toBe("No email address on file");
+    expect(totals.sms.eligible).toBe(1);
+    expect(totals.email.eligible).toBe(0);
+  });
+
+  it("carries an opt-out on one channel without touching the other", async () => {
+    const customerId = await addCustomer({ phone: "905 555 1234", email: "dave@example.com" });
+    await addMissedAppointment({ customerId, status: "no_show", startsAt: daysAgo(10) });
+    await addSuppression(db(), { channel: "email", destination: "dave@example.com", reason: "unsubscribe_link" });
+
+    const { rows } = await findMissedAudience({ filter: "missed", withinDays: 90, timezone: TZ });
+
+    expect(rows[0].sms.blockedReason).toBeNull();
+    expect(rows[0].email.blockedReason).toBe("On the do-not-contact list");
   });
 });

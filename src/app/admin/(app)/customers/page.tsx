@@ -3,9 +3,13 @@ import { desc, ilike, or } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { requirePageStaff } from "@/lib/auth/page";
 import { duplicatePhoneNumbers, normalizePhone } from "@/lib/phone";
+import { CustomerSearch } from "./customer-search";
 import { NewCustomerForm } from "./new-customer-form";
 
 export const dynamic = "force-dynamic";
+
+/** One screenful of the newest customers; anything beyond it is reached by searching. */
+const CUSTOMER_LIST_LIMIT = 100;
 
 export default async function CustomersPage({
   searchParams,
@@ -35,7 +39,7 @@ export default async function CustomersPage({
     : base
   )
     .orderBy(desc(schema.customers.createdAt))
-    .limit(100);
+    .limit(CUSTOMER_LIST_LIMIT);
 
   // Live data already contains duplicates — the public booking form creates a
   // new customer every time, and deliberately does not match on phone. Flagging
@@ -62,14 +66,11 @@ export default async function CustomersPage({
       <div className="mt-4">
         <NewCustomerForm defaultOpen={openNew === "1"} next={next} />
       </div>
-      <form className="mt-4 max-w-sm">
-        <input
-          name="q"
-          defaultValue={query ?? ""}
-          placeholder="Search name, email or phone…"
-          className="w-full rounded-lg border border-ink-600 bg-ink-900 px-4 py-2 text-sm text-white placeholder:text-ink-600"
-        />
-      </form>
+      <CustomerSearch
+        defaultQuery={query ?? ""}
+        resultCount={customers.length}
+        capped={customers.length === CUSTOMER_LIST_LIMIT}
+      />
       <div className="mt-6 overflow-x-auto rounded-xl border border-ink-800">
         <table className="w-full text-sm">
           <thead className="bg-ink-900 text-left text-ink-400">
