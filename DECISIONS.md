@@ -1230,6 +1230,26 @@ about not knowing, and staff needed it to be useful instead.
   the job reaches ready for pickup or completed. The invoice is still built from
   the appointment's lines, so re-pricing first is still the right order.
 
+- **The bill comes first, and every line on it is removable.** A revision
+  replaces the booking with whatever the form says, but the form only ever
+  showed the catalogue: ticking the new package did not untick the old one, and
+  a line whose service had been renamed or retired was pre-selected with no
+  checkbox to untick at all — it was resubmitted with every revision and kept
+  reappearing on the invoice. The panel now opens with "What this change will
+  bill": packages, add-ons and custom lines in one list, each with Remove, and
+  the subtotal under it. A line the catalogue can no longer price is listed from
+  what was booked, flagged, and holds the save until it is removed — the action
+  would otherwise refuse the whole change with a message about "one or more
+  services" that names nothing. This is the only place a line can be taken off:
+  the invoice screen has no line editor, by #21 and #22.
+- **The staff member's reason never reaches the invoice.** It is required, and it
+  belongs in the audit log: "our mistake", "customer haggled" and "comped the
+  interior" are notes for the shop, and the owner does not want them on a
+  document the customer is handed. `revisionDiscountReason` now records only
+  what happened to the offer — re-applied to the revised package, or the
+  original amount kept — and the typed reason stays in `audit_log.reason`. The
+  field says so on screen.
+
 **Revisit when:** the panel needs to show durations as well as prices — the size
 delta moves both, and a longer job is what triggers the bay-overlap warning
 staff then have to confirm.

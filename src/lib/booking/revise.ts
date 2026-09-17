@@ -122,17 +122,23 @@ export function reviseDiscountCents(input: {
   return Math.min(Math.max(0, raw), input.newSubtotalCents);
 }
 
-/** The human-readable "why" that rides onto `invoices.discount_reason`. */
+/**
+ * The human-readable "why" that rides onto `invoices.discount_reason`.
+ *
+ * Deliberately says only what happened to the OFFER. The staff member's typed
+ * reason is not included: the owner does not want a note written for the shop
+ * ("customer haggled", "our mistake") sitting on the customer's bill. It is
+ * kept in the audit log, which is where an internal explanation belongs.
+ */
 export function revisionDiscountReason(
   mode: ReviseDiscountMode,
   promoLabel: string | null,
-  staffReason: string,
 ): string | null {
   if (mode === "remove") return null;
   const offer = promoLabel ?? "Discount locked at booking";
   return mode === "reapply"
-    ? `${offer} — re-applied to revised package (${staffReason})`
-    : `${offer} — original amount kept on revised package (${staffReason})`;
+    ? `${offer} — re-applied to revised package`
+    : `${offer} — original amount kept on revised package`;
 }
 
 export async function reviseAppointmentLines(input: {
@@ -350,7 +356,7 @@ export async function reviseAppointmentLines(input: {
           depositAppliedCents: Math.min(appointment.depositPaidCents, invoiceTotals.totalCents),
           discountReason:
             invoiceTotals.discountCents > 0
-              ? revisionDiscountReason(input.discountMode, appointment.promoLabel, input.reason)
+              ? revisionDiscountReason(input.discountMode, appointment.promoLabel)
               : null,
           updatedAt: new Date(),
         })

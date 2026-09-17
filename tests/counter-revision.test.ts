@@ -189,11 +189,18 @@ describe("reviseDiscountCents", () => {
 
 describe("revisionDiscountReason", () => {
   it("records which choice a staff member made", () => {
-    expect(revisionDiscountReason("reapply", "First Detail Offer", "upgraded at counter"))
-      .toBe("First Detail Offer — re-applied to revised package (upgraded at counter)");
-    expect(revisionDiscountReason("keep", "First Detail Offer", "goodwill"))
-      .toBe("First Detail Offer — original amount kept on revised package (goodwill)");
-    expect(revisionDiscountReason("remove", "First Detail Offer", "n/a")).toBeNull();
+    expect(revisionDiscountReason("reapply", "First Detail Offer"))
+      .toBe("First Detail Offer — re-applied to revised package");
+    expect(revisionDiscountReason("keep", "First Detail Offer"))
+      .toBe("First Detail Offer — original amount kept on revised package");
+    expect(revisionDiscountReason("remove", "First Detail Offer")).toBeNull();
+  });
+
+  it("never carries the staff member's typed reason onto the bill", () => {
+    // The owner's rule: an internal note ("our mistake", "customer haggled")
+    // belongs in the audit log, not on the customer's invoice.
+    expect(revisionDiscountReason("reapply", "First Detail Offer"))
+      .not.toContain("(");
   });
 });
 
@@ -353,6 +360,9 @@ describe("reviseAppointmentLinesAction", () => {
     expect(after.discountCents).toBe(900);
     expect(after.totalCents).toBe(9153); // $90 − $9 + 13%
     expect(after.discountReason).toContain("re-applied to revised package");
+    // The staff member's words stay in the audit log — never on the document
+    // the customer is handed.
+    expect(after.discountReason).not.toContain("downgraded at the counter");
 
     const lines = await db().select().from(schema.invoiceLineItems)
       .where(eq(schema.invoiceLineItems.invoiceId, invoiceRes.invoiceId));

@@ -323,6 +323,14 @@ export default async function AppointmentDetailPage({
               priceCents: line.priceCents,
               durationMin: line.durationMin,
             }))}
+          // Named and priced as booked, so the summary can still show a line
+          // whose package has since been renamed or retired.
+          bookedLines={lines.map((line) => ({
+            serviceId: line.serviceId,
+            addonId: line.addonId,
+            description: line.description,
+            priceCents: line.priceCents,
+          }))}
           currentDiscountCents={appt.discountCents}
           promoLabel={appt.promoLabel}
           vehicleLabel={vehicleCategory ? VEHICLE_CATEGORY_LABELS[vehicleCategory] : null}

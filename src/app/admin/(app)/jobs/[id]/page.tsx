@@ -216,6 +216,14 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
               priceCents: line.priceCents,
               durationMin: line.durationMin,
             }))}
+          // Named and priced as booked, so the summary can still show a line
+          // whose package has since been renamed or retired.
+          bookedLines={appointmentLines.map((line) => ({
+            serviceId: line.serviceId,
+            addonId: line.addonId,
+            description: line.description,
+            priceCents: line.priceCents,
+          }))}
           currentDiscountCents={appointment.discountCents}
           promoLabel={appointment.promoLabel}
           vehicleLabel={vehicleCategory ? VEHICLE_CATEGORY_LABELS[vehicleCategory] : null}
