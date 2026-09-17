@@ -9,19 +9,51 @@ type ServiceOption = {
   id: string;
   name: string;
   categoryName: string;
-  basePriceCents: number;
+  /**
+   * What this package costs for THIS booking's vehicle — the catalogue base
+   * price plus the size delta — not the sedan base price. See the panel's
+   * doc comment.
+   */
+  priceCents: number;
   addonIds: string[];
 };
+/** Same rule for an add-on: priced for this vehicle's size, not from base. */
 type AddonOption = { id: string; name: string; priceCents: number };
+
+/**
+ * A custom line while it is being edited. The price and the duration are held
+ * as the raw strings staff are typing, NOT as cents.
+ *
+ * This matters: the price field used to be a controlled number input whose
+ * value was re-derived as `(priceCents / 100).toFixed(2)` on every keystroke.
+ * Typing "250" put the caret behind a freshly-inserted ".00" after the first
+ * digit, so the field could only realistically be driven with the spinner
+ * arrows — one cent at a time. Keeping the text staff typed and converting on
+ * submit is the same pattern the invoice builder uses.
+ */
+type CustomLineDraft = { description: string; price: string; durationMin: string };
+
 type CustomLine = { description: string; priceCents: number; durationMin: number };
+
+function toCents(dollars: string): number {
+  const value = Number(dollars);
+  return Number.isFinite(value) && value > 0 ? Math.round(value * 100) : 0;
+}
+
+function toMinutes(value: string): number {
+  const minutes = Number(value);
+  return Number.isFinite(minutes) && minutes > 0 ? Math.round(minutes) : 0;
+}
 
 /**
  * "Change packages" — the customer moved up or down after booking.
  *
- * The prices shown here are catalog base prices, NOT what the customer will be
- * charged: the server re-prices every line for this vehicle's size when the
- * revision is saved. The panel says so rather than showing a figure that
- * quietly disagrees with the invoice.
+ * Every price on this panel is the price for the vehicle on the booking. It
+ * used to show catalogue base prices with a note explaining that the real
+ * figure was worked out on save, which in practice meant staff re-pricing a
+ * large SUV read sedan money on screen and had no way to check the change
+ * before committing it. The server still re-prices from the catalogue on save —
+ * it is the only authority — but it now arrives at the same numbers shown here.
  */
 export function RevisePanel({
   appointmentId,
@@ -32,6 +64,7 @@ export function RevisePanel({
   initialCustomLines,
   currentDiscountCents,
   promoLabel,
+  vehicleLabel,
   currency,
 }: {
   appointmentId: string;
@@ -42,13 +75,21 @@ export function RevisePanel({
   initialCustomLines: CustomLine[];
   currentDiscountCents: number;
   promoLabel: string | null;
+  /** Size the prices are for, e.g. "Large SUV". Null when no vehicle is on file. */
+  vehicleLabel: string | null;
   currency: string;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [serviceIds, setServiceIds] = useState<string[]>(initialServiceIds);
   const [addonIds, setAddonIds] = useState<string[]>(initialAddonIds);
-  const [customLines, setCustomLines] = useState<CustomLine[]>(initialCustomLines);
+  const [customLines, setCustomLines] = useState<CustomLineDraft[]>(() =>
+    initialCustomLines.map((line) => ({
+      description: line.description,
+      price: (line.priceCents / 100).toFixed(2),
+      durationMin: String(line.durationMin),
+    })),
+  );
   const [discountMode, setDiscountMode] = useState<"reapply" | "keep" | "remove">("reapply");
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -71,6 +112,38 @@ export function RevisePanel({
     return [...map.entries()];
   }, [services]);
 
+  /**
+   * The custom lines as the server will see them. A row that is still entirely
+   * blank is dropped rather than sent: staff press "Add custom line", change
+   * their mind, and an empty description is rejected by the action with a
+   * message about the packages that explains nothing.
+   */
+  const submittedCustomLines = useMemo(
+    () =>
+      customLines
+        .map((line) => ({
+          description: line.description.trim(),
+          priceCents: toCents(line.price),
+          durationMin: toMinutes(line.durationMin),
+        }))
+        .filter((line) => line.description !== "" || line.priceCents > 0),
+    [customLines],
+  );
+
+  /**
+   * What the selection adds up to, before the discount and tax the server
+   * settles. Shown because the whole point of a counter re-price is that staff
+   * can see what they are about to bill — and because an SUV total that reads
+   * as sedan money is exactly the mistake this panel used to invite.
+   */
+  const newSubtotalCents = useMemo(() => {
+    const selected = [
+      ...services.filter((service) => serviceIds.includes(service.id)),
+      ...addons.filter((addon) => addonIds.includes(addon.id)),
+    ].reduce((sum, item) => sum + item.priceCents, 0);
+    return submittedCustomLines.reduce((sum, line) => sum + line.priceCents, selected);
+  }, [services, addons, serviceIds, addonIds, submittedCustomLines]);
+
   function toggleService(id: string) {
     setServiceIds((prev) => {
       const next = prev.includes(id) ? prev.filter((s) => s !== id) : [...prev, id].slice(0, 5);
@@ -90,7 +163,7 @@ export function RevisePanel({
       appointmentId,
       serviceIds,
       addonIds,
-      customLines,
+      customLines: submittedCustomLines,
       discountMode,
       reason,
       confirmOverlap,
@@ -104,7 +177,8 @@ export function RevisePanel({
     router.refresh();
   }
 
-  const canSubmit = reason.trim().length > 0 && serviceIds.length + customLines.length > 0;
+  const canSubmit =
+    reason.trim().length > 0 && serviceIds.length + submittedCustomLines.length > 0;
 
   return (
     <section className="mt-4 rounded-xl border border-ink-800 p-4">
@@ -118,8 +192,10 @@ export function RevisePanel({
       {open && (
         <div className="mt-4">
           <p className="text-xs text-ink-500">
-            For a customer who moved up or down a package after booking. Prices below are catalog
-            base prices — the final amount is re-calculated for this vehicle&rsquo;s size on save.
+            For a customer who moved up or down a package after booking.{" "}
+            {vehicleLabel
+              ? `Prices are for this ${vehicleLabel} — the size on the booking.`
+              : "No vehicle is on the booking, so prices are the base ones; add the vehicle to price for its size."}
           </p>
 
           {grouped.map(([category, options]) => (
@@ -140,7 +216,7 @@ export function RevisePanel({
                       />
                       {service.name}
                     </span>
-                    <span className="text-ink-400">{formatCents(service.basePriceCents, currency)}</span>
+                    <span className="text-ink-400">{formatCents(service.priceCents, currency)}</span>
                   </label>
                 ))}
               </div>
@@ -199,32 +275,34 @@ export function RevisePanel({
                   placeholder="Description"
                   className="min-w-[12rem] flex-1 rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-white"
                 />
-                <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={(line.priceCents / 100).toFixed(2)}
-                  onChange={(e) =>
-                    setCustomLines((prev) =>
-                      prev.map((l, j) =>
-                        j === i ? { ...l, priceCents: Math.round(Number(e.target.value) * 100) || 0 } : l,
-                      ),
-                    )
-                  }
-                  className="w-28 rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-white"
-                />
-                <input
-                  type="number"
-                  min={0}
-                  value={line.durationMin}
-                  onChange={(e) =>
-                    setCustomLines((prev) =>
-                      prev.map((l, j) => (j === i ? { ...l, durationMin: Number(e.target.value) || 0 } : l)),
-                    )
-                  }
-                  className="w-24 rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-white"
-                  title="Minutes"
-                />
+                <label className="block">
+                  <span className="mb-1 block text-[0.7rem] text-ink-500">Price ($)</span>
+                  <input
+                    inputMode="decimal"
+                    value={line.price}
+                    onChange={(e) =>
+                      setCustomLines((prev) =>
+                        prev.map((l, j) => (j === i ? { ...l, price: e.target.value } : l)),
+                      )
+                    }
+                    placeholder="0.00"
+                    className="w-28 rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-white"
+                  />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-[0.7rem] text-ink-500">Minutes</span>
+                  <input
+                    inputMode="numeric"
+                    value={line.durationMin}
+                    onChange={(e) =>
+                      setCustomLines((prev) =>
+                        prev.map((l, j) => (j === i ? { ...l, durationMin: e.target.value } : l)),
+                      )
+                    }
+                    placeholder="60"
+                    className="w-24 rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-white"
+                  />
+                </label>
                 <button
                   type="button"
                   onClick={() => setCustomLines((prev) => prev.filter((_, j) => j !== i))}
@@ -237,13 +315,19 @@ export function RevisePanel({
             <button
               type="button"
               onClick={() =>
-                setCustomLines((prev) => [...prev, { description: "", priceCents: 0, durationMin: 60 }])
+                setCustomLines((prev) => [...prev, { description: "", price: "", durationMin: "60" }])
               }
               className="mt-2 rounded-lg border border-ink-700 px-3 py-2 text-xs text-ink-200"
             >
               Add custom line
             </button>
           </div>
+
+          <p className="mt-4 text-sm text-ink-300">
+            New subtotal:{" "}
+            <span className="font-semibold text-white">{formatCents(newSubtotalCents, currency)}</span>
+            <span className="text-ink-500"> — before discount and tax</span>
+          </p>
 
           {currentDiscountCents > 0 && (
             <div className="mt-4 rounded-lg border border-emerald-900/50 p-3">

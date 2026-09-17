@@ -15,9 +15,14 @@ import { NotesForm } from "./notes-form";
 import { CreateInvoiceButton } from "./create-invoice-button";
 import { requirePageStaff } from "@/lib/auth/page";
 import { roleHas } from "@/lib/auth/permissions";
-import type { StaffRole } from "@/lib/types";
 import { PhotoConsentButton } from "./photo-consent-button";
 import { RevisePanel } from "../../appointments/[id]/revise-panel";
+import {
+  VEHICLE_CATEGORIES,
+  VEHICLE_CATEGORY_LABELS,
+  type StaffRole,
+  type VehicleCategory,
+} from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -49,21 +54,37 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
     ? (await db().select().from(schema.resources).where(eq(schema.resources.id, job.resourceId)).limit(1))[0]
     : null;
 
-  // Catalog for the "Change packages" panel, loaded only when it will render.
+  // Catalog for the "Change packages" panel, loaded only when it will render —
+  // with this vehicle's size deltas, so the panel quotes what the packages cost
+  // for THIS car rather than the sedan base price. See the panel's doc comment.
   const showRevisePanel = canRevise && appointment !== null && isJobOpenForRepricing(job.status);
-  const [reviseServices, reviseCategories, reviseAddonLinks, reviseAddons] = showRevisePanel
-    ? await Promise.all([
-        db().select().from(schema.services).where(and(
-          eq(schema.services.active, true),
-          eq(schema.services.bookingMode, "bookable"),
-          isNotNull(schema.services.basePriceCents),
-        )).orderBy(asc(schema.services.sort)),
-        db().select().from(schema.serviceCategories).orderBy(asc(schema.serviceCategories.sort)),
-        db().select().from(schema.serviceAddons),
-        db().select().from(schema.addons).where(eq(schema.addons.active, true)).orderBy(asc(schema.addons.sort)),
-      ])
-    : [[], [], [], []];
+  const vehicleCategory = vehicle && VEHICLE_CATEGORIES.includes(vehicle.category as VehicleCategory)
+    ? (vehicle.category as VehicleCategory)
+    : null;
+  const [reviseServices, reviseCategories, reviseAddonLinks, reviseAddons, serviceDeltas, addonDeltas] =
+    showRevisePanel
+      ? await Promise.all([
+          db().select().from(schema.services).where(and(
+            eq(schema.services.active, true),
+            eq(schema.services.bookingMode, "bookable"),
+            isNotNull(schema.services.basePriceCents),
+          )).orderBy(asc(schema.services.sort)),
+          db().select().from(schema.serviceCategories).orderBy(asc(schema.serviceCategories.sort)),
+          db().select().from(schema.serviceAddons),
+          db().select().from(schema.addons).where(eq(schema.addons.active, true)).orderBy(asc(schema.addons.sort)),
+          vehicleCategory
+            ? db().select().from(schema.serviceVehicleAdjustments)
+                .where(eq(schema.serviceVehicleAdjustments.vehicleCategory, vehicleCategory))
+            : [],
+          vehicleCategory
+            ? db().select().from(schema.addonVehicleAdjustments)
+                .where(eq(schema.addonVehicleAdjustments.vehicleCategory, vehicleCategory))
+            : [],
+        ])
+      : [[], [], [], [], [], []];
   const reviseCategoryNames = new Map(reviseCategories.map((category) => [category.id, category.name]));
+  const serviceDeltaCents = new Map(serviceDeltas.map((adj) => [adj.serviceId, adj.priceDeltaCents]));
+  const addonDeltaCents = new Map(addonDeltas.map((adj) => [adj.addonId, adj.priceDeltaCents]));
 
   const [inspection] = await db()
     .select()
@@ -176,7 +197,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             id: service.id,
             name: service.name,
             categoryName: reviseCategoryNames.get(service.categoryId) ?? "Services",
-            basePriceCents: service.basePriceCents!,
+            priceCents: service.basePriceCents! + (serviceDeltaCents.get(service.id) ?? 0),
             addonIds: reviseAddonLinks
               .filter((link) => link.serviceId === service.id)
               .map((link) => link.addonId),
@@ -184,7 +205,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
           addons={reviseAddons.map((addon) => ({
             id: addon.id,
             name: addon.name,
-            priceCents: addon.priceCents,
+            priceCents: addon.priceCents + (addonDeltaCents.get(addon.id) ?? 0),
           }))}
           initialServiceIds={appointmentLines.flatMap((line) => (line.serviceId ? [line.serviceId] : []))}
           initialAddonIds={appointmentLines.flatMap((line) => (line.addonId ? [line.addonId] : []))}
@@ -197,6 +218,7 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
             }))}
           currentDiscountCents={appointment.discountCents}
           promoLabel={appointment.promoLabel}
+          vehicleLabel={vehicleCategory ? VEHICLE_CATEGORY_LABELS[vehicleCategory] : null}
           currency={settings.currency}
         />
       )}

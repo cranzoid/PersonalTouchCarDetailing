@@ -51,6 +51,8 @@ async function bookedAppointment(opts: {
   depositPaidCents?: number;
   status?: string;
   taxRateBp?: number;
+  /** Defaults to the sedan; pass a bigger car to exercise the size deltas. */
+  vehicleId?: string;
 }) {
   const taxRateBp = opts.taxRateBp ?? 1300;
   const discountCents = opts.discountCents ?? 0;
@@ -61,7 +63,7 @@ async function bookedAppointment(opts: {
   await db().insert(schema.appointments).values({
     id: appointmentId,
     customerId,
-    vehicleId,
+    vehicleId: opts.vehicleId ?? vehicleId,
     status: opts.status ?? "arrived",
     startsAt,
     // 15 + 60 + 15 of buffers/work, matching SETTINGS_DEFAULTS.
@@ -90,11 +92,15 @@ async function bookedAppointment(opts: {
 
 async function jobFor(appointmentId: string, status = "in_progress") {
   const jobId = newId("job");
+  // The appointment's own vehicle, because the invoice this job produces is a
+  // record of work on that car — not on whichever one the fixture made first.
+  const [appointment] = await db().select({ vehicleId: schema.appointments.vehicleId })
+    .from(schema.appointments).where(eq(schema.appointments.id, appointmentId));
   await db().insert(schema.jobs).values({
     id: jobId,
     appointmentId,
     customerId,
-    vehicleId,
+    vehicleId: appointment.vehicleId,
     status,
   });
   return jobId;
@@ -253,6 +259,46 @@ describe("reviseAppointmentLinesAction", () => {
       .where(eq(schema.appointmentServices.appointmentId, appointmentId));
     expect(lines).toHaveLength(1);
     expect(lines[0].serviceId).toBe(PKG2);
+  });
+
+  it("prices the new package for the vehicle's size, not the sedan base price", async () => {
+    // The counter report this test came from: a large SUV moved up to Package 2
+    // was billed sedan money. The size delta has to survive the revision and
+    // land on the draft invoice the revision rewrites, because that draft is
+    // what the customer is handed.
+    await db().insert(schema.serviceVehicleAdjustments).values({
+      id: newId("adj"), serviceId: PKG2, vehicleCategory: "suv_large",
+      priceDeltaCents: 4000, durationDeltaMin: 30,
+    });
+    const suvId = newId("veh");
+    await db().insert(schema.vehicles).values({
+      id: suvId, customerId, make: "Honda", model: "Pilot", category: "suv_large",
+    });
+    const appointmentId = await bookedAppointment({
+      serviceId: PKG1, priceCents: 9000, vehicleId: suvId,
+    });
+    const jobId = await jobFor(appointmentId, "ready_for_pickup");
+    const invoice = await createInvoiceFromJobAction({ jobId });
+    expect(invoice.ok).toBe(true);
+    if (!invoice.ok) return;
+
+    const res = await reviseAppointmentLinesAction({
+      appointmentId, serviceIds: [PKG2], addonIds: [], customLines: [],
+      discountMode: "remove", reason: "upgraded at the counter",
+    });
+    expect(res.ok).toBe(true);
+
+    const [appt] = await db().select().from(schema.appointments)
+      .where(eq(schema.appointments.id, appointmentId));
+    // $175.00 for Package 2 plus the $40.00 this size costs, and the half hour
+    // it takes longer.
+    expect(appt.subtotalCents).toBe(21500);
+    expect(appt.durationMin).toBe(90);
+
+    const invoiceLines = await db().select().from(schema.invoiceLineItems)
+      .where(eq(schema.invoiceLineItems.invoiceId, invoice.invoiceId));
+    expect(invoiceLines).toHaveLength(1);
+    expect(invoiceLines[0].unitPriceCents).toBe(21500);
   });
 
   it("drops the discount when the customer swaps to a package the offer never covered", async () => {

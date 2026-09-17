@@ -18,6 +18,7 @@ import { VehiclePanel, type AppointmentVehicle } from "./vehicle-panel";
 import { OfferRedemptionPanel } from "./offer-redemption-panel";
 import { formatClaimCode } from "@/lib/wash-offer";
 import { isRevisableAppointmentStatus } from "@/lib/booking/revise";
+import { VEHICLE_CATEGORIES, VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -79,7 +80,15 @@ export default async function AppointmentDetailPage({
 
   // Catalog for the "Change packages" panel — the same filter the manual
   // booking builder uses, so staff see one consistent list of what is bookable.
-  const [services, categories, addonLinks, addons] = await Promise.all([
+  //
+  // The size deltas come along with it: this booking's vehicle is known, so the
+  // panel can quote what each package actually costs for THIS car. Without them
+  // it quoted the sedan base price for every vehicle while the server re-priced
+  // a large SUV — the same trap already fixed in the manual invoice builder.
+  const vehicleCategory = vehicle && VEHICLE_CATEGORIES.includes(vehicle.category as VehicleCategory)
+    ? (vehicle.category as VehicleCategory)
+    : null;
+  const [services, categories, addonLinks, addons, serviceDeltas, addonDeltas] = await Promise.all([
     db().select().from(schema.services).where(and(
       eq(schema.services.active, true),
       eq(schema.services.bookingMode, "bookable"),
@@ -88,8 +97,18 @@ export default async function AppointmentDetailPage({
     db().select().from(schema.serviceCategories).orderBy(asc(schema.serviceCategories.sort)),
     db().select().from(schema.serviceAddons),
     db().select().from(schema.addons).where(eq(schema.addons.active, true)).orderBy(asc(schema.addons.sort)),
+    vehicleCategory
+      ? db().select().from(schema.serviceVehicleAdjustments)
+          .where(eq(schema.serviceVehicleAdjustments.vehicleCategory, vehicleCategory))
+      : [],
+    vehicleCategory
+      ? db().select().from(schema.addonVehicleAdjustments)
+          .where(eq(schema.addonVehicleAdjustments.vehicleCategory, vehicleCategory))
+      : [],
   ]);
   const categoryNames = new Map(categories.map((category) => [category.id, category.name]));
+  const serviceDeltaCents = new Map(serviceDeltas.map((adj) => [adj.serviceId, adj.priceDeltaCents]));
+  const addonDeltaCents = new Map(addonDeltas.map((adj) => [adj.addonId, adj.priceDeltaCents]));
 
   // Read from lib/booking/revise.ts rather than copied: this list used to be
   // duplicated here and drifted, hiding the panel on exactly the `completed`
@@ -287,10 +306,14 @@ export default async function AppointmentDetailPage({
             id: service.id,
             name: service.name,
             categoryName: categoryNames.get(service.categoryId) ?? "Services",
-            basePriceCents: service.basePriceCents!,
+            priceCents: service.basePriceCents! + (serviceDeltaCents.get(service.id) ?? 0),
             addonIds: addonLinks.filter((link) => link.serviceId === service.id).map((link) => link.addonId),
           }))}
-          addons={addons.map((addon) => ({ id: addon.id, name: addon.name, priceCents: addon.priceCents }))}
+          addons={addons.map((addon) => ({
+            id: addon.id,
+            name: addon.name,
+            priceCents: addon.priceCents + (addonDeltaCents.get(addon.id) ?? 0),
+          }))}
           initialServiceIds={lines.flatMap((line) => (line.serviceId ? [line.serviceId] : []))}
           initialAddonIds={lines.flatMap((line) => (line.addonId ? [line.addonId] : []))}
           initialCustomLines={lines
@@ -302,6 +325,7 @@ export default async function AppointmentDetailPage({
             }))}
           currentDiscountCents={appt.discountCents}
           promoLabel={appt.promoLabel}
+          vehicleLabel={vehicleCategory ? VEHICLE_CATEGORY_LABELS[vehicleCategory] : null}
           currency={settings.currency}
         />
       )}
@@ -316,18 +340,36 @@ export default async function AppointmentDetailPage({
             Invoice #{invoice.number} ({invoice.status.replaceAll("_", " ")}) →
           </Link>
         </section>
-      ) : (
-        appt.status === "completed" &&
-        lines.length > 0 && (
-          <CreateInvoicePanel
-            appointmentId={appt.id}
-            lineCount={lines.length}
-            totalCents={appt.totalCents}
-            depositPaidCents={appt.depositPaidCents}
-            currency={settings.currency}
-          />
-        )
-      )}
+      ) : appt.status === "completed" && lines.length > 0 ? (
+        <CreateInvoicePanel
+          appointmentId={appt.id}
+          lineCount={lines.length}
+          totalCents={appt.totalCents}
+          depositPaidCents={appt.depositPaidCents}
+          currency={settings.currency}
+        />
+      ) : job ? (
+        /*
+          A checked-in visit is stamped `converted` and its invoice is raised on
+          the job, which is also where any additional work approved in the bay
+          lives. Said here because staff who have just changed the packages look
+          for "Create invoice" on this screen and find nothing to press.
+        */
+        <section className="mt-6 rounded-xl border border-ink-800 p-5">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-ink-400">Invoice</h2>
+          <p className="mt-2 text-sm text-ink-300">
+            This vehicle was checked in, so the invoice is raised on the job — it appears there once
+            the job reaches ready for pickup or completed. It bills whatever the packages above say,
+            so change them here first.
+          </p>
+          <Link
+            href={`/admin/jobs/${job.id}`}
+            className="mt-2 inline-block text-accent-300 hover:underline"
+          >
+            Go to the job to invoice →
+          </Link>
+        </section>
+      ) : null}
 
       {depositRefundableCents > 0 && (
         <DepositRefundPanel

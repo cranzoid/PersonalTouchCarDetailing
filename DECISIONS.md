@@ -1197,3 +1197,39 @@ Consequential choices:
 **Revisit when:** a second fixed-price offer runs → the nudge list should filter
 by `offer_code` rather than assume the one configured offer.
 
+
+## 36. "Change packages" quotes the car in front of you
+Three counter complaints, one root: the re-pricing panel was built to be honest
+about not knowing, and staff needed it to be useful instead.
+
+- **The prices on the panel are this vehicle's prices.** It used to list
+  catalogue base prices with a note saying the real figure would be worked out
+  on save, so a large SUV upgraded at the counter read sedan money on screen and
+  there was no way to check the bill before committing to it. The page now loads
+  `service_vehicle_adjustments` / `addon_vehicle_adjustments` for the booking's
+  own category and adds the delta before rendering — the same fix already made
+  for the manual invoice builder's grid, for the same reason. The server still
+  re-prices from the catalogue inside `reviseAppointmentLines`: it remains the
+  only authority, and it now agrees with what staff were shown.
+- **A running subtotal is shown, before discount and tax.** Not the total: the
+  discount mode and the tax rate are settled by the server (and the payment
+  method can still strip the tax, #18), so a "total" here would be a second,
+  worse answer. The subtotal is the number staff are actually checking.
+- **A custom line's price is typed, not spun.** The field was a controlled
+  number input re-derived as `(priceCents / 100).toFixed(2)` every keystroke, so
+  the first digit typed inserted ".00" behind the caret and the only workable
+  way to enter $250 was the spinner arrows. The draft now holds the raw text and
+  converts on submit, matching the invoice builder. A row left entirely blank is
+  dropped rather than sent, because the action rejects an empty description with
+  a message about packages that explains nothing.
+- **A checked-in visit says where its invoice lives.** A `converted` appointment
+  has no "Create invoice" button — by #22 the invoice hangs off the job — and
+  the screen used to render nothing at all there, which reads as a missing
+  feature to anyone who has just changed the packages and is waiting to bill.
+  The panel now names the job and links to it, and says the button appears once
+  the job reaches ready for pickup or completed. The invoice is still built from
+  the appointment's lines, so re-pricing first is still the right order.
+
+**Revisit when:** the panel needs to show durations as well as prices — the size
+delta moves both, and a longer job is what triggers the bay-overlap warning
+staff then have to confirm.
