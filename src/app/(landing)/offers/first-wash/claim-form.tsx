@@ -456,9 +456,12 @@ function TimeStep({
             <span className="text-sm font-black uppercase tracking-[0.12em] text-[#087B87]">You pay</span>
             <span className="text-3xl font-black">{copy.priceLabel}</span>
           </div>
+          {/* One price, tax on top. What the customer pays with is settled at
+              the counter and is the shop's own affair (DECISIONS.md #18) — it
+              is not a cheaper price to advertise here. */}
           <p className="mt-2 text-xs leading-5 text-[#445459]">
-            {copy.priceLabel} with cash or Interac e-transfer. {copy.priceWithTaxLabel} on card or cheque,
-            which adds {copy.taxLabel}. Nothing to pay now — you pay at the shop when the wash is done.
+            Plus {copy.taxLabel} — {copy.priceWithTaxLabel} in total. Nothing to pay now; you pay at
+            the shop when the wash is done.
           </p>
         </div>
 
@@ -502,7 +505,7 @@ function BookedPanel({
       <div className="px-6 pb-7 pt-6 sm:px-8">
         <h2 className="text-3xl font-black leading-tight">{booked.whenLabel}</h2>
         <p className="mt-3 text-sm font-bold text-[#526267]">
-          {booked.priceLabel} with cash or Interac e-transfer · {booked.priceWithTaxLabel} on card
+          {booked.priceLabel} plus {copy.taxLabel} — {booked.priceWithTaxLabel} in total
         </p>
         <p className="mt-5 text-xs font-black uppercase tracking-[0.14em] text-[#087B87]">Show this on arrival</p>
         <p className="mt-2 select-all rounded-2xl border-2 border-dashed border-[#087B87] bg-[#EEFBFC] px-4 py-5 font-mono text-3xl font-black tracking-[0.1em] sm:text-4xl">

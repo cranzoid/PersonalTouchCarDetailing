@@ -226,9 +226,25 @@ describe("washOfferTerms", () => {
     largeRegularLabel: "$35.00",
     claimValidDays: 14,
     taxLabel: "HST",
-    cardPriceLabel: "$18.07",
+    priceWithTaxLabel: "$18.07",
     claimsCloseLabel: null,
   };
+
+  /**
+   * The terms quote ONE price with tax on top, and never a cheaper figure for
+   * cash. The shop's tax treatment does vary by payment method (DECISIONS.md
+   * #18), but that is the shop's own arrangement and not a discount being
+   * offered — advertising it as one turned an internal accounting rule into a
+   * public price list. Nobody may be charged above the figure stated here.
+   */
+  it("quotes one price with tax on top, never a cash price", () => {
+    const terms = washOfferTerms({ ...base, largeOfferLabel: "$15.99" }).join(" ");
+    expect(terms).toContain("Prices exclude HST");
+    expect(terms).toContain("With HST the total is $18.07");
+    expect(terms).not.toMatch(/cash/i);
+    expect(terms).not.toMatch(/interac|e-transfer/i);
+    expect(terms).not.toMatch(/cheque/i);
+  });
 
   // These sentences ARE the offer — the Competition Act wants the material
   // terms stated plainly and the saving measured against a price the shop

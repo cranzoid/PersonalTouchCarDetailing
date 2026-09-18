@@ -351,7 +351,7 @@ export async function bookWashOfferAction(raw: unknown): Promise<WashBookingResu
         settings,
         variant: "booked",
         baseUrl: safeBaseUrl(),
-        extraVariables: { when: whenLabel, priceWithTax: priceWithTaxLabel },
+        extraVariables: { when: whenLabel, priceWithTax: priceWithTaxLabel, taxLabel: settings.taxLabel },
       });
     } catch {
       console.error("Wash offer booked but the confirmation could not be queued");

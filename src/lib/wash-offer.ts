@@ -289,11 +289,13 @@ export const OFFER_CLAIM_REMINDER_DAYS = [3, 7, 12] as const;
  * `tax_label` is snapshotted onto an invoice (DECISIONS.md #6).
  *
  * Bump this whenever the wording below changes in a way that alters the deal.
- * `2026-09.3` is the combined service, offer and electronic-message consent
- * displayed beside the claim checkbox. Earlier codes keep their snapshotted
- * version; reclaiming explicitly accepts and records the current one.
+ * `2026-09.3` was the combined service, offer and electronic-message consent
+ * displayed beside the claim checkbox. `2026-09.4` stops quoting a cheaper
+ * figure for cash and Interac: one price, with tax on top. Earlier codes keep
+ * their snapshotted version; reclaiming explicitly accepts and records the
+ * current one.
  */
-export const WASH_OFFER_TERMS_VERSION = "2026-09.3";
+export const WASH_OFFER_TERMS_VERSION = "2026-09.4";
 
 /**
  * The offer in full, in the order it has to be read.
@@ -313,7 +315,11 @@ export function washOfferTerms(input: {
   largeOfferLabel: string;
   claimValidDays: number;
   taxLabel: string;
-  cardPriceLabel: string;
+  /**
+   * The price with tax added. NOT "the card price": what a customer is quoted
+   * never varies by how they intend to pay. See the terms line below.
+   */
+  priceWithTaxLabel: string;
   claimsCloseLabel: string | null;
 }): string[] {
   // One price for every size is the offer as the owners set it, but the prices
@@ -329,7 +335,12 @@ export function washOfferTerms(input: {
       : `${input.carOfferLabel} applies to a coupe or sedan, regularly ${input.carRegularLabel}. ${input.largeOfferLabel} applies to an SUV, pickup or van, regularly ${input.largeRegularLabel}. Commercial vehicles are quoted individually and are not included.`,
     "Covers the basic exterior wash only: a hand wash and dry, with the wheels and tyres rinsed. Floor-mat cleaning, other interior cleaning, waxing and any other extra is charged at the usual price.",
     "100% hand wash. No automatic brushes are used on any vehicle, on this offer or otherwise.",
-    `Prices exclude ${input.taxLabel}. Cash and Interac e-transfer pay the listed price; card and cheque add ${input.taxLabel} (${input.cardPriceLabel}${onePrice ? " in total" : " for a car"}).`,
+    // ONE quoted price, and tax on top of it. How the customer settles up is a
+    // counter matter and the shop's own (DECISIONS.md #18): quoting a cheaper
+    // figure for cash advertises the tax treatment as a discount, which is not
+    // something a customer is being offered. Nobody is charged more than this
+    // line says, which is what the sentence has to guarantee.
+    `Prices exclude ${input.taxLabel}. With ${input.taxLabel} the total is ${input.priceWithTaxLabel}${onePrice ? "" : " for a car"}.`,
     `Book your appointment within ${input.claimValidDays} days of claiming. Appointments are subject to availability and the offer cannot be used as a walk-in without one.`,
     "Cannot be combined with any other offer, discount or package deal.",
     input.claimsCloseLabel

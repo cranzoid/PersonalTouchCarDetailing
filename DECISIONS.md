@@ -1316,6 +1316,21 @@ Consequential choices:
   reads the appointment back and shows the time and the code again, unless the
   booking has been cancelled or is already in the past.
 
+- **No price is quoted per payment method, anywhere a customer can see.** The
+  shop charges no HST on cash and Interac e-transfer and does charge it on card
+  and cheque (#18), and the offer page used to publish that as two prices —
+  "$15.99 with cash, $18.07 on card". The owner's position, 2026-09-18: that
+  treatment is the shop's own arrangement, settled at the counter, not a
+  discount being advertised. Every customer-facing surface now states one price
+  with tax on top, and the published terms with it — so the terms version moves
+  to `2026-09.4` and outstanding codes keep the version they were issued under.
+  Nobody is ever charged above the figure shown, which is the property that
+  makes dropping the line safe. The portal's invoice screens are untouched:
+  they explain why a specific already-settled invoice has no card button, name
+  no price and advertise nothing. `dualPriceLabel` in money.ts renders exactly
+  the banned pair and is now called from nothing but its own test — delete it
+  rather than finding a use for it.
+
 **Revisit when:** the test is settled. The losing arm's page code, its templates
 and the setting itself should then go, rather than being left as a switch nobody
 remembers the meaning of — and if a second fixed-price offer is ever run at the

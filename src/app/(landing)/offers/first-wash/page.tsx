@@ -92,7 +92,7 @@ export default async function FirstWashOfferPage() {
     largeOfferLabel: money(largeOfferCents),
     claimValidDays: offer.claimValidDays,
     taxLabel: settings.taxLabel,
-    cardPriceLabel: money(withTaxCents(offerCents, settings.taxRateBp)),
+    priceWithTaxLabel: money(withTaxCents(offerCents, settings.taxRateBp)),
     claimsCloseLabel: settings.washOffer.claimsCloseOn
       ? formatInZone(new Date(`${settings.washOffer.claimsCloseOn}T12:00:00Z`), settings.timezone, {
           weekday: "long",

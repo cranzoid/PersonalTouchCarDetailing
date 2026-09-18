@@ -204,6 +204,13 @@
       "when": 1789209604325,
       "tag": "0028_offer_claim_nudges",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1789213204325,
+      "tag": "0029_offer_booked_no_cash_price",
+      "breakpoints": true
     }
   ]
 }
