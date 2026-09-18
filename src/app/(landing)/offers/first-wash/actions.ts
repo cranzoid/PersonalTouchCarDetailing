@@ -351,7 +351,12 @@ export async function bookWashOfferAction(raw: unknown): Promise<WashBookingResu
         settings,
         variant: "booked",
         baseUrl: safeBaseUrl(),
-        extraVariables: { when: whenLabel, priceWithTax: priceWithTaxLabel, taxLabel: settings.taxLabel },
+        // No taxLabel here on purpose. The template says "plus tax" in words,
+        // like additional_work_request does, so the body renders correctly on
+        // the build running BEFORE this deploy as well as after it — migration
+        // 0029 lands on the shared database while the old build is still
+        // serving, and renderTemplate blanks a variable it was not given.
+        extraVariables: { when: whenLabel, priceWithTax: priceWithTaxLabel },
       });
     } catch {
       console.error("Wash offer booked but the confirmation could not be queued");

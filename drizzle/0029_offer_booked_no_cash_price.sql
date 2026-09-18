@@ -21,7 +21,7 @@ You''re booked in for your {{offerLabel}}.
 
   When: {{when}}
   Where: {{address}}
-  Price: {{price}} plus {{taxLabel}} — {{priceWithTax}} in total
+  Price: {{price}} plus tax — {{priceWithTax}} in total
   Your code: {{code}}
 
 Show the code when you arrive — it is what applies the offer to your bill. There is nothing to pay in advance.
