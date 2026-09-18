@@ -253,6 +253,17 @@ const MESSAGE_TEMPLATES = [
   { key: "offer_claim_reminder_sms", channel: "sms", subject: null, body: "{{businessName}}: your {{price}} first wash code {{code}} expires {{expires}}. Grab a time: {{link}}\nCall {{phone}}. Reply STOP to opt out." },
   { key: "offer_claim_reminder_email", channel: "email", subject: "Your {{price}} wash code expires {{expires}}", body: "Hi {{firstName}},\n\nYour {{offerLabel}} code {{code}} is still unused. It is worth a {{price}} hand wash and it expires on {{expires}}.\n\nBook a time here:\n{{link}}\n\nOr call us on {{phone}}.\n\n— {{businessName}}\n{{address}}\n{{phone}} · {{email}}\n\nDon't want emails from us? Unsubscribe here: {{unsubscribe}}" },
   /*
+   * Book-first arm: one message, not two. The appointment and the code are the
+   * same event for this customer, and the ordinary booking confirmation is
+   * deliberately NOT sent alongside these — two texts describing one wash, one
+   * of them silent about the code, is how a customer arrives unsure whether
+   * they are paying {{price}} or full price.
+   */
+  // Nothing may follow {{when}} with a full stop: it ends in "p.m." and the
+  // pair reads as a typo in the one message the customer keeps.
+  { key: "offer_claim_booked_sms", channel: "sms", subject: null, body: "{{businessName}}: you're booked for {{when}} — {{price}} first wash. Your code: {{code}}. Show it when you arrive.\nChanges: {{phone}}. Reply STOP to opt out." },
+  { key: "offer_claim_booked_email", channel: "email", subject: "You're booked for {{when}} — your {{price}} wash", body: "Hi {{firstName}},\n\nYou're booked in for your {{offerLabel}}.\n\n  When: {{when}}\n  Where: {{address}}\n  Price: {{price}} with cash or Interac e-transfer, {{priceWithTax}} on card or cheque\n  Your code: {{code}}\n\nShow the code when you arrive — it is what applies the offer to your bill. There is nothing to pay in advance.\n\nNeed a different time, or can't make it? Call or text us on {{phone}} and we will move it.\n\nOne promotional wash per customer and per vehicle. Full terms are on the offer page.\n\n— {{businessName}}\n{{address}}\n{{phone}} · {{email}}\n\nDon't want emails from us? Unsubscribe here: {{unsubscribe}}" },
+  /*
    * Hand-sent nudges (Outreach → First-wash nudges). Staff edit these on that
    * screen before each send; the email's address and unsubscribe footer is
    * appended by the sender, so it is not in the body to be edited away.

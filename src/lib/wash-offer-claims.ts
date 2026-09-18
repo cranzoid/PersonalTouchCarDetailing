@@ -534,17 +534,32 @@ export async function sendClaimMessages(input: {
   claim: OfferClaim;
   offer: ResolvedWashOffer;
   settings: BusinessSettings;
-  variant: "code" | "reminder";
+  /**
+   * `booked` is the book-first arm's single message: it confirms the
+   * appointment AND carries the code, because in that flow the two facts
+   * arrive together and two texts saying half of it each would be worse than
+   * one saying all of it.
+   */
+  variant: "code" | "reminder" | "booked";
   baseUrl: string;
+  /**
+   * Extra placeholders for this variant — the appointment's date and time for
+   * `booked`. Merged over nothing: it cannot overwrite the code, price or
+   * expiry every message is written from.
+   */
+  extraVariables?: Record<string, string>;
 }): Promise<("sms" | "email")[]> {
   const { claim, offer, settings, baseUrl } = input;
-  const variables = claimMessageVariables({ claim, offer, settings, baseUrl });
+  const variables = {
+    ...input.extraVariables,
+    ...claimMessageVariables({ claim, offer, settings, baseUrl }),
+  };
 
   const sent: ("sms" | "email")[] = [];
   for (const channel of ["sms", "email"] as const) {
     try {
       const delivery = await sendMessageTemplate({
-        templateKey: `offer_claim_${input.variant === "code" ? "code" : "reminder"}_${channel}`,
+        templateKey: `offer_claim_${input.variant}_${channel}`,
         recipient: { phone: claim.phone, email: claim.email },
         leadId: claim.leadId ?? undefined,
         kind: "confirmation",

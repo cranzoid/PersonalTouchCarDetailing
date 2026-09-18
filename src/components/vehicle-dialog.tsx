@@ -224,7 +224,13 @@ export function vehicleLabel(values: {
   trim?: string | null;
   licencePlate?: string | null;
 }): string {
-  return [values.year, values.make, values.model, values.trim, values.licencePlate && `(${values.licencePlate})`]
-    .filter(Boolean)
-    .join(" ");
+  // A wash booked from the offer page trades make and model for the
+  // conversion — it asks only for the size — so this can legitimately be
+  // empty. Staff screens put the pricing size next to it; an empty line above
+  // that reads like a broken record rather than a car nobody has named yet.
+  return (
+    [values.year, values.make, values.model, values.trim, values.licencePlate && `(${values.licencePlate})`]
+      .filter(Boolean)
+      .join(" ") || "Vehicle details not given"
+  );
 }

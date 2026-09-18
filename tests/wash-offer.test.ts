@@ -82,6 +82,24 @@ describe("activeWashOffer", () => {
     // coupon from the person holding it is exactly what this must not do.
     expect(activeWashOffer(settings({ claimsCloseOn: "2026-01-01" }), NOW)).not.toBeNull();
   });
+
+  /**
+   * The landing-page A/B switch. Settings are stored as one JSON blob per key,
+   * so the `washOffer` row the owners saved before this field existed comes
+   * back without it — and an unrecognised flow must never invent a third
+   * behaviour. Both have to land on the arm that has been running all along,
+   * or flipping the test on would be a deploy rather than a checkbox.
+   */
+  it("runs the original code-first flow unless book-first is chosen", () => {
+    expect(activeWashOffer(settings(), NOW)?.flow).toBe("code_first");
+    expect(activeWashOffer(settings({ flow: "book_first" }), NOW)?.flow).toBe("book_first");
+    expect(
+      activeWashOffer(settings({ flow: undefined as unknown as "code_first" }), NOW)?.flow,
+    ).toBe("code_first");
+    expect(
+      activeWashOffer(settings({ flow: "whatever" as unknown as "code_first" }), NOW)?.flow,
+    ).toBe("code_first");
+  });
 });
 
 describe("resolveWashOfferCode", () => {

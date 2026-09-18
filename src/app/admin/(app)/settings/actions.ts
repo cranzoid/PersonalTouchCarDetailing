@@ -91,6 +91,9 @@ const settingsInput = z.object({
       claimsCloseOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).or(z.literal("")),
       firstTimeOnly: z.boolean(),
       remindersEnabled: z.boolean(),
+      // Which arm of the landing-page A/B test runs. Defaulted rather than
+      // required so a caller that predates the field cannot fail validation.
+      flow: z.enum(["code_first", "book_first"]).default("code_first"),
     })
     .refine((o) => !o.enabled || o.serviceSlug.length > 0, {
       message: "The wash offer needs the catalogue slug of the service it buys",

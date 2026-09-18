@@ -174,6 +174,9 @@ export const SETTINGS_DEFAULTS: BusinessSettings = {
     claimsCloseOn: "",
     firstTimeOnly: true,
     remindersEnabled: false,
+    // The arm that has been running since the offer launched. The owners flip
+    // this in Admin to test handing the code over only once a time is booked.
+    flow: "code_first",
   },
 };
 

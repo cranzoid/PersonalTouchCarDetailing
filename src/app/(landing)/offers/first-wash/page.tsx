@@ -178,7 +178,9 @@ export default async function FirstWashOfferPage() {
 
             <aside className="lg:sticky lg:top-5">
               <ClaimForm copy={{
+                flow: offer.flow,
                 priceLabel: offerLabel,
+                priceWithTaxLabel: money(withTaxCents(offerCents, settings.taxRateBp)),
                 priceValue: offerCents / 100,
                 currency: settings.currency,
                 claimValidDays: offer.claimValidDays,
@@ -186,6 +188,9 @@ export default async function FirstWashOfferPage() {
                 businessName: settings.businessName,
                 email: settings.email,
                 address,
+                taxLabel: settings.taxLabel,
+                timezone: settings.timezone,
+                maxBookingWindowDays: settings.maxBookingWindowDays,
                 offerTerms: terms,
               }} />
               <div className="mt-4 grid grid-cols-3 gap-2 text-center text-[0.66rem] font-bold text-white/75 sm:text-xs">
@@ -205,11 +210,18 @@ export default async function FirstWashOfferPage() {
               <p className="mt-5 max-w-md leading-7 text-[#526267]">We want you to try us once. That is the whole offer—no subscription and no awkward upsell when you arrive.</p>
             </div>
             <div className="grid gap-3 sm:grid-cols-3">
-              {[
-                ["01", "Claim the code", "Enter your details. The code appears immediately and arrives by text and email."],
-                ["02", "Choose a time", `Continue to booking. The ${offerLabel} price is applied before you confirm.`],
-                ["03", "Drive in", "We wash by hand. Pay when it is finished."],
-              ].map(([number, title, body]) => (
+              {(offer.flow === "book_first"
+                ? [
+                    ["01", "Tell us about you", "Your name, number and whether you drive a car or something bigger."],
+                    ["02", "Pick your time", `Choose from what is actually free. The ${offerLabel} price is shown before you confirm.`],
+                    ["03", "Drive in", "Show the code on your phone. We wash by hand, and you pay when it is finished."],
+                  ]
+                : [
+                    ["01", "Claim the code", "Enter your details. The code appears immediately and arrives by text and email."],
+                    ["02", "Choose a time", `Continue to booking. The ${offerLabel} price is applied before you confirm.`],
+                    ["03", "Drive in", "We wash by hand. Pay when it is finished."],
+                  ]
+              ).map(([number, title, body]) => (
                 <article key={number} className="rounded-2xl border border-[#D5DFE0] bg-white p-5 shadow-[0_16px_45px_-35px_rgba(7,20,25,0.7)]">
                   <span className="text-sm font-black text-[#087B87]">{number}</span>
                   <h3 className="mt-8 text-xl font-black">{title}</h3>
@@ -235,7 +247,9 @@ export default async function FirstWashOfferPage() {
               <p className="text-xs font-black uppercase tracking-[0.18em] text-[#087B87]">Good to know</p>
               <h2 className="mt-3 text-3xl font-black">No surprise extras.</h2>
               <p className="mt-4 leading-7 text-[#3E5055]">Floor-mat and other interior cleaning, waxing, paint correction and engine-bay cleaning are not included. You can add services during booking and see their prices first. Commercial vehicles are quoted separately.</p>
-              <a href="#claim" className="mt-6 inline-flex min-h-12 items-center rounded-full bg-[#071419] px-6 font-black text-white transition hover:bg-[#14373D]">Claim my code ↑</a>
+              <a href="#claim" className="mt-6 inline-flex min-h-12 items-center rounded-full bg-[#071419] px-6 font-black text-white transition hover:bg-[#14373D]">
+                {offer.flow === "book_first" ? "Book my wash ↑" : "Claim my code ↑"}
+              </a>
             </div>
           </div>
         </section>

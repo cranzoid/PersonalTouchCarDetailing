@@ -27,6 +27,26 @@ import type { BusinessSettings } from "@/lib/settings";
  * deploy.
  */
 
+/**
+ * Which way round the landing page runs, and the only thing the A/B test
+ * changes.
+ *
+ * - `code_first` — details, then the code, then a link to the booking wizard.
+ *   The original: everyone who fills the form leaves holding a coupon.
+ * - `book_first` — details, then a date and time on the same page, and the code
+ *   is handed over as part of the confirmation. Nothing is sent until an
+ *   appointment exists.
+ *
+ * The claim record is identical either way, so the two arms are comparable on
+ * the one number that matters: of the people who claimed, how many hold a
+ * booking. That is `offer_claims.status`, already on the Offer claims screen.
+ *
+ * DEFAULTS TO `code_first`, and must keep doing so: settings are stored as one
+ * JSON blob per key, so a `washOffer` row written before this field existed
+ * comes back without it. A missing flow has to mean "carry on as before".
+ */
+export type WashOfferFlow = "code_first" | "book_first";
+
 export type WashOffer = {
   enabled: boolean;
   /** Campaign code, also what rides in the ad URL as ?offer=. Uppercase. */
@@ -52,6 +72,8 @@ export type WashOffer = {
   firstTimeOnly: boolean;
   /** Send the unbooked-claim nudges. Off until SMS is registered and live. */
   remindersEnabled: boolean;
+  /** Which arm of the A/B test the landing page runs. See WashOfferFlow. */
+  flow: WashOfferFlow;
 };
 
 export type ResolvedWashOffer = {
@@ -62,6 +84,7 @@ export type ResolvedWashOffer = {
   claimValidDays: number;
   firstTimeOnly: boolean;
   remindersEnabled: boolean;
+  flow: WashOfferFlow;
   /** False once `claimsCloseOn` has passed: issued codes still work, new ones do not. */
   acceptingClaims: boolean;
 };
@@ -106,6 +129,10 @@ export function activeWashOffer(
     claimValidDays: offer.claimValidDays,
     firstTimeOnly: offer.firstTimeOnly,
     remindersEnabled: offer.remindersEnabled,
+    // Anything that is not the new arm is the old one. A settings row saved
+    // before the field existed, or a value typed by hand into the database,
+    // both resolve to the flow that has been running all along.
+    flow: offer.flow === "book_first" ? "book_first" : "code_first",
     acceptingClaims,
   };
 }

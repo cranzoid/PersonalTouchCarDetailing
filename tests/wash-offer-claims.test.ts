@@ -7,7 +7,8 @@ import { zonedWeekday } from "../src/lib/tz";
 import { createAppointment, OfferChangedError } from "../src/lib/booking/create";
 import { getAvailableSlots } from "../src/lib/booking/availability";
 import { priceBooking } from "../src/lib/pricing";
-import { activeWashOffer } from "../src/lib/wash-offer";
+import { activeWashOffer, formatClaimCode } from "../src/lib/wash-offer";
+import { appointmentWhenLabel } from "../src/lib/appointment-time";
 import {
   claimBelongsTo,
   issueClaim,
@@ -451,6 +452,168 @@ describe("spending a claim on a booking", () => {
     ]);
     expect(attempts.filter((a) => a.status === "fulfilled")).toHaveLength(1);
     expect(await db().select().from(schema.appointments)).toHaveLength(1);
+  });
+});
+
+/**
+ * The book-first arm of the A/B test: the landing page takes a date and a time
+ * itself and only then hands the code over.
+ *
+ * What is different, and therefore what is tested here, is the INPUT — the
+ * booking is built entirely from the claim, because the customer is never asked
+ * a second time. Nobody types a name, a phone number or a vehicle, so if the
+ * claim is read wrongly there is no second form to correct it. The money then
+ * goes through the same priceBooking/createAppointment pair as every other
+ * booking, and the caps above still apply unchanged.
+ */
+describe("booking the wash from the offer page", () => {
+  /** What bookWashOfferAction does, with nothing supplied by the browser. */
+  async function bookFromClaim(claim: Awaited<ReturnType<typeof claimFor>>["claim"], startMs: number) {
+    const category = claim.vehicleSize === "suv" ? "suv_small" : "sedan";
+    const pricing = await priceBooking({
+      serviceIds: [WASH],
+      addonIds: [],
+      vehicleCategory: category,
+      settings,
+      washOffer: offer,
+    });
+    const created = await createAppointment({
+      customer: {
+        firstName: claim.firstName,
+        lastName: claim.lastName,
+        email: claim.email ?? undefined,
+        phone: claim.phone ?? undefined,
+        preferredContact: claim.email ? "email" : "phone",
+      },
+      vehicle: { make: "", model: "", category },
+      pricing,
+      dateISO,
+      startMs,
+      policiesAccepted: true,
+      settings,
+      washClaim: { offer, code: claim.code },
+    });
+    return { pricing, created };
+  }
+
+  it("books and spends the code without asking anything twice", async () => {
+    const { claim } = await claimFor({ firstName: "Sam", phone: "905-555-0101" }, "suv");
+    const { pricing, created } = await bookFromClaim(claim, await slotAt(0, "suv_small"));
+
+    // The claim said SUV, so the SUV catalogue price is what the offer buys
+    // down to the advertised figure — the page never asked again.
+    expect(pricing.subtotalCents).toBe(3500);
+    expect(pricing.subtotalCents - pricing.discountCents).toBe(1599);
+    expect(pricing.promoCode).toBe(offer.code);
+
+    const [after] = await db().select().from(schema.offerClaims).where(eq(schema.offerClaims.id, claim.id));
+    expect(after.status).toBe("booked");
+    expect(after.appointmentId).toBe(created.appointmentId);
+
+    // The wash is booked onto a real slot, not left for the shop to call about:
+    // the whole point of the arm is that the customer leaves with a time.
+    const [appointment] = await db()
+      .select()
+      .from(schema.appointments)
+      .where(eq(schema.appointments.id, created.appointmentId));
+    expect(appointment.timeToBeConfirmed).toBe(false);
+    expect(appointment.status).toBe("confirmed");
+  });
+
+  it("records the vehicle by size when make and model were never asked for", async () => {
+    const { claim } = await claimFor({ firstName: "Sam", phone: "905-555-0101" }, "car");
+    const { created } = await bookFromClaim(claim, await slotAt(0));
+    const [vehicle] = await db().select().from(schema.vehicles).where(eq(schema.vehicles.id, created.vehicleId));
+    // The size is what prices the wash and what the shop needs; the rest is
+    // filled in at the counter, where the car is actually in front of someone.
+    expect(vehicle.category).toBe("sedan");
+    expect(vehicle.make).toBe("");
+    expect(vehicle.model).toBe("");
+  });
+
+  it("confirms the time and hands over the code in ONE message", async () => {
+    await db().insert(schema.messageTemplates).values([
+      {
+        id: newId("tpl"),
+        key: "offer_claim_booked_sms",
+        channel: "sms",
+        body: "{{businessName}}: booked for {{when}}. Code {{code}}. Reply STOP to opt out.",
+      },
+      {
+        id: newId("tpl"),
+        key: "offer_claim_booked_email",
+        channel: "email",
+        subject: "Booked for {{when}}",
+        body: "Hi {{firstName}}, you are booked for {{when}}. Code {{code}}, {{price}}. {{unsubscribe}}",
+      },
+    ]).onConflictDoNothing();
+
+    const { claim } = await claimFor({ firstName: "Sam", phone: "905-555-0101", email: "sam@example.com" });
+    const { created } = await bookFromClaim(claim, await slotAt(0));
+    const whenLabel = appointmentWhenLabel(created, tz, {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+    });
+
+    const sent = await sendClaimMessages({
+      claim,
+      offer,
+      settings,
+      variant: "booked",
+      baseUrl: "https://www.personaltouchcardetailing.ca",
+      extraVariables: { when: whenLabel, priceWithTax: "$18.07" },
+    });
+    expect(sent).toEqual(["sms", "email"]);
+
+    const rows = await db()
+      .select({ channel: schema.communications.channel, body: schema.communications.body })
+      .from(schema.communications)
+      .where(eq(schema.communications.relatedEntityId, claim.id));
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      // Both halves in both messages: a confirmation that omits the code sends
+      // the customer to the counter unsure what they are paying.
+      expect(row.body).toContain(whenLabel);
+      expect(row.body).toContain(formatClaimCode(claim.code));
+    }
+  });
+
+  it("refuses a returning customer before anything is written", async () => {
+    // Same rule as the wizard, but it lands at a different moment: here the
+    // person is told at the point of booking rather than after following a
+    // code into a second page.
+    const existing = newId("cus");
+    await db().insert(schema.customers).values({
+      id: existing,
+      firstName: "Sam",
+      lastName: "Lee",
+      phone: "905-555-0101",
+      phoneNormalized: "9055550101",
+    });
+    const vehicleId = newId("veh");
+    await db().insert(schema.vehicles).values({
+      id: vehicleId,
+      customerId: existing,
+      make: "Honda",
+      model: "Civic",
+      category: "sedan",
+    });
+    await db().insert(schema.appointments).values({
+      id: newId("apt"),
+      customerId: existing,
+      vehicleId,
+      status: "completed",
+      startsAt: new Date(Date.now() - 30 * 86_400_000),
+      endsAt: new Date(Date.now() - 30 * 86_400_000 + 3_600_000),
+      durationMin: 60,
+    });
+
+    const { claim } = await claimFor({ firstName: "Sam", phone: "905-555-0101" });
+    await expect(bookFromClaim(claim, await slotAt(0))).rejects.toBeInstanceOf(OfferChangedError);
+
+    const [after] = await db().select().from(schema.offerClaims).where(eq(schema.offerClaims.id, claim.id));
+    expect(after.status).toBe("issued");
   });
 });
 

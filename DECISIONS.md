@@ -1253,3 +1253,70 @@ about not knowing, and staff needed it to be useful instead.
 **Revisit when:** the panel needs to show durations as well as prices — the size
 delta moves both, and a longer job is what triggers the bay-overlap warning
 staff then have to confirm.
+
+
+## 37. The wash offer's second arm: book the time first, hand the code over after
+Most people who claimed a first-wash code never booked with it. The funnel asked
+them to fill a form, gave them a coupon, and then sent them to `/book` — a
+different page, a different theme, a five-step wizard and a second set of
+questions — to do the thing the shop actually wanted. The coupon was the reward;
+the booking was homework.
+
+So the landing page can now take the appointment itself, and the code becomes
+part of the confirmation rather than the prize. Both versions ship, and Admin →
+Settings switches between them, because which one converts better is a question
+about these customers and not one to be settled by argument.
+
+Consequential choices:
+
+- **The two arms differ in exactly two ways.** What the page asks for after the
+  details, and whether anything is sent before an appointment exists. The claim
+  record, the caps, the price, the terms and the code itself are identical, so
+  the arms are comparable on the one number that matters — of the claims made,
+  how many are `booked` — and that number is already on the Offer claims screen
+  with no new reporting to build.
+- **The claim is still created the moment the details are submitted**, in both
+  arms, before a time is chosen. Someone who gives their number and then
+  abandons the time picker is a lead the shop can work, and the existing nudges
+  already know how to chase an unbooked claim. Withholding the *code* is the
+  experiment; withholding the *lead* would just be losing it.
+- **Nothing is sent until the booking exists.** In the book-first arm the code
+  text and email are not sent at claim time — sending them would hand over the
+  very thing being withheld, and leave the customer holding a coupon and half a
+  booking. When the appointment is made, ONE message carries both facts
+  (`offer_claim_booked_sms` / `_email`). The ordinary booking confirmation is
+  deliberately not sent alongside it: two messages about one wash, one of them
+  silent about the code, is how somebody arrives unsure what they are paying.
+- **The booking is built entirely from the claim.** Name, number, email and
+  vehicle size were given to get the code; asking again is the friction this
+  exists to remove. `bookWashOfferAction` therefore accepts only a code, a date
+  and a start time — the browser never names a service, a price or a customer —
+  and everything else is read from the claim the code resolves to.
+- **Make and model are not asked for, and that is a trade.** The wash is priced
+  by size, the plate is recorded at the counter, and two more fields on a form
+  built to be finished in a minute cost more than the details are worth here.
+  The vehicle row is written with empty make and model, and `vehicleLabel` now
+  says "Vehicle details not given" rather than rendering an empty line above the
+  pricing size. Staff fill it in from the appointment if they want it.
+- **It reuses `priceBooking` and `createAppointment` unchanged.** Not a second
+  booking path: the same double-booking lock, the same in-transaction
+  first-time-customer re-check, the same conditional spend of the claim. The
+  offer page can no more sell a wash twice than the wizard can, and a returning
+  customer is refused there with nothing written — the difference is only that
+  they are told at the moment of booking instead of two pages later.
+- **A missing flow means the old flow.** Settings are one JSON blob per key, so
+  the `washOffer` row saved before this field existed comes back without it, and
+  so does anything unrecognised typed into it. Both resolve to `code_first` —
+  otherwise switching the test on would be a deploy rather than a checkbox, and
+  a typo would be an outage.
+- **Coming back to the page after booking returns the code, not a refusal.** A
+  spent claim used to answer "this code has already been used", which is the
+  right answer for somebody who has had their wash and the wrong one for
+  somebody who booked an hour ago and came back to find the code. The page now
+  reads the appointment back and shows the time and the code again, unless the
+  booking has been cancelled or is already in the past.
+
+**Revisit when:** the test is settled. The losing arm's page code, its templates
+and the setting itself should then go, rather than being left as a switch nobody
+remembers the meaning of — and if a second fixed-price offer is ever run at the
+same time, the flow belongs on the offer rather than on the one settings blob.

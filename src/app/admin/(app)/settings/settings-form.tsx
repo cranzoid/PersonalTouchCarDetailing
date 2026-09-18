@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { BusinessSettings } from "@/lib/settings";
+import type { WashOfferFlow } from "@/lib/wash-offer";
 import { formatHHMM12 } from "@/lib/tz";
 import { VEHICLE_CATEGORIES, VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
 import { updateSettingsAction, updateBusinessHoursAction } from "./actions";
@@ -77,6 +78,11 @@ export function SettingsForm({
   const [washEnabled, setWashEnabled] = useState(initial.washOffer.enabled);
   const [washFirstTimeOnly, setWashFirstTimeOnly] = useState(initial.washOffer.firstTimeOnly);
   const [washReminders, setWashReminders] = useState(initial.washOffer.remindersEnabled);
+  // Settings are stored as one JSON blob per key, so a row saved before this
+  // field existed comes back without it. Missing means the original flow.
+  const [washFlow, setWashFlow] = useState<WashOfferFlow>(
+    initial.washOffer.flow === "book_first" ? "book_first" : "code_first",
+  );
   const [washPrices, setWashPrices] = useState<Partial<Record<VehicleCategory, string>>>(() =>
     Object.fromEntries(
       VEHICLE_CATEGORIES.map((category) => {
@@ -151,6 +157,7 @@ export function SettingsForm({
         claimsCloseOn: form.washClaimsCloseOn,
         firstTimeOnly: washFirstTimeOnly,
         remindersEnabled: washReminders,
+        flow: washFlow,
       },
     });
     setBusy(false);
@@ -215,6 +222,47 @@ export function SettingsForm({
           <input type="checkbox" checked={washEnabled} onChange={(e) => setWashEnabled(e.target.checked)} />
           Run the new-customer wash offer
         </label>
+
+        <fieldset className="mt-4 rounded-lg border border-ink-700 bg-ink-950/60 p-3">
+          <legend className="px-1 text-xs text-ink-400">
+            What the landing page asks for
+          </legend>
+          <p className="mb-3 text-xs leading-5 text-ink-500">
+            Switch this whenever you like — it changes the page, the text message and the email
+            together, and it never touches a code somebody is already holding. Compare the two on
+            the Offer claims screen: the same claims are counted either way, so &ldquo;booked&rdquo;
+            against &ldquo;issued&rdquo; is the answer.
+          </p>
+          {(
+            [
+              [
+                "code_first",
+                "Code first, booking afterwards",
+                "They get the code on screen and by text, then follow a link to the booking page to pick a time. Most people never come back to book.",
+              ],
+              [
+                "book_first",
+                "Book the time first, then the code",
+                "The same page asks for a date and time, shows the price, and hands over the code with the confirmation. Nothing is sent until an appointment exists.",
+              ],
+            ] as const
+          ).map(([value, title, detail]) => (
+            <label key={value} className="mt-2 flex items-start gap-2 text-sm text-ink-200">
+              <input
+                type="radio"
+                name="wash-offer-flow"
+                className="mt-1"
+                checked={washFlow === value}
+                onChange={() => setWashFlow(value)}
+              />
+              <span>
+                {title}
+                <span className="block text-xs text-ink-500">{detail}</span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
+
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           {field("washLabel", "Customer-facing label", { placeholder: "First Wash Offer" })}
           {field("washCode", "Campaign code", { placeholder: "FIRSTWASH26" })}
