@@ -6,7 +6,7 @@ import { requirePageStaff } from "@/lib/auth/page";
 import { roleHas } from "@/lib/auth/permissions";
 import { getAttentionQueue } from "@/lib/attention";
 import { getBooksSnapshot, listUnconfirmedBills } from "@/lib/books";
-import { loadUnreadReplies } from "@/lib/replies";
+import { unreadRepliesOrNone } from "@/lib/replies";
 import { getSettings } from "@/lib/settings";
 import { appointmentTimeLabel } from "@/lib/appointment-time";
 import { formatCents } from "@/lib/money";
@@ -84,7 +84,7 @@ export default async function AdminDashboard() {
   const canSeeMoney = roleHas(role, "view_financial_reports");
   // What a customer texted back is their words to the shop, not shop-floor
   // information — the same gate the customer records themselves are behind.
-  const replies = roleHas(role, "manage_customers") ? await loadUnreadReplies() : null;
+  const replies = roleHas(role, "manage_customers") ? await unreadRepliesOrNone() : null;
   const canManageExpenses = roleHas(role, "manage_expenses");
   const canManageInvoices = roleHas(role, "manage_invoices");
   const books = canSeeMoney ? await getBooksSnapshot("month", y, m) : null;

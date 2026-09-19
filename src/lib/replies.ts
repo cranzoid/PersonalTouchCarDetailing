@@ -391,6 +391,41 @@ export async function loadUnreadReplies(limit = 5): Promise<{ total: number; ite
   };
 }
 
+/**
+ * The two reads the admin shell does whether anybody asked for them or not,
+ * degraded rather than fatal.
+ *
+ * The count is in the rail on every admin page and the card opens the
+ * dashboard, so a throw here takes down screens that have nothing to do with
+ * replies. The one window where either can fail is a release: the staging slot
+ * shares the production database and migrates at boot, so for a few seconds the
+ * live build is querying a schema mid-change. A rail without a number on it, or
+ * a dashboard without the card, beats a shop that cannot see today's work.
+ *
+ * The replies screen itself is deliberately NOT wrapped. If the data is broken
+ * that screen should say so rather than quietly show an empty inbox.
+ */
+export async function unreadReplyCountOrZero(): Promise<number> {
+  try {
+    return await countUnreadReplies();
+  } catch (error) {
+    console.error("[replies] unread count unavailable", error instanceof Error ? error.message : "");
+    return 0;
+  }
+}
+
+/** As above, for the dashboard card. Null means "show nothing", not "none". */
+export async function unreadRepliesOrNone(
+  limit?: number,
+): Promise<{ total: number; items: UnreadReply[] } | null> {
+  try {
+    return await loadUnreadReplies(limit);
+  } catch (error) {
+    console.error("[replies] unread replies unavailable", error instanceof Error ? error.message : "");
+    return null;
+  }
+}
+
 function unique(values: readonly (string | null)[]): string[] {
   return [...new Set(values.filter((value): value is string => Boolean(value)))];
 }

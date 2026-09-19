@@ -5,7 +5,7 @@ import type { ReactNode } from "react";
 import { AdminNav, type AdminNavIcon } from "@/components/admin";
 import { getStaff } from "@/lib/auth/session";
 import { roleHas, type Permission } from "@/lib/auth/permissions";
-import { countUnreadReplies } from "@/lib/replies";
+import { unreadReplyCountOrZero } from "@/lib/replies";
 import { logoutAction } from "../login/actions";
 
 type NavItem = { href: string; label: string; permission: Permission; icon: AdminNavIcon };
@@ -80,7 +80,7 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   // authorization via requireStaff() — this redirect is not the security boundary.
   const staff = await getStaff();
   if (!staff) redirect("/admin/login");
-  const unreadReplies = roleHas(staff.role, "manage_customers") ? await unreadReplyCount() : 0;
+  const unreadReplies = roleHas(staff.role, "manage_customers") ? await unreadReplyCountOrZero() : 0;
   const visibleSections = NAV_SECTIONS.map((section) => ({
     label: section.label,
     items: section.items
@@ -167,24 +167,6 @@ export default async function AdminLayout({ children }: { children: ReactNode })
       </div>
     </div>
   );
-}
-
-/**
- * The badge count, degraded rather than fatal.
- *
- * This runs in the layout, so a failure here would take down EVERY admin
- * screen — and the one window where it could fail is a release: the staging
- * slot shares the production database and migrates at boot, so for a few
- * seconds the live build is querying a schema mid-change. A rail without a
- * number on it is a far better outcome than a shop that cannot open a booking.
- */
-async function unreadReplyCount(): Promise<number> {
-  try {
-    return await countUnreadReplies();
-  } catch (error) {
-    console.error("[admin] unread reply count unavailable", error instanceof Error ? error.message : "");
-    return 0;
-  }
 }
 
 function BrandLockup({ compact = false }: { compact?: boolean }) {
