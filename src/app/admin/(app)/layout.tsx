@@ -5,9 +5,13 @@ import type { ReactNode } from "react";
 import { AdminNav, type AdminNavIcon } from "@/components/admin";
 import { getStaff } from "@/lib/auth/session";
 import { roleHas, type Permission } from "@/lib/auth/permissions";
+import { countUnreadReplies } from "@/lib/replies";
 import { logoutAction } from "../login/actions";
 
 type NavItem = { href: string; label: string; permission: Permission; icon: AdminNavIcon };
+
+/** The rail item whose pill shows how many replies nobody has read yet. */
+const REPLIES_HREF = "/admin/messages";
 
 /**
  * The rail, grouped the way the shop works rather than the way the code is laid
@@ -30,6 +34,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
     items: [
       { href: "/admin/appointments", label: "Appointments", permission: "manage_bookings", icon: "calendar" },
       { href: "/admin/leads", label: "Leads", permission: "manage_customers", icon: "leads" },
+      { href: REPLIES_HREF, label: "Replies", permission: "manage_customers", icon: "messages" },
       { href: "/admin/marketing/offer-claims/redeem", label: "Redeem wash code", permission: "manage_bookings", icon: "ticket" },
       { href: "/admin/marketing/offer-claims", label: "Offer claims", permission: "manage_marketing", icon: "claims" },
       { href: "/admin/estimates", label: "Estimates", permission: "manage_estimates", icon: "estimate" },
@@ -75,11 +80,17 @@ export default async function AdminLayout({ children }: { children: ReactNode })
   // authorization via requireStaff() — this redirect is not the security boundary.
   const staff = await getStaff();
   if (!staff) redirect("/admin/login");
+  const unreadReplies = roleHas(staff.role, "manage_customers") ? await unreadReplyCount() : 0;
   const visibleSections = NAV_SECTIONS.map((section) => ({
     label: section.label,
     items: section.items
       .filter((item) => roleHas(staff.role, item.permission))
-      .map(({ href, label, icon }) => ({ href, label, icon })),
+      .map(({ href, label, icon }) => ({
+        href,
+        label,
+        icon,
+        ...(href === REPLIES_HREF ? { badge: unreadReplies } : {}),
+      })),
   })).filter((section) => section.items.length > 0);
   const initial = staff.name.trim().charAt(0).toUpperCase() || "S";
 
@@ -156,6 +167,24 @@ export default async function AdminLayout({ children }: { children: ReactNode })
       </div>
     </div>
   );
+}
+
+/**
+ * The badge count, degraded rather than fatal.
+ *
+ * This runs in the layout, so a failure here would take down EVERY admin
+ * screen — and the one window where it could fail is a release: the staging
+ * slot shares the production database and migrates at boot, so for a few
+ * seconds the live build is querying a schema mid-change. A rail without a
+ * number on it is a far better outcome than a shop that cannot open a booking.
+ */
+async function unreadReplyCount(): Promise<number> {
+  try {
+    return await countUnreadReplies();
+  } catch (error) {
+    console.error("[admin] unread reply count unavailable", error instanceof Error ? error.message : "");
+    return 0;
+  }
 }
 
 function BrandLockup({ compact = false }: { compact?: boolean }) {

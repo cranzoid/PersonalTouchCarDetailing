@@ -150,6 +150,11 @@ export async function recordInboundSms(input: {
       direction: "inbound",
       channel: "sms",
       kind: action === "reply" ? "reply" : `opt_${action}`,
+      // The sender's number, on the row. A reply from a number matching neither
+      // a lead nor a customer carries no other identity, and the replies inbox
+      // threads on this — see src/lib/replies.ts.
+      contactAddress: input.from,
+      contactAddressNormalized: normalized,
       body: input.body,
       status: "received",
       providerRef: input.messageSid,

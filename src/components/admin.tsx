@@ -28,6 +28,8 @@ export type AdminNavItem = {
   href: string;
   label: string;
   icon: AdminNavIcon;
+  /** Count of things waiting on this screen, shown as a pill. Omit for none. */
+  badge?: number;
 };
 
 export type AdminNavSection = {
@@ -87,6 +89,7 @@ export function AdminNav({
       {sections.map((section) => {
         const expanded = open.includes(section.label);
         const holdsActive = section.label === activeSection;
+        const sectionBadge = section.items.reduce((total, item) => total + (item.badge ?? 0), 0);
         return (
           <section key={section.label}>
             <h2>
@@ -108,8 +111,18 @@ export function AdminNav({
               >
                 <Chevron open={expanded} />
                 <span className="truncate">{section.label}</span>
-                {/* A collapsed section still has to say "you are in here". */}
-                {holdsActive && !expanded && (
+                {/*
+                  * Only the section holding the current page is open, so a count
+                  * on an item inside a closed one would be invisible — which is
+                  * the whole point of the count. It surfaces on the header
+                  * instead, and the header alone once the section is open.
+                  */}
+                {!expanded && sectionBadge > 0 && (
+                  <span className="ml-auto shrink-0 rounded-full bg-[#C2453C] px-1.5 py-0.5 text-[10px] font-bold leading-none text-white admin-on-dark">
+                    {sectionBadge > 99 ? "99+" : sectionBadge}
+                  </span>
+                )}
+                {holdsActive && !expanded && sectionBadge === 0 && (
                   <span
                     aria-hidden="true"
                     className="ml-auto h-1.5 w-1.5 shrink-0 rounded-full bg-[#E0A93B]"
@@ -169,6 +182,12 @@ function AdminNavLink({
         <AdminIcon name={item.icon} />
       </span>
       <span className="truncate">{item.label}</span>
+      {item.badge !== undefined && item.badge > 0 && (
+        <span className="ml-auto shrink-0 rounded-full bg-[#C2453C] px-1.5 py-0.5 text-[10px] font-bold leading-none text-white admin-on-dark">
+          {item.badge > 99 ? "99+" : item.badge}
+          <span className="sr-only"> waiting</span>
+        </span>
+      )}
     </Link>
   );
 }

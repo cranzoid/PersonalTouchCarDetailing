@@ -1335,3 +1335,44 @@ Consequential choices:
 and the setting itself should then go, rather than being left as a switch nobody
 remembers the meaning of — and if a second fixed-price offer is ever run at the
 same time, the flow belongs on the offer rather than on the one settings blob.
+
+## 38. Replies are conversations, and a conversation belongs to a number
+
+Every reply a customer sent has been recorded since the Twilio webhook shipped,
+and there has never been anywhere to read one. A reply appeared on whichever
+customer or lead its number matched, so finding it meant already knowing it was
+there — and a reply from a number matching neither record showed up nowhere at
+all, because nothing identifying was written on the row. `/admin/messages` is
+the screen that was missing.
+
+- **The number is on the message now.** `communications.contact_address` and
+  its normalized form are written by both sides: the webhook records who texted
+  in, `sendMessage` records who we sent to. Historical inbound rows were
+  backfilled in `0030` from the raw Twilio delivery still sitting in
+  `webhook_events.payload`, which was the only place the sender's number had
+  survived. Normalization is byte-identical to `normalizePhone` — a number keyed
+  one way on the send and another way on the reply would thread into a
+  conversation of its own and look, convincingly, like it had worked.
+- **A thread is a number, not a person.** Two known numbers are two
+  conversations even when both belong to one customer. The reply box sends to
+  ONE number, so merging a work and a home phone would answer whichever of them
+  the thread happened to keep. Ids bridge only where an address is missing,
+  which is how messages sent before the column existed still find their thread.
+- **Threads are seeded from inbound messages only.** A contact who has never
+  written to us has nothing here to answer. Everything else is then pulled in
+  around the replies, so a reply is read next to the confirmation or nudge that
+  provoked it.
+- **Replying is `manual`, not marketing, and has no send window.** Answering
+  someone who just texted the shop is a conversation they started: it needs no
+  marketing consent, and the 9am–8pm rule that binds campaigns does not apply —
+  somebody texting at 9pm is waiting for an answer at 9pm. The opt-out list is
+  still checked, because a number that replied STOP is blocked by the carrier
+  and the attempt would only fail with error 21610.
+- **The reply endpoint is not a "text anybody" endpoint.** `sendReplyAction`
+  refuses a number with no inbound message, and resolves the customer and lead
+  itself rather than trusting ids from the browser. Without that, every user who
+  can open a customer record would have an unlogged way to text any number in
+  the country from the shop's Twilio number.
+- **Everything that arrived before this screen starts unread.** The owner gets
+  one backlog to triage, which is the honest state: nobody has read these in an
+  inbox, and the complaint that prompted the work was replies going unseen.

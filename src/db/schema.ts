@@ -1091,10 +1091,36 @@ export const communications = pgTable(
     relatedEntityId: text("related_entity_id"),
     status: text("status").notNull().default("logged"), // queued | sent | failed | logged | received
     providerRef: text("provider_ref"),
+    /**
+     * The customer's own address on this message — the number or address we
+     * sent to, or the one a reply came from.
+     *
+     * Until the replies inbox this was not stored at all, and an inbound SMS
+     * from a number we do not recognise recorded NOTHING identifying: both ids
+     * are null on such a row, and the sender's number survived only inside
+     * `webhook_events.payload`. A reply nobody can attribute is a reply nobody
+     * can answer. Kept alongside the ids rather than replacing them, because a
+     * person can change their number and the history must not follow it.
+     */
+    contactAddress: text("contact_address"),
+    /** normalizeDestination() of the above — the key conversations thread on. */
+    contactAddressNormalized: text("contact_address_normalized"),
+    /**
+     * When a staff member saw this reply, and who. Outbound rows keep both null
+     * forever: there is nothing to read on a message the shop sent itself.
+     */
+    readAt: timestamp("read_at", { withTimezone: true }),
+    readByStaffId: text("read_by_staff_id").references(() => staffUsers.id),
     createdByStaffId: text("created_by_staff_id").references(() => staffUsers.id),
     createdAt: createdAt(),
   },
-  (t) => [index("communications_customer_idx").on(t.customerId)],
+  (t) => [
+    index("communications_customer_idx").on(t.customerId),
+    index("communications_lead_idx").on(t.leadId),
+    index("communications_contact_idx").on(t.contactAddressNormalized),
+    /** The unread badge in the admin rail runs on every page load. */
+    index("communications_inbound_idx").on(t.direction, t.readAt),
+  ],
 );
 
 export const messageTemplates = pgTable("message_templates", {

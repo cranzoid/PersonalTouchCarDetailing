@@ -6,6 +6,7 @@ import { requirePageStaff } from "@/lib/auth/page";
 import { roleHas } from "@/lib/auth/permissions";
 import { getAttentionQueue } from "@/lib/attention";
 import { getBooksSnapshot, listUnconfirmedBills } from "@/lib/books";
+import { loadUnreadReplies } from "@/lib/replies";
 import { getSettings } from "@/lib/settings";
 import { appointmentTimeLabel } from "@/lib/appointment-time";
 import { formatCents } from "@/lib/money";
@@ -13,6 +14,7 @@ import { formatInZone, zonedToUtc } from "@/lib/tz";
 import type { StaffRole } from "@/lib/types";
 import { AttentionCard } from "./attention-card";
 import { ConfirmBillsCard } from "./expenses/confirm-bills-card";
+import { RepliesCard } from "./replies-card";
 
 export const dynamic = "force-dynamic";
 
@@ -80,6 +82,9 @@ export default async function AdminDashboard() {
   // technicians reach this page too, and must not see either.
   const role = staff.role as StaffRole;
   const canSeeMoney = roleHas(role, "view_financial_reports");
+  // What a customer texted back is their words to the shop, not shop-floor
+  // information — the same gate the customer records themselves are behind.
+  const replies = roleHas(role, "manage_customers") ? await loadUnreadReplies() : null;
   const canManageExpenses = roleHas(role, "manage_expenses");
   const canManageInvoices = roleHas(role, "manage_invoices");
   const books = canSeeMoney ? await getBooksSnapshot("month", y, m) : null;
@@ -120,6 +125,25 @@ export default async function AdminDashboard() {
           </Link>
         ))}
       </div>
+
+      {replies && replies.total > 0 && (
+        <RepliesCard
+          total={replies.total}
+          items={replies.items.map((item) => ({
+            id: item.id,
+            name: item.name,
+            phoneLabel: item.phoneLabel,
+            preview: item.preview,
+            atLabel: formatInZone(item.createdAt, tz, {
+              month: "short",
+              day: "numeric",
+              hour: "numeric",
+              minute: "2-digit",
+            }),
+            needsAttention: item.needsAttention,
+          }))}
+        />
+      )}
 
       {books && (
         <section className="mt-8">

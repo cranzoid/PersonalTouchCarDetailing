@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "@/lib/id";
 import { getIntegrationSecret } from "@/lib/integrations";
-import { isSuppressed, type MarketingChannel } from "@/lib/marketing/suppressions";
+import { isSuppressed, normalizeDestination, type MarketingChannel } from "@/lib/marketing/suppressions";
 
 export type OutboundMessage = {
   customerId?: string;
@@ -148,6 +148,26 @@ async function marketingDenial(msg: OutboundMessage): Promise<string | null> {
 }
 
 /**
+ * The destination, stored on the row so a conversation can be threaded by the
+ * address it actually happened at.
+ *
+ * Without this an outbound message is tied only to a customer or lead id, which
+ * is enough to list it under that record and not enough to sit it beside the
+ * reply it provoked — inbound SMS from a stranger has no id at all. Normalized
+ * with the SAME function the suppression list is keyed by, so "(905) 555-1234"
+ * on a send and "+19055551234" on the reply land in one thread.
+ */
+function contactOf(msg: OutboundMessage): {
+  contactAddress: string;
+  contactAddressNormalized: string | null;
+} {
+  return {
+    contactAddress: msg.to.trim(),
+    contactAddressNormalized: normalizeDestination(msg.channel, msg.to),
+  };
+}
+
+/**
  * Sends (or in dev, logs) an outbound message and records it in the unified
  * communications history. Marketing-consent enforcement lives HERE so no
  * caller can accidentally bypass it. Operational messages (confirmations,
@@ -166,6 +186,7 @@ export async function sendMessage(msg: OutboundMessage): Promise<MessageResult> 
         channel: msg.channel,
         kind: msg.kind,
         subject: msg.subject,
+        ...contactOf(msg),
         body: `[SUPPRESSED — ${denial}] ${msg.body.slice(0, 200)}`,
         relatedEntityType: msg.relatedEntityType,
         relatedEntityId: msg.relatedEntityId,
@@ -195,6 +216,7 @@ export async function sendMessage(msg: OutboundMessage): Promise<MessageResult> 
     kind: msg.kind,
     subject: msg.subject,
     cc,
+    ...contactOf(msg),
     body: msg.body,
     relatedEntityType: msg.relatedEntityType,
     relatedEntityId: msg.relatedEntityId,
