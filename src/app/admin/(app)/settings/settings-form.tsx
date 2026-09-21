@@ -92,6 +92,7 @@ export function SettingsForm({
     ),
   );
   const [notifyOnNewAppointment, setNotifyOnNewAppointment] = useState(initial.notifyOnNewAppointment);
+  const [notifyOnCustomerReply, setNotifyOnCustomerReply] = useState(initial.notifyOnCustomerReply);
   const [promoEnabled, setPromoEnabled] = useState(initial.promotion.enabled);
   const [promoFirstTimeOnly, setPromoFirstTimeOnly] = useState(initial.promotion.firstTimeOnly);
   const [promoServiceIds, setPromoServiceIds] = useState<string[]>(initial.promotion.eligibleServiceIds);
@@ -127,6 +128,7 @@ export function SettingsForm({
       reviewRequestDelayHours: Number(form.reviewRequestDelayHours),
       maintenanceReminderMonths: Number(form.maintenanceReminderMonths),
       notifyOnNewAppointment,
+      notifyOnCustomerReply,
       staffNotifyPhones: splitList(form.staffNotifyPhones),
       staffNotifyEmails: splitList(form.staffNotifyEmails),
       promotion: {
@@ -453,6 +455,14 @@ export function SettingsForm({
             onChange={(e) => setNotifyOnNewAppointment(e.target.checked)}
           />
           Text and email us whenever a new appointment is booked
+        </label>
+        <label className="mt-2 flex items-center gap-2 text-sm text-ink-200">
+          <input
+            type="checkbox"
+            checked={notifyOnCustomerReply}
+            onChange={(e) => setNotifyOnCustomerReply(e.target.checked)}
+          />
+          Text and email us when a customer replies to one of our messages
         </label>
         <div className="mt-3 grid gap-3 sm:grid-cols-2">
           {field("staffNotifyPhones", "Alert phone numbers (comma separated)", {

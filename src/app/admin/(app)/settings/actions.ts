@@ -42,6 +42,7 @@ const settingsInput = z.object({
   reviewRequestDelayHours: z.number().int().min(0).max(24 * 30),
   maintenanceReminderMonths: z.number().int().min(1).max(24),
   notifyOnNewAppointment: z.boolean(),
+  notifyOnCustomerReply: z.boolean(),
   staffNotifyPhones: z.array(z.string().trim().min(1).max(30)).max(10),
   staffNotifyEmails: z.array(z.string().trim().email().max(200)).max(10),
   promotion: z

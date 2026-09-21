@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getIntegrationSecret } from "@/lib/integrations";
-import { recordInboundSms, verifyTwilioSignature } from "@/lib/marketing/inbound";
+import { recordInboundSms, verifyTwilioSignature, type InboundSmsOutcome } from "@/lib/marketing/inbound";
+import { notifyStaffOfCustomerReply } from "@/lib/staff-notifications";
 import { getAppBaseUrl } from "@/lib/urls";
 
 /**
@@ -13,8 +14,9 @@ import { getAppBaseUrl } from "@/lib/urls";
  *
  * Replies to a marketing campaign land here, as does every STOP. Twilio blocks
  * a stopped number on its own side regardless of this route; what this adds is
- * that we can see the reply, and that the opt-out becomes binding on email and
- * on every future campaign too.
+ * that we can see the reply, that the opt-out becomes binding on email and on
+ * every future campaign too, and that a reply wakes a staff phone instead of
+ * waiting for someone to open the inbox.
  */
 export const dynamic = "force-dynamic";
 
@@ -59,12 +61,14 @@ export async function POST(req: Request) {
   const from = params.From;
   if (!messageSid || !from) return new NextResponse("Missing message fields", { status: 400 });
 
+  const body = params.Body ?? "";
+  let outcome: InboundSmsOutcome;
   try {
-    await recordInboundSms({
+    outcome = await recordInboundSms({
       messageSid,
       from,
       to: params.To ?? "",
-      body: params.Body ?? "",
+      body,
       payload: params,
     });
   } catch (error) {
@@ -72,6 +76,27 @@ export async function POST(req: Request) {
     // makes Twilio retry, and the MessageSid dedupe makes that retry safe.
     console.error("[webhooks:twilio] failed to record inbound SMS", error instanceof Error ? error.message : "");
     return new NextResponse("Could not record message", { status: 500 });
+  }
+
+  // Someone is waiting for an answer, so staff hear about it now rather than
+  // the next time somebody opens the inbox. Only for a genuine reply: STOP and
+  // START are acted on automatically and must not be texted back.
+  //
+  // Guarded on `processed` so a Twilio retry — which is deduped into a no-op
+  // above — cannot alert twice, and best-effort so a messaging outage leaves
+  // the reply recorded rather than provoking retries of a stored message.
+  if (outcome.processed && outcome.action === "reply") {
+    try {
+      await notifyStaffOfCustomerReply({
+        from,
+        body,
+        customerId: outcome.matchedCustomerId,
+        leadId: outcome.matchedLeadId,
+        needsAttention: outcome.needsAttention,
+      });
+    } catch {
+      console.error("[webhooks:twilio] inbound SMS recorded but staff alert could not be queued");
+    }
   }
 
   return emptyTwiml();

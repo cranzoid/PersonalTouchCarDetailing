@@ -1,14 +1,17 @@
 import "server-only";
 
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, gt } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { appointmentWhenLabel } from "@/lib/appointment-time";
 import { formatCents } from "@/lib/money";
 import { sendMessage } from "@/lib/messaging";
+import { formatPhone, normalizePhone } from "@/lib/phone";
 import { getSettings, type BusinessSettings } from "@/lib/settings";
+import { getAppBaseUrl } from "@/lib/urls";
 
 /**
- * Operational alerts to our own staff — currently "a booking just landed".
+ * Operational alerts to our own staff — a booking just landed, or a customer
+ * just texted back.
  *
  * Deliberately addressed to plain phone numbers and email addresses from
  * settings rather than staff_users rows: the manager login is shared between
@@ -133,5 +136,121 @@ export async function notifyStaffOfNewAppointment(appointmentId: string): Promis
     body,
     { type: "appointment", id: appointmentId },
     appointment.customerId,
+  );
+}
+
+/**
+ * How long one contact's replies stay under a single alert.
+ *
+ * Someone typing three lines in a row is one conversation, not three things to
+ * be woken for, and a campaign send can bring several replies at once. The
+ * window is per contact, so a second person writing in still gets through
+ * immediately.
+ */
+const REPLY_ALERT_WINDOW_MIN = 10;
+
+/** Ties an alert back to the conversation it is about, and throttles on it. */
+const REPLY_ALERT_ENTITY = "customer_reply";
+
+const NOTHING: StaffAlertOutcome = { attempted: 0, sent: 0 };
+
+/** The contact's own name, when the reply matched a record we hold. */
+async function replyContactName(input: {
+  customerId: string | null;
+  leadId: string | null;
+}): Promise<string | null> {
+  if (input.customerId) {
+    const [customer] = await db()
+      .select({ firstName: schema.customers.firstName, lastName: schema.customers.lastName })
+      .from(schema.customers)
+      .where(eq(schema.customers.id, input.customerId))
+      .limit(1);
+    const name = customer ? `${customer.firstName} ${customer.lastName}`.trim() : "";
+    if (name) return name;
+  }
+  if (input.leadId) {
+    const [lead] = await db()
+      .select({ name: schema.leads.name })
+      .from(schema.leads)
+      .where(eq(schema.leads.id, input.leadId))
+      .limit(1);
+    const name = lead?.name.trim();
+    if (name) return name;
+  }
+  return null;
+}
+
+/**
+ * Alerts staff that a customer has written back.
+ *
+ * The reply itself is already recorded and readable in Admin -> Messages by
+ * the time this runs; what this adds is that somebody knows to go and answer
+ * it while the customer is still holding their phone. Call it AFTER the
+ * inbound message has committed and treat it as best-effort: an alert that
+ * cannot be sent must never cost us the reply.
+ *
+ * Deliberately not called for STOP or START. Those are acted on automatically,
+ * the carrier has already blocked the number, and a staff member texting back
+ * "no problem" would be a send to a number that just opted out.
+ */
+export async function notifyStaffOfCustomerReply(input: {
+  /** The sender's number, exactly as it arrived. */
+  from: string;
+  body: string;
+  customerId: string | null;
+  leadId: string | null;
+  /** The reply reads like an opt-out request without using the keyword. */
+  needsAttention: boolean;
+}): Promise<StaffAlertOutcome> {
+  const settings = await getSettings();
+  if (!settings.notifyOnCustomerReply) return NOTHING;
+  if (recipients(settings).length === 0) return NOTHING;
+
+  const normalized = normalizePhone(input.from);
+
+  // A staff member texting the shop number is not a customer reply. Alerting
+  // them about their own message is also how an alert loop starts: the alert
+  // goes out from the same number they just wrote to.
+  if (normalized && settings.staffNotifyPhones.some((phone) => normalizePhone(phone) === normalized)) {
+    return NOTHING;
+  }
+
+  const threadKey = normalized ?? input.from.trim();
+  const [recent] = await db()
+    .select({ id: schema.communications.id })
+    .from(schema.communications)
+    .where(
+      and(
+        eq(schema.communications.kind, "staff_alert"),
+        eq(schema.communications.relatedEntityType, REPLY_ALERT_ENTITY),
+        eq(schema.communications.relatedEntityId, threadKey),
+        gt(schema.communications.createdAt, new Date(Date.now() - REPLY_ALERT_WINDOW_MIN * 60_000)),
+      ),
+    )
+    .limit(1);
+  if (recent) return NOTHING;
+
+  const who = (await replyContactName(input)) ?? "Unknown number";
+  const number = formatPhone(input.from) || input.from;
+  const text = input.body.trim().replace(/\s+/g, " ");
+  // Kept short on purpose: this is an SMS to the owner's phone, and the whole
+  // message is in the inbox anyway.
+  const excerpt = text.length > 160 ? `${text.slice(0, 159)}…` : text;
+
+  const body = [
+    `Reply from ${who} — ${number}`,
+    excerpt ? `"${excerpt}"` : "(no message text)",
+    input.needsAttention ? "Reads like an opt-out request — check before texting again." : null,
+    `Answer: ${getAppBaseUrl()}/admin/messages`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return fanOut(
+    settings,
+    `Reply from ${who}`,
+    body,
+    { type: REPLY_ALERT_ENTITY, id: threadKey },
+    input.customerId ?? undefined,
   );
 }

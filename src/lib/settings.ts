@@ -56,6 +56,12 @@ export type BusinessSettings = {
    * server components.
    */
   notifyOnNewAppointment: boolean;
+  /**
+   * Alert staff when a customer texts back. Replies are already recorded and
+   * readable in Admin -> Messages; this is what makes someone go and look
+   * while the customer is still holding their phone.
+   */
+  notifyOnCustomerReply: boolean;
   staffNotifyPhones: string[];
   staffNotifyEmails: string[];
   /** Ad-driven promotion. See src/lib/promotions.ts for how it is resolved. */
@@ -131,6 +137,7 @@ export const SETTINGS_DEFAULTS: BusinessSettings = {
   reviewRequestDelayHours: 24,
   maintenanceReminderMonths: 4,
   notifyOnNewAppointment: true,
+  notifyOnCustomerReply: true,
   staffNotifyPhones: [],
   staffNotifyEmails: [],
   // Ships disabled with nothing eligible: merging this never changes a price
