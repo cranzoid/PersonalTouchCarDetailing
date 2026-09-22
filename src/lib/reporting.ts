@@ -83,6 +83,14 @@ export type TaxSummary = {
   exemptBaseCents: number;
   /** Why tax was not charged, most valuable first. */
   exemptReasons: { reason: string; count: number; baseCents: number }[];
+  /**
+   * Gratuities invoiced in the window. Reported beside the tax figures but part
+   * of NEITHER base above: a tip is not consideration for a taxable supply, so
+   * it belongs in no HST line. It is here so the cash-basis revenue total can be
+   * reconciled against the accrual ones — without it, tips look like an
+   * unexplained gap between money received and sales recorded.
+   */
+  tipsCents: number;
 };
 
 export type PaymentMethodTotal = {
@@ -125,6 +133,7 @@ type TaxInvoiceLike = {
   taxCents: number;
   taxExempt: boolean;
   taxExemptReason: string | null;
+  tipCents: number;
 };
 
 /**
@@ -160,6 +169,7 @@ export function summarizeTax(rows: readonly TaxInvoiceLike[]): TaxSummary {
     exemptInvoiceCount: 0,
     exemptBaseCents: 0,
     exemptReasons: [],
+    tipsCents: issued.reduce((sum, row) => sum + (row.tipCents ?? 0), 0),
   };
   const reasons = new Map<string, { count: number; baseCents: number }>();
 
@@ -745,6 +755,7 @@ export async function getReportingSnapshot(days: ReportDays, now = new Date()): 
       taxCents: schema.invoices.taxCents,
       taxExempt: schema.invoices.taxExempt,
       taxExemptReason: schema.invoices.taxExemptReason,
+      tipCents: schema.invoices.tipCents,
     })
     .from(schema.invoices)
     .where(invoiceIssuedInWindow);

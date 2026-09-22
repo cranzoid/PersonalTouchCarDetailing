@@ -218,6 +218,13 @@
       "when": 1789216804325,
       "tag": "0030_reply_inbox",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "7",
+      "when": 1789220404325,
+      "tag": "0031_invoice_tips",
+      "breakpoints": true
     }
   ]
 }

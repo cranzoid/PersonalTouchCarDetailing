@@ -81,6 +81,9 @@ function summaryCsv(snapshot: ReportingSnapshot): string {
     ["Tax collected", money(snapshot.tax.taxCollectedCents)],
     ["Non-taxed invoices", snapshot.tax.exemptInvoiceCount],
     ["Non-taxed sales", money(snapshot.tax.exemptBaseCents)],
+    // Outside both bases above, and said so in the label: this is what
+    // reconciles cash received against sales recorded.
+    ["Tips (not a taxable supply)", money(snapshot.tax.tipsCents)],
     [],
     ["Non-taxed reason", "Invoices", "Sales"],
     ...snapshot.tax.exemptReasons.map((r) => [r.reason, r.count, money(r.baseCents)]),
@@ -145,6 +148,7 @@ async function invoicesCsv(days: ReportDays, now: Date): Promise<string> {
       taxRateBp: schema.invoices.taxRateBp,
       taxExempt: schema.invoices.taxExempt,
       taxExemptReason: schema.invoices.taxExemptReason,
+      tipCents: schema.invoices.tipCents,
       totalCents: schema.invoices.totalCents,
       customerFirstName: schema.customers.firstName,
       customerLastName: schema.customers.lastName,
@@ -168,6 +172,7 @@ async function invoicesCsv(days: ReportDays, now: Date): Promise<string> {
       "Tax",
       "Tax exempt",
       "Exemption reason",
+      "Tip",
       "Total",
     ],
     ...rows.map((r) => [
@@ -182,6 +187,7 @@ async function invoicesCsv(days: ReportDays, now: Date): Promise<string> {
       money(r.taxCents),
       r.taxExempt ? "Yes" : "No",
       r.taxExemptReason ?? "",
+      money(r.tipCents),
       money(r.totalCents),
     ]),
   ]);
@@ -250,6 +256,8 @@ function pnlCsv(books: BooksSnapshot, taxLabel: string): string {
     [`${taxLabel} collected`, money(books.pnl.taxCollectedCents)],
     ["Gross invoiced", money(books.pnl.grossSalesCents)],
     ["Discounts given", money(books.pnl.discountsGivenCents)],
+    // Its own line, outside net sales and net profit — see ProfitAndLoss.tipsCents.
+    ["Tips collected (not sales)", money(books.pnl.tipsCents)],
     ["Invoices issued", books.pnl.invoiceCount],
     [],
     ["Expenses by category", "Payments", `${taxLabel} paid`, "Amount"],

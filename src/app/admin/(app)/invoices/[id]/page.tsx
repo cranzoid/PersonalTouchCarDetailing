@@ -7,7 +7,7 @@ import { QUOTED_PAYMENT_METHOD_LABELS, type QuotedPaymentMethod } from "@/lib/ty
 import { PAYMENT_PROVIDER_LABELS } from "@/lib/payment-labels";
 import { formatInZone } from "@/lib/tz";
 import { getSettings } from "@/lib/settings";
-import { summarizePayments, syncOverdueInvoices } from "@/lib/invoices";
+import { summarizePayments, syncOverdueInvoices, tipBaseCents } from "@/lib/invoices";
 import { StatusBadge } from "@/components/admin";
 import { InvoiceActions } from "./invoice-actions";
 import { requirePageStaff } from "@/lib/auth/page";
@@ -180,6 +180,15 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                   }`}
                 </td></tr>
             )}
+            {invoice.tipCents > 0 && (
+              <tr><td colSpan={3} className="px-4 py-2 text-right text-ink-400">
+                  Tip{invoice.tipBasisBp ? ` (${(invoice.tipBasisBp / 100).toFixed(invoice.tipBasisBp % 100 === 0 ? 0 : 2)}%)` : ""}
+                  <span className="block text-xs font-normal text-ink-500">
+                    No {invoice.taxLabel} — a gratuity is not a taxable supply
+                  </span>
+                </td>
+                <td className="px-4 py-2 text-ink-200">{formatCents(invoice.tipCents, settings.currency)}</td></tr>
+            )}
             <tr><td colSpan={3} className="px-4 py-3 text-right font-semibold text-white">Total</td>
               <td className="px-4 py-3 font-semibold text-accent-300">{formatCents(invoice.totalCents, settings.currency)}</td></tr>
             {invoice.depositAppliedCents > 0 && (
@@ -285,6 +294,9 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         manualRefundableCents={refundAvailability.manualRefundableCents}
         taxExempt={invoice.taxExempt}
         taxLabel={invoice.taxLabel}
+        tipCents={invoice.tipCents}
+        tipBasisBp={invoice.tipBasisBp}
+        tipBaseCents={tipBaseCents(invoice.subtotalCents, invoice.discountCents)}
       />
     </div>
   );

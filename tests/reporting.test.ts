@@ -266,6 +266,7 @@ const invoice = (over: Partial<{
   taxCents: 2600,
   taxExempt: false,
   taxExemptReason: null,
+  tipCents: 0,
   ...over,
 });
 

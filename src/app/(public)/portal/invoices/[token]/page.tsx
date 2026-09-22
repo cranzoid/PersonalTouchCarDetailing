@@ -133,6 +133,12 @@ export default async function PortalInvoicePage({
             )}
             <tr><td className="py-2 pr-4 text-right text-ink-400">{invoice.taxLabel} ({(invoice.taxRateBp / 100).toFixed(2)}%)</td>
               <td className="py-2 text-right text-ink-200">{formatCents(invoice.taxCents, settings.currency)}</td></tr>
+            {invoice.tipCents > 0 && (
+              <tr><td className="py-2 pr-4 text-right text-ink-400">
+                Tip{invoice.tipBasisBp ? ` (${(invoice.tipBasisBp / 100).toFixed(invoice.tipBasisBp % 100 === 0 ? 0 : 2)}%)` : ""}
+              </td>
+                <td className="py-2 text-right text-ink-200">{formatCents(invoice.tipCents, settings.currency)}</td></tr>
+            )}
             <tr><td className="py-3 pr-4 text-right font-semibold text-white">Total</td>
               <td className="py-3 text-right font-semibold text-accent-300">{formatCents(invoice.totalCents, settings.currency)}</td></tr>
             {(invoice.depositAppliedCents > 0 || summary.paidCents > 0) && (

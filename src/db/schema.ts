@@ -954,6 +954,26 @@ export const invoices = pgTable(
     quotedPaymentMethod: text("quoted_payment_method"),
     /** Required by the staff builders whenever a discount is applied. */
     discountReason: text("discount_reason"),
+    /**
+     * A voluntary gratuity, added AFTER tax and deliberately kept OUT of
+     * `subtotalCents`. A tip is not consideration for a taxable supply, so it
+     * carries no HST — and living outside the subtotal is what enforces that
+     * for free: `summarizeTax` and `computeProfitAndLoss` both build their base
+     * from `subtotal - discount`, so a tip can never reach the tax base or net
+     * sales no matter who adds one.
+     *
+     * Part of `totalCents`, so the balance owing and every payment check follow
+     * it without a second rule.
+     */
+    tipCents: integer("tip_cents").notNull().default(0),
+    /**
+     * Set when the tip was expressed as a percentage (1500 = 15%), so the
+     * document can say "Tip (15%)" rather than only a dollar figure. NULL means
+     * a flat amount was typed. Provenance only — `tipCents` is always the
+     * authoritative number and no arithmetic re-derives it from this, because a
+     * later edit to the lines must not silently move a tip the customer chose.
+     */
+    tipBasisBp: integer("tip_basis_bp"),
     totalCents: integer("total_cents").notNull().default(0),
     depositAppliedCents: integer("deposit_applied_cents").notNull().default(0),
     /**

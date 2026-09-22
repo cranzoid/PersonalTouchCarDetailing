@@ -193,6 +193,7 @@ export type PnlInvoiceLike = {
   subtotalCents: number;
   discountCents: number;
   taxCents: number;
+  tipCents: number;
 };
 
 export type ProfitAndLoss = {
@@ -202,6 +203,15 @@ export type ProfitAndLoss = {
   /** What the business actually earned: gross less the tax it is holding for the CRA. */
   netSalesCents: number;
   discountsGivenCents: number;
+  /**
+   * Gratuities invoiced in the period. Its OWN line, deliberately outside
+   * netSales and outside netProfit: a tip is not a sale, carries no HST, and in
+   * the normal case is money passing through the shop to whoever did the work.
+   * It is shown rather than hidden so the figure is there to be moved if the
+   * owner keeps it — that is a question for their accountant, not a default
+   * this report should quietly pick.
+   */
+  tipsCents: number;
   invoiceCount: number;
   expenses: ExpenseSummary;
   netProfitCents: number;
@@ -227,12 +237,14 @@ export function computeProfitAndLoss(
     (sum, invoice) => sum + invoice.subtotalCents - invoice.discountCents,
     0,
   );
+  const tipsCents = issued.reduce((sum, invoice) => sum + (invoice.tipCents ?? 0), 0);
   const netProfitCents = netSalesCents - expenses.totalCents;
   return {
     grossSalesCents: netSalesCents + taxCollectedCents,
     taxCollectedCents,
     netSalesCents,
     discountsGivenCents,
+    tipsCents,
     invoiceCount: issued.length,
     expenses,
     netProfitCents,
@@ -374,6 +386,7 @@ async function loadPnl(
       .select({
         status: schema.invoices.status,
         subtotalCents: schema.invoices.subtotalCents,
+        tipCents: schema.invoices.tipCents,
         discountCents: schema.invoices.discountCents,
         taxCents: schema.invoices.taxCents,
       })

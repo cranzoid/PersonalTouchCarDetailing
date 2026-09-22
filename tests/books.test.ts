@@ -127,8 +127,8 @@ describe("computeProfitAndLoss", () => {
     const pnl = computeProfitAndLoss(
       [
         // 500.00 of work, 50.00 off, 58.50 HST on the 450.00 balance.
-        { status: "paid", subtotalCents: 50_000, discountCents: 5_000, taxCents: 5_850 },
-        { status: "sent", subtotalCents: 30_000, discountCents: 0, taxCents: 3_900 },
+        { status: "paid", subtotalCents: 50_000, discountCents: 5_000, taxCents: 5_850, tipCents: 0 },
+        { status: "sent", subtotalCents: 30_000, discountCents: 0, taxCents: 3_900, tipCents: 0 },
       ],
       expenses,
     );
@@ -144,9 +144,9 @@ describe("computeProfitAndLoss", () => {
   it("ignores draft and cancelled invoices", () => {
     const pnl = computeProfitAndLoss(
       [
-        { status: "draft", subtotalCents: 99_999, discountCents: 0, taxCents: 9_999 },
-        { status: "cancelled", subtotalCents: 88_888, discountCents: 0, taxCents: 8_888 },
-        { status: "paid", subtotalCents: 10_000, discountCents: 0, taxCents: 1_300 },
+        { status: "draft", subtotalCents: 99_999, discountCents: 0, taxCents: 9_999, tipCents: 0 },
+        { status: "cancelled", subtotalCents: 88_888, discountCents: 0, taxCents: 8_888, tipCents: 0 },
+        { status: "paid", subtotalCents: 10_000, discountCents: 0, taxCents: 1_300, tipCents: 0 },
       ],
       expenses,
     );
@@ -163,7 +163,7 @@ describe("computeProfitAndLoss", () => {
 
   it("nets tax collected against input credits, and reports a refund as negative", () => {
     const owing = computeTaxPosition(
-      computeProfitAndLoss([{ status: "paid", subtotalCents: 10_000, discountCents: 0, taxCents: 1_300 }], expenses),
+      computeProfitAndLoss([{ status: "paid", subtotalCents: 10_000, discountCents: 0, taxCents: 1_300, tipCents: 0 }], expenses),
     );
     expect(owing.netOwingCents).toBe(1_300);
 

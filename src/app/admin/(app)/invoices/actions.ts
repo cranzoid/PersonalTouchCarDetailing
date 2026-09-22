@@ -21,10 +21,11 @@ import {
   resolvePaymentTax,
   sendInvoiceReceipt,
   summarizePayments,
+  tipCentsFromBasisPoints,
 } from "@/lib/invoices";
 import { zonedToUtc } from "@/lib/tz";
 import { resolveCatalogPrices } from "@/lib/pricing";
-import { MANUAL_PAYMENT_METHODS, VEHICLE_CATEGORIES, type VehicleCategory } from "@/lib/types";
+import { MANUAL_PAYMENT_METHODS, MAX_TIP_BP, VEHICLE_CATEGORIES, type VehicleCategory } from "@/lib/types";
 import { getAppBaseUrl } from "@/lib/urls";
 import {
   decodeStripeRefundReference,
@@ -1382,7 +1383,11 @@ export async function setInvoiceTaxExemptAction(raw: unknown): Promise<ActionRes
         .from(schema.invoiceLineItems)
         .where(eq(schema.invoiceLineItems.invoiceId, invoice.id));
       const taxRateBp = input.taxExempt ? 0 : settings.taxRateBp;
-      const totals = computeInvoiceTotals(lines, invoice.discountCents, taxRateBp);
+      // The tip rides across untouched. It is not part of the lines and is not
+      // taxed, so exempting the work must leave the gratuity exactly as it was;
+      // omitting it here would rebuild the total without it and quietly erase
+      // money the customer chose to add.
+      const totals = computeInvoiceTotals(lines, invoice.discountCents, taxRateBp, invoice.tipCents);
 
       await tx
         .update(schema.invoices)
@@ -1424,6 +1429,127 @@ export async function setInvoiceTaxExemptAction(raw: unknown): Promise<ActionRes
   } catch (err) {
     if (err instanceof AuthError) return { ok: false, error: err.message };
     console.error("setInvoiceTaxExemptAction failed", err);
+    return { ok: false, error: "Something went wrong" };
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Tips                                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Sets (or clears) the gratuity on an invoice, as a percentage of the work or
+ * as a flat amount, and lets the status follow the new balance.
+ *
+ * DELIBERATELY ALLOWED AFTER PAYMENT, unlike setInvoiceTaxExemptAction. A tip
+ * is not a re-pricing of the work — it is money the customer decided to add
+ * once the job was done, which is usually at the moment they pay and sometimes
+ * after. Refusing it on a paid invoice is what forced the shop to have no way
+ * to record a tip a customer had already handed over.
+ *
+ * The total is rebuilt from the STORED snapshot (`totalCents - old tip + new
+ * tip`), never recomputed from the line items. An invoice settled in cash has
+ * already had its HST stripped by resolvePaymentTax, and recomputing from lines
+ * would quietly put that tax back on a document the customer has paid.
+ */
+export async function setInvoiceTipAction(raw: unknown): Promise<ActionResult<{ tipCents: number }>> {
+  try {
+    const staff = await requireStaff("manage_invoices");
+    const parsed = z
+      .object({
+        invoiceId: z.string().min(1),
+        // Exactly one of the two. A percentage is resolved to cents here,
+        // against the stored subtotal — the browser never supplies an amount
+        // derived from a total it computed itself.
+        basisPoints: z.number().int().min(0).max(MAX_TIP_BP).optional(),
+        tipCents: z.number().int().min(0).max(1_000_000).optional(),
+      })
+      .safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Please check the tip amount" };
+    const input = parsed.data;
+    if ((input.basisPoints === undefined) === (input.tipCents === undefined)) {
+      return { ok: false, error: "Give the tip either as a percentage or as an amount" };
+    }
+    const settings = await getSettings();
+
+    const result = await db().transaction(async (tx): Promise<ActionResult<{ tipCents: number }>> => {
+      const rows = await tx.select().from(schema.invoices).where(eq(schema.invoices.id, input.invoiceId)).for("update");
+      const invoice = rows[0];
+      if (!invoice) return { ok: false, error: "Invoice not found" };
+      if (["cancelled", "refunded"].includes(invoice.status)) {
+        return { ok: false, error: `A ${invoice.status} invoice cannot take a tip` };
+      }
+
+      const nextTipCents =
+        input.basisPoints !== undefined
+          ? tipCentsFromBasisPoints(invoice.subtotalCents, invoice.discountCents, input.basisPoints)
+          : input.tipCents!;
+      if (nextTipCents === invoice.tipCents) {
+        return { ok: true, tipCents: nextTipCents };
+      }
+
+      // A flat amount gets the same sanity cap the percentage buttons have, so
+      // the two routes cannot disagree about what counts as a typo.
+      const capCents = tipCentsFromBasisPoints(invoice.subtotalCents, invoice.discountCents, MAX_TIP_BP);
+      if (nextTipCents > capCents) {
+        return {
+          ok: false,
+          error: `That tip is more than the work itself (${formatCents(capCents, settings.currency)}) — check the amount`,
+        };
+      }
+
+      // Rebuild from the snapshot, not the lines. See the note above.
+      const totalCents = invoice.totalCents - invoice.tipCents + nextTipCents;
+
+      // Lowering a tip must never take the total below money already banked:
+      // summarizePayments clamps the balance at zero, so an overpayment would
+      // vanish silently instead of surfacing as a refund the shop has to make.
+      const payments = await tx.select().from(schema.payments).where(eq(schema.payments.invoiceId, invoice.id));
+      const { netPaidCents } = summarizePayments(totalCents, invoice.depositAppliedCents, payments);
+      if (totalCents < netPaidCents) {
+        return {
+          ok: false,
+          error: `That would drop the total below the ${formatCents(netPaidCents, settings.currency)} already paid — refund the difference instead`,
+        };
+      }
+
+      await tx
+        .update(schema.invoices)
+        .set({
+          tipCents: nextTipCents,
+          // Cleared when the tip is typed as an amount or removed, so the
+          // document never prints a percentage that no longer describes it.
+          tipBasisBp: nextTipCents > 0 && input.basisPoints !== undefined ? input.basisPoints : null,
+          totalCents,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.invoices.id, invoice.id));
+
+      // The balance moved, so the status has to follow: adding a tip to a paid
+      // invoice reopens it as partially_paid, which is exactly what lets the
+      // tip itself be recorded as a payment.
+      const { status } = await recalculateInvoiceStatus(tx, invoice.id);
+
+      await audit(tx, {
+        actorType: "staff",
+        actorId: staff.id,
+        action: "invoice.tip_set",
+        entityType: "invoice",
+        entityId: invoice.id,
+        before: { tipCents: invoice.tipCents, tipBasisBp: invoice.tipBasisBp, totalCents: invoice.totalCents },
+        after: { tipCents: nextTipCents, basisPoints: input.basisPoints ?? null, totalCents, status },
+      });
+      return { ok: true, tipCents: nextTipCents };
+    });
+
+    if (result.ok) {
+      revalidatePath("/admin/invoices");
+      revalidatePath(`/admin/invoices/${input.invoiceId}`);
+    }
+    return result;
+  } catch (err) {
+    if (err instanceof AuthError) return { ok: false, error: err.message };
+    console.error("setInvoiceTipAction failed", err);
     return { ok: false, error: "Something went wrong" };
   }
 }

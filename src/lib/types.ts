@@ -57,6 +57,21 @@ export function isQuoteOnlyVehicleCategory(category: string): boolean {
  * `payments.provider` also accepts "stripe" (online checkout) and "fake"
  * (development), neither of which staff can select.
  */
+/**
+ * The percentages the tip control offers as one-tap buttons, in basis points.
+ * Staff can always type a dollar amount instead; these exist so the common case
+ * is not arithmetic done at the counter on a phone.
+ */
+export const TIP_PRESET_BP = [1000, 1500, 1800, 2000] as const;
+
+/**
+ * A tip above this share of the work is refused as a typo. 100% of the job is
+ * already far beyond any real gratuity, and the realistic mistake here is a
+ * misplaced decimal — $2,000 typed where $20.00 was meant — on a document that
+ * then asks the customer for it.
+ */
+export const MAX_TIP_BP = 10_000;
+
 export const MANUAL_PAYMENT_METHODS = ["cash", "cheque", "etransfer", "card_terminal"] as const;
 export type ManualPaymentMethod = (typeof MANUAL_PAYMENT_METHODS)[number];
 

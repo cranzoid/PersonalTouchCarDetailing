@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatCents } from "@/lib/money";
-import { PAYMENT_METHOD_TAXABLE, type ManualPaymentMethod } from "@/lib/types";
+import { PAYMENT_METHOD_TAXABLE, TIP_PRESET_BP, type ManualPaymentMethod } from "@/lib/types";
 import { MAX_CC_RECIPIENTS, splitCcInput } from "@/lib/email";
 import {
   sendInvoiceAction,
@@ -11,6 +11,7 @@ import {
   issueRefundAction,
   cancelInvoiceAction,
   setInvoiceTaxExemptAction,
+  setInvoiceTipAction,
 } from "../actions";
 
 const PAYMENT_METHODS = [
@@ -44,6 +45,9 @@ export function InvoiceActions({
   manualRefundableCents,
   taxExempt,
   taxLabel,
+  tipCents,
+  tipBasisBp,
+  tipBaseCents,
 }: {
   invoiceId: string;
   /**
@@ -67,6 +71,16 @@ export function InvoiceActions({
   manualRefundableCents: number;
   taxExempt: boolean;
   taxLabel: string;
+  /** Gratuity currently on the invoice. */
+  tipCents: number;
+  /** Set when that gratuity was chosen as a percentage (1500 = 15%). */
+  tipBasisBp: number | null;
+  /**
+   * What a percentage tip is taken from — the discounted, pre-tax work. Sent
+   * from the server so the preview beside each button is the same number the
+   * action will compute, rather than a second derivation that can drift.
+   */
+  tipBaseCents: number;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -96,6 +110,7 @@ export function InvoiceActions({
   const [showCancel, setShowCancel] = useState(false);
   const [showTax, setShowTax] = useState(false);
   const [taxReason, setTaxReason] = useState("");
+  const [tipAmount, setTipAmount] = useState("");
 
   const canSend = ["draft", "sent", "partially_paid", "overdue"].includes(status);
   const canTakePayment = balanceCents > 0 && !["cancelled", "refunded"].includes(status);
@@ -103,6 +118,10 @@ export function InvoiceActions({
   const canCancel = ["draft", "sent", "overdue"].includes(status) && netPaidCents === 0;
   // Totals are an immutable snapshot once money has moved against the invoice.
   const canChangeTax = ["draft", "sent", "overdue"].includes(status) && netPaidCents === 0;
+  // A tip is deliberately NOT held to that rule. Customers decide to tip when
+  // they pay and sometimes after, so the one moment staff most need this is on
+  // an invoice that already shows as paid.
+  const canTip = !["cancelled", "refunded"].includes(status);
 
   async function changeTaxExemption(next: boolean) {
     setBusy(true);
@@ -117,6 +136,25 @@ export function InvoiceActions({
     setShowTax(false);
     setTaxReason("");
     router.refresh();
+  }
+
+  async function setTip(args: { basisPoints?: number; tipCents?: number }) {
+    setBusy(true);
+    setError(null);
+    const res = await setInvoiceTipAction({ invoiceId, ...args });
+    setBusy(false);
+    if (!res.ok) return setError(res.error);
+    setTipAmount("");
+    router.refresh();
+  }
+
+  async function applyTipAmount() {
+    const cents = Math.round(Number(tipAmount) * 100);
+    if (!Number.isFinite(cents) || cents < 0) {
+      setError("Enter a tip amount");
+      return;
+    }
+    await setTip({ tipCents: cents });
   }
 
   async function send() {
@@ -280,6 +318,74 @@ export function InvoiceActions({
               )}
               <p className="mt-1 break-all font-mono text-emerald-300">{link}</p>
             </div>
+          )}
+        </div>
+      )}
+
+      {canTip && (
+        <div className="border-t border-ink-800 pt-5">
+          <p className="text-sm font-medium text-white">Tip</p>
+          <p className="mt-1 text-xs text-ink-500">
+            {tipCents > 0
+              ? `${formatCents(tipCents, currency)}${tipBasisBp ? ` (${(tipBasisBp / 100).toFixed(tipBasisBp % 100 === 0 ? 0 : 2)}%)` : ""} on this invoice.`
+              : "A gratuity is added on top of the total and carries no " + taxLabel + "."}
+          </p>
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            {TIP_PRESET_BP.map((bp) => (
+              <button
+                key={bp}
+                type="button"
+                onClick={() => void setTip({ basisPoints: bp })}
+                disabled={busy}
+                className={`rounded-lg border px-3 py-2 text-sm font-medium disabled:opacity-40 ${
+                  tipBasisBp === bp
+                    ? "border-accent-400 bg-accent-400/10 text-accent-300"
+                    : "border-ink-600 text-ink-200 hover:bg-ink-800"
+                }`}
+              >
+                {bp / 100}%
+                {/* The dollar figure beside the percentage, because that is
+                    what staff read back to the customer. */}
+                <span className="ml-1 text-xs text-ink-500">
+                  {formatCents(Math.round((tipBaseCents * bp) / 10000), currency)}
+                </span>
+              </button>
+            ))}
+            <label className="block text-xs text-ink-400">
+              Or an amount
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                className={`${input} mt-1 block w-32`}
+                value={tipAmount}
+                onChange={(e) => setTipAmount(e.target.value)}
+                placeholder="0.00"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={applyTipAmount}
+              disabled={busy || tipAmount.trim() === ""}
+              className="rounded-lg border border-ink-600 px-4 py-2 text-sm font-medium text-ink-200 hover:bg-ink-800 disabled:opacity-40"
+            >
+              Apply
+            </button>
+            {tipCents > 0 && (
+              <button
+                type="button"
+                onClick={() => void setTip({ tipCents: 0 })}
+                disabled={busy}
+                className="rounded-lg border border-ink-700 px-4 py-2 text-sm font-medium text-ink-400 hover:bg-ink-800 disabled:opacity-40"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+          {tipCents > 0 && status === "partially_paid" && netPaidCents > 0 && (
+            <p className="mt-2 text-xs text-amber-300">
+              Adding the tip reopened this invoice — record the tip as a payment below to settle it.
+            </p>
           )}
         </div>
       )}

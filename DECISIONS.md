@@ -1376,3 +1376,48 @@ the screen that was missing.
 - **Everything that arrived before this screen starts unread.** The owner gets
   one backlog to triage, which is the honest state: nobody has read these in an
   inbox, and the complaint that prompted the work was replies going unseen.
+
+## 39. A tip sits outside the subtotal, and outside the tax
+A gratuity is not consideration for a taxable supply, so it carries no HST. The
+shape that enforces this is where the money is stored, not a rule anyone has to
+remember: `invoices.tip_cents` lives OUTSIDE `subtotal_cents` and is added after
+tax, so `total = subtotal - discount + tax + tip`. Every tax and P&L query in the
+app already builds its base from `subtotal - discount` — `summarizeTax`,
+`computeProfitAndLoss`, `summarizeDiscounts`, the HST working paper — so a tip
+cannot reach the tax base or net sales from any direction, including a future
+caller nobody has written yet.
+
+Three consequences worth stating, because each one is a place the obvious
+implementation is wrong:
+
+- **A percentage tip is taken from the discounted, PRE-tax work.** This shop
+  strips HST for cash and Interac (#18), so tipping on the tax-inclusive figure
+  would make the same 15% worth less on a cash job than a card one — a
+  difference no customer would accept and no staff member could explain.
+- **Tips can be added after payment**, unlike every other change to a total.
+  `setInvoiceTaxExemptAction` refuses to touch an invoice with money against it,
+  because re-pricing settled work desynchronises the ledger. A tip is not a
+  re-pricing: it is money the customer decided to add once the job was done,
+  which is usually as they pay and sometimes after. Adding one reopens a paid
+  invoice as `partially_paid`, which is exactly what lets the tip be recorded as
+  a payment. The guard that replaces the no-payments rule is narrower and is the
+  one that actually matters: a tip may never be lowered below money already
+  banked, because `summarizePayments` clamps the balance at zero and the
+  overpayment would vanish instead of surfacing as a refund owed.
+- **The total is rebuilt from the stored snapshot, never recomputed from the
+  line items.** An invoice settled in cash has already had its HST stripped;
+  recomputing from lines would silently put that tax back on a document the
+  customer has paid. Same reasoning as `resolvePaymentTax`, which subtracts the
+  snapshotted tax rather than re-deriving it.
+
+Tips are reported on their own line in the P&L and the tax summary —
+deliberately outside net sales, net profit and both tax bases — rather than
+folded into either. In the normal case the money passes through the shop to
+whoever did the work; if the owner keeps it, it is income, and that is a
+question for their accountant, not a default this report should quietly pick.
+Showing the figure is what makes cash received reconcile against sales recorded,
+which is otherwise an unexplained gap.
+**Revisit when:** customers should be able to tip themselves at the pay portal
+(the Stripe checkout amount would need to carry it), or tips need attributing to
+a specific detailer for payout — payroll is timesheet-based today and a tip
+reaches staff as an ordinary payroll expense.

@@ -2,7 +2,7 @@ import { randomBytes } from "crypto";
 import { and, eq, gt, inArray, isNotNull, isNull, lt, sql } from "drizzle-orm";
 import { db, schema, type Db } from "@/db";
 import { newId } from "@/lib/id";
-import { taxCents, formatCents } from "@/lib/money";
+import { taxCents, formatCents, percentCents } from "@/lib/money";
 import { hashToken } from "@/lib/estimates";
 import { getSettings } from "@/lib/settings";
 import { sendMessageTemplate } from "@/lib/messaging";
@@ -34,6 +34,8 @@ export type InvoiceTotals = {
   subtotalCents: number;
   discountCents: number;
   taxCents: number;
+  /** Gratuity, added after tax. Zero on every invoice that has not been tipped. */
+  tipCents: number;
   totalCents: number;
 };
 
@@ -210,6 +212,12 @@ export function resolvePaymentTax(input: {
   // agree on every invoice the app can raise, but only this one is safe on an
   // invoice whose lines are missing — recomputing there would write a $0.00
   // total onto a real financial document.
+  //
+  // It is also what keeps a tip whole. The tip sits in `totalCents` and never
+  // in the lines, so subtracting the tax leaves the work plus the gratuity —
+  // which is right, because stripping HST for a cash sale must not also strip
+  // the money the customer meant for the detailer. Recomputing from the lines
+  // would silently drop it.
   const untaxedTotalCents = invoice.totalCents - invoice.taxCents;
   return {
     ok: true,
@@ -226,17 +234,47 @@ export function resolvePaymentTax(input: {
   };
 }
 
-/** Pure totals math — mirrors computeEstimateTotals minus the optional-line concept. */
+/**
+ * The base a percentage tip is taken from: the discounted, PRE-tax value of the
+ * work. Tipping on top of the tax would quietly make the gratuity depend on the
+ * customer's payment method, because cash and Interac strip the HST off this
+ * shop's invoices (see resolvePaymentTax) — the same 15% would then be worth
+ * less on a cash job than a card one for no reason the customer would accept.
+ */
+export function tipBaseCents(subtotalCents: number, discountCents: number): number {
+  return Math.max(0, subtotalCents - Math.min(Math.max(0, discountCents), subtotalCents));
+}
+
+/** A percentage tip in cents. 1500 bp = 15% of the discounted, pre-tax work. */
+export function tipCentsFromBasisPoints(
+  subtotalCents: number,
+  discountCents: number,
+  basisPoints: number,
+): number {
+  return percentCents(tipBaseCents(subtotalCents, discountCents), Math.max(0, basisPoints));
+}
+
+/**
+ * Pure totals math — mirrors computeEstimateTotals minus the optional-line
+ * concept.
+ *
+ * The tip is added AFTER tax and is never part of the subtotal, so it is not
+ * taxed and cannot reach the HST base. `tipCents` defaults to 0 so that every
+ * caller that predates tipping keeps its exact previous behaviour; the ones
+ * that must carry a stored tip across pass it explicitly.
+ */
 export function computeInvoiceTotals(
   lines: readonly Pick<InvoiceLineInput, "quantity" | "unitPriceCents">[],
   discountCents: number,
   taxRateBp: number,
+  tipCents = 0,
 ): InvoiceTotals {
   const subtotalCents = lines.reduce((sum, l) => sum + l.quantity * l.unitPriceCents, 0);
   const discount = Math.min(Math.max(0, discountCents), subtotalCents);
   const taxable = subtotalCents - discount;
   const tax = taxCents(taxable, taxRateBp);
-  return { subtotalCents, discountCents: discount, taxCents: tax, totalCents: taxable + tax };
+  const tip = Math.max(0, Math.trunc(tipCents));
+  return { subtotalCents, discountCents: discount, taxCents: tax, tipCents: tip, totalCents: taxable + tax + tip };
 }
 
 /** Atomically allocates the next invoice number. */

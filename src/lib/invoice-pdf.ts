@@ -315,6 +315,14 @@ function drawTotals(
     label: invoice.taxExempt ? `${invoice.taxLabel} — exempt` : `${invoice.taxLabel} (${(invoice.taxRateBp / 100).toFixed(2)}%)`,
     value: money(invoice.taxCents),
   });
+  // After the tax line, because that is where it sits in the arithmetic: a tip
+  // is not a taxable supply and is never part of the base above it.
+  if (invoice.tipCents > 0) {
+    rows.push({
+      label: invoice.tipBasisBp ? `Tip (${(invoice.tipBasisBp / 100).toFixed(invoice.tipBasisBp % 100 === 0 ? 0 : 2)}%)` : "Tip",
+      value: money(invoice.tipCents),
+    });
+  }
   rows.push({ label: "Total", value: money(invoice.totalCents), strong: true });
   if (invoice.depositAppliedCents > 0) {
     rows.push({ label: "Deposit applied", value: `-${money(invoice.depositAppliedCents)}` });
