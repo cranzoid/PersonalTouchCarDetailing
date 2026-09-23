@@ -10,7 +10,7 @@ import { claimBelongsTo, lookupClaim } from "@/lib/wash-offer-claims";
 import { getAvailableSlots } from "@/lib/booking/availability";
 import { createAppointment, BookingError, OfferChangedError } from "@/lib/booking/create";
 import { appointmentWhenLabel } from "@/lib/appointment-time";
-import { sendMessageTemplate } from "@/lib/messaging";
+import { sendBookingConfirmation } from "@/lib/booking/confirmation";
 import { formatCents } from "@/lib/money";
 import { formatInZone } from "@/lib/tz";
 import { VEHICLE_CATEGORIES, isQuoteOnlyVehicleCategory } from "@/lib/types";
@@ -267,12 +267,14 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
     // Formatted from what was stored, not from what was submitted: a coating
     // is booked date-only whatever start time the request carried, and the
     // customer must be told the same thing the appointment record says.
-    const dateLabelOptions = { weekday: "long", month: "long", day: "numeric" } as const;
-    const whenLabel = appointmentWhenLabel(result, settings.timezone, dateLabelOptions);
-    const dateLabel = formatInZone(result.startsAt, settings.timezone, dateLabelOptions);
+    const whenLabel = appointmentWhenLabel(result, settings.timezone, {
+      weekday: "long",
+      month: "long",
+      day: "numeric",
+    });
 
     let depositUrl: string | null = null;
-    const delivery: Array<"email" | "sms"> = [];
+    let delivery: Array<"email" | "sms"> = [];
     try {
       if (pricing.depositRequiredCents > 0) {
         if (!result.depositAccessToken || !baseUrl) {
@@ -283,40 +285,17 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
         if (request.sent && request.channel) delivery.push(request.channel);
       } else {
         // Only deposit-free bookings are confirmed immediately. Deposit-backed
-        // bookings receive their confirmation after payment succeeds. The
-        // confirmation intentionally does not quote a price — it tells the
-        // customer what they booked, not what it costs.
-        const confirmationVariables = {
-          businessName: settings.businessName,
+        // bookings receive their confirmation after payment succeeds.
+        delivery = await sendBookingConfirmation({
+          appointmentId: result.appointmentId,
+          customerId: result.customerId,
+          recipient: input.customer,
           firstName: input.customer.firstName,
-          // The template reads "on {{date}} at {{time}}". A timed booking has
-          // always carried the whole thing in {{date}}; a date-only one puts
-          // the promise to call where the time would have been.
-          date: result.timeToBeConfirmed ? dateLabel : whenLabel,
-          time: result.timeToBeConfirmed ? "a time we will confirm with you" : "",
-          services: pricing.lines.map((l) => l.description).join(", "),
+          appointment: result,
+          services: pricing.lines.map((l) => l.description),
           vehicle: `${input.vehicle.make} ${input.vehicle.model}`,
-        };
-        const email = await sendMessageTemplate({
-          templateKey: "booking_confirmation",
-          recipient: input.customer,
-          customerId: result.customerId,
-          kind: "confirmation",
-          variables: confirmationVariables,
-          relatedEntityType: "appointment",
-          relatedEntityId: result.appointmentId,
+          settings,
         });
-        if (email.sent && email.channel) delivery.push(email.channel);
-        const sms = await sendMessageTemplate({
-          templateKey: "booking_confirmation_sms",
-          recipient: input.customer,
-          customerId: result.customerId,
-          kind: "confirmation",
-          variables: confirmationVariables,
-          relatedEntityType: "appointment",
-          relatedEntityId: result.appointmentId,
-        });
-        if (sms.sent && sms.channel) delivery.push(sms.channel);
       }
     } catch {
       // The secure link remains visible in the success UI even when message

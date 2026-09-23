@@ -1457,3 +1457,28 @@ and the summary is priced by the same `priceBooking` call that saves the
 booking, so bundle discounts, HST and deposits match what gets created.
 **Revisit when:** customers should be able to request an after-hours drop-off
 themselves. That would be a request for staff to confirm, not this override.
+
+## 41. A booking staff take is confirmed to the customer like an online one
+
+Until now the staff booking screen alerted staff and nobody else. A customer
+booked over the phone heard nothing until the day-before reminder, and a
+booking still waiting on a deposit never got that reminder either. The owner
+noticed because customers were asking whether they were booked.
+
+The confirmation now lives in `src/lib/booking/confirmation.ts`, and online
+booking and the staff screen both send it from there: the same
+`booking_confirmation` email and `booking_confirmation_sms` text, with no price.
+
+- **On by default, with a checkbox to turn it off.** Booking over the phone is
+  the common case. Staff untick it for a booking the customer should not hear
+  about yet.
+- **Nothing for a visit that already happened.** Staff record walk-ins after the
+  fact on the same screen, so a booking whose start has passed gets no
+  confirmation. A date-only booking counts as upcoming for its whole day.
+- **Nothing for a deposit-required booking.** It is not confirmed yet, and staff
+  arrange that deposit themselves. Recording the deposit still sends nothing.
+  That is the next gap if the owner wants it closed.
+- **Read back from the stored appointment.** The staff action does not have the
+  customer's contact details, and the stored lines are what was actually saved.
+- **Best effort.** The booking is committed first, so a messaging failure never
+  turns into a failed booking. This matches the staff alert.

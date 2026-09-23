@@ -17,6 +17,7 @@ import {
 import { getSettings } from "@/lib/settings";
 import { getAvailableSlots, OverrideNeedsConfirmError, overrideStartMs } from "@/lib/booking/availability";
 import { BookingError, createStaffAppointment } from "@/lib/booking/create";
+import { sendStaffBookingConfirmation } from "@/lib/booking/confirmation";
 import { rescheduleAppointment } from "@/lib/booking/reschedule";
 import {
   isRevisableAppointmentStatus,
@@ -106,6 +107,12 @@ function hasTimeChoice(value: { startMs?: number; timeOverride?: boolean; overri
 const createManualShape = manualSlotsShape.extend({
   ...timeChoiceShape,
   customerNotes: z.string().trim().max(2000).optional(),
+  /**
+   * Send the customer the same confirmation email and text an online booking
+   * gets. On unless staff untick it — booking over the phone is the common
+   * case, and a customer who never hears back is the complaint this answers.
+   */
+  notifyCustomer: z.boolean().default(true),
 });
 
 /** Something has to be booked — a catalog service or a custom line. */
@@ -287,12 +294,22 @@ export async function createManualAppointmentAction(
     if (parsed.data.serviceIds.length === 0 && parsed.data.customLines.every((line) => line.durationMin <= 0)) {
       return { ok: false, error: "Give the work a duration in minutes" };
     }
+    const { notifyCustomer, ...booking } = parsed.data;
     const result = await createStaffAppointment({
-      ...parsed.data,
-      startMs: chosenStartMs(parsed.data, settings.timezone),
+      ...booking,
+      startMs: chosenStartMs(booking, settings.timezone),
       settings,
       staffId: staff.id,
     });
+    // Best-effort, like the staff alert below: the booking is already
+    // committed, so a messaging failure must not read as a failed booking.
+    if (notifyCustomer) {
+      try {
+        await sendStaffBookingConfirmation(result.appointmentId, settings);
+      } catch {
+        console.error("Manual appointment created but customer confirmation could not be queued");
+      }
+    }
     // Best-effort: the booking is already committed, so an alert failure must
     // not surface as a failed appointment creation.
     try {

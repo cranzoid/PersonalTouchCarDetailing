@@ -121,6 +121,7 @@ export function NewAppointmentBuilder({
   /** What the server says an override breaks; set means "Book anyway" is on offer. */
   const [overrideWarnings, setOverrideWarnings] = useState<string[] | null>(null);
   const [notes, setNotes] = useState("");
+  const [notifyCustomer, setNotifyCustomer] = useState(true);
   const [allowOutsideWindow, setAllowOutsideWindow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -273,6 +274,7 @@ export function NewAppointmentBuilder({
       dateISO,
       ...time,
       customerNotes: notes || undefined,
+      notifyCustomer,
     });
     setBusy(false);
     if (!result.ok) {
@@ -535,6 +537,21 @@ export function NewAppointmentBuilder({
 
         <section className="rounded-xl border border-ink-800 p-5">
           <label className="text-sm text-ink-300">Customer/service notes<textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={2000} rows={3} className={`${inputClass} mt-1`} /></label>
+          <label className="mt-4 flex items-start gap-2 text-sm text-ink-300">
+            <input
+              type="checkbox"
+              checked={notifyCustomer}
+              onChange={(event) => setNotifyCustomer(event.target.checked)}
+              className="mt-0.5"
+            />
+            <span>
+              Send the customer a booking confirmation
+              <span className="block text-xs text-ink-500">
+                The same text and email an online booking gets. Not sent for a time already past or a
+                booking waiting on a deposit.
+              </span>
+            </span>
+          </label>
         </section>
       </div>
 
