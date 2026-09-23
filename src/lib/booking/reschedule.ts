@@ -2,7 +2,16 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import type { BusinessSettings } from "@/lib/settings";
-import { computeDaySlots, loadDayContext, pickFreeBay, pickFreeStaff, type Interval } from "./availability";
+import { formatInZone } from "@/lib/tz";
+import {
+  assessOverrideWindow,
+  computeDaySlots,
+  loadDayContext,
+  OverrideNeedsConfirmError,
+  pickFreeBay,
+  pickFreeStaff,
+  type Interval,
+} from "./availability";
 import { BookingError } from "./create";
 
 const RESCHEDULABLE = new Set(["pending", "deposit_required", "confirmed"]);
@@ -23,7 +32,14 @@ export async function rescheduleAppointment(input: {
    * customer actually turned up yesterday. Conflict checks still apply.
    */
   allowOutsideBookingWindow?: boolean;
-}): Promise<{ appointmentId: string; startsAt: Date; endsAt: Date; resourceId: string; status: string }> {
+  /**
+   * Move it to `startMs` as given — past closing, before opening, on a closed
+   * day. Anything that overrides is refused with OverrideNeedsConfirmError
+   * until `confirmOverride`. See assessOverrideWindow.
+   */
+  timeOverride?: boolean;
+  confirmOverride?: boolean;
+}): Promise<{ appointmentId: string; startsAt: Date; endsAt: Date; resourceId: string | null; status: string }> {
   return db().transaction(async (tx) => {
     const [appointment] = await tx
       .select()
@@ -47,33 +63,53 @@ export async function rescheduleAppointment(input: {
           .where(inArray(schema.services.id, serviceIds))
       : [];
     const requiredSkills = [...new Set(serviceRows.flatMap((service) => service.requiredSkills))];
+    const totalMin = input.settings.setupBufferMin + appointment.durationMin + input.settings.cleanupBufferMin;
     const { ctx, bayIds } = await loadDayContext({
       dateISO: input.dateISO,
       workDurationMin: appointment.durationMin,
       settings: input.settings,
       excludeAppointmentId: appointment.id,
       requiredSkills,
-      allowOutsideBookingWindow: input.allowOutsideBookingWindow,
+      allowOutsideBookingWindow: input.allowOutsideBookingWindow || input.timeOverride,
+      window: input.timeOverride ? { start: input.startMs, end: input.startMs + totalMin * 60_000 } : undefined,
     });
     const window: Interval = {
       start: input.startMs,
       end: input.startMs + ctx.totalDurationMin * 60_000,
     };
-    if (!computeDaySlots(ctx).some((slot) => slot.start === window.start)) {
-      throw new BookingError("That time is no longer available. Please choose another slot.");
-    }
-    const bayIdx = pickFreeBay(ctx, window);
-    if (bayIdx === null || !bayIds[bayIdx]) {
-      throw new BookingError("That time is no longer available. Please choose another slot.");
-    }
-    const eligibleStaffId = pickFreeStaff(ctx, window);
-    if (ctx.staffingConfigured && !eligibleStaffId) {
-      throw new BookingError("That time is no longer available. Please choose another slot.");
+    let bayIdx: number | null;
+    let eligibleStaffId: string | null | undefined;
+    let overrideWarnings: string[] | undefined;
+    if (input.timeOverride) {
+      const assessment = assessOverrideWindow(ctx, window, (ms) =>
+        formatInZone(new Date(ms), input.settings.timezone, { hour: "numeric", minute: "2-digit" }),
+      );
+      if (assessment.warnings.length > 0 && !input.confirmOverride) {
+        throw new OverrideNeedsConfirmError(assessment.warnings);
+      }
+      bayIdx = assessment.bayIdx;
+      // Nobody free on shift: keep whoever it was already assigned to rather
+      // than strip the job of its technician — the override is the owner
+      // saying they know who is doing it.
+      eligibleStaffId = assessment.staffId ?? appointment.assignedStaffId;
+      overrideWarnings = assessment.warnings;
+    } else {
+      if (!computeDaySlots(ctx).some((slot) => slot.start === window.start)) {
+        throw new BookingError("That time is no longer available. Please choose another slot.");
+      }
+      bayIdx = pickFreeBay(ctx, window);
+      if (bayIdx === null || !bayIds[bayIdx]) {
+        throw new BookingError("That time is no longer available. Please choose another slot.");
+      }
+      eligibleStaffId = pickFreeStaff(ctx, window);
+      if (ctx.staffingConfigured && !eligibleStaffId) {
+        throw new BookingError("That time is no longer available. Please choose another slot.");
+      }
     }
 
     const startsAt = new Date(window.start);
     const endsAt = new Date(window.end);
-    const resourceId = bayIds[bayIdx];
+    const resourceId = bayIdx === null ? null : bayIds[bayIdx];
     await tx
       .update(schema.appointments)
       .set({
@@ -111,6 +147,7 @@ export async function rescheduleAppointment(input: {
         assignedStaffId: ctx.staffingConfigured ? eligibleStaffId : appointment.assignedStaffId,
         status: appointment.status,
         reminderSentAt: null,
+        ...(overrideWarnings ? { timeOverride: true, overrideWarnings } : {}),
       },
     });
     return { appointmentId: appointment.id, startsAt, endsAt, resourceId, status: appointment.status };

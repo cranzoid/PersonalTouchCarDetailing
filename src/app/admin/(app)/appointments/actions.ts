@@ -15,7 +15,7 @@ import {
   type VehicleCategory,
 } from "@/lib/types";
 import { getSettings } from "@/lib/settings";
-import { getAvailableSlots } from "@/lib/booking/availability";
+import { getAvailableSlots, OverrideNeedsConfirmError, overrideStartMs } from "@/lib/booking/availability";
 import { BookingError, createStaffAppointment } from "@/lib/booking/create";
 import { rescheduleAppointment } from "@/lib/booking/reschedule";
 import {
@@ -86,8 +86,25 @@ const manualSlotsShape = manualSelectionShape.extend({
   allowOutsideBookingWindow: z.boolean().optional(),
 });
 
+/**
+ * Either an offered slot (`startMs`) or a staff time override: a business-local
+ * "HH:MM" on `dateISO`, booked as typed — outside hours, past closing, on a
+ * closed day. The server turns the wall time into a start itself.
+ */
+const timeChoiceShape = {
+  startMs: z.number().int().positive().optional(),
+  timeOverride: z.boolean().optional(),
+  overrideTime: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+  /** Second press, after staff have read what the override breaks. */
+  confirmOverride: z.boolean().optional(),
+};
+
+function hasTimeChoice(value: { startMs?: number; timeOverride?: boolean; overrideTime?: string }): boolean {
+  return value.timeOverride ? Boolean(value.overrideTime) : value.startMs !== undefined;
+}
+
 const createManualShape = manualSlotsShape.extend({
-  startMs: z.number().int().positive(),
+  ...timeChoiceShape,
   customerNotes: z.string().trim().max(2000).optional(),
 });
 
@@ -97,16 +114,31 @@ function hasBookableLine(value: { serviceIds: string[]; customLines: unknown[] }
 }
 
 const manualSlotsSchema = manualSlotsShape.refine(hasBookableLine);
-const createManualSchema = createManualShape.refine(hasBookableLine);
+const createManualSchema = createManualShape.refine(hasBookableLine).refine(hasTimeChoice);
+const manualQuoteSchema = manualSelectionShape.refine(hasBookableLine);
 
-const rescheduleSchema = z.object({
+const rescheduleShape = z.object({
   appointmentId: z.string().min(1),
   dateISO: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  startMs: z.number().int().positive(),
   allowOutsideBookingWindow: z.boolean().optional(),
 });
 
-const rescheduleSlotsSchema = rescheduleSchema.omit({ startMs: true });
+const rescheduleSchema = rescheduleShape.extend(timeChoiceShape).refine(hasTimeChoice);
+
+const rescheduleSlotsSchema = rescheduleShape;
+
+/** The start a validated time choice resolves to. */
+function chosenStartMs(
+  input: { dateISO: string; startMs?: number; timeOverride?: boolean; overrideTime?: string },
+  timezone: string,
+): number {
+  return input.timeOverride
+    ? overrideStartMs(timezone, input.dateISO, input.overrideTime!)
+    : input.startMs!;
+}
+
+/** A booking or move that needs a second, informed press. */
+export type OverrideConfirmResult = { ok: false; needsOverrideConfirm: true; warnings: string[] };
 
 async function loadOwnedVehicle(customerId: string, vehicleId: string) {
   const [vehicle] = await db().select().from(schema.vehicles).where(eq(schema.vehicles.id, vehicleId)).limit(1);
@@ -123,6 +155,75 @@ async function loadAppointmentRequiredSkills(appointmentId: string): Promise<str
   const services = await db().select({ requiredSkills: schema.services.requiredSkills })
     .from(schema.services).where(inArray(schema.services.id, serviceIds));
   return [...new Set(services.flatMap((service) => service.requiredSkills))];
+}
+
+export type ManualQuote = {
+  lines: Array<{ kind: "service" | "addon" | "custom"; description: string; priceCents: number; durationMin: number }>;
+  subtotalCents: number;
+  discountCents: number;
+  discountLabel: string | null;
+  taxCents: number;
+  taxRateBp: number;
+  taxLabel: string;
+  totalCents: number;
+  depositRequiredCents: number;
+  /** Work time only. */
+  durationMin: number;
+  /** What the bay is held for: setup + work + cleanup. */
+  blockMin: number;
+};
+
+/**
+ * The staff booking screen's running summary, priced by the same priceBooking
+ * call that creates the appointment — vehicle size, bundle discounts and
+ * deposits included — so the figure staff quote on the phone is the figure
+ * that gets saved. Read-only; it books nothing.
+ */
+export async function quoteManualAppointmentAction(
+  raw: unknown,
+): Promise<{ ok: true; quote: ManualQuote } | { ok: false; error: string }> {
+  try {
+    await requireStaff("manage_bookings");
+    const parsed = manualQuoteSchema.safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Select a vehicle and at least one service or custom line" };
+    const input = parsed.data;
+    const vehicle = await loadOwnedVehicle(input.customerId, input.vehicleId);
+    const settings = await getSettings();
+    const pricing = await priceBooking({
+      serviceIds: input.serviceIds,
+      addonIds: input.addonIds,
+      customLines: input.customLines,
+      vehicleCategory: vehicle.category as VehicleCategory,
+      settings,
+    });
+    return {
+      ok: true,
+      quote: {
+        lines: pricing.lines.map((line) => ({
+          kind: line.serviceId ? "service" : line.addonId ? "addon" : "custom",
+          description: line.description,
+          priceCents: line.priceCents,
+          durationMin: line.durationMin,
+        })),
+        subtotalCents: pricing.subtotalCents,
+        discountCents: pricing.discountCents,
+        discountLabel: pricing.promoLabel,
+        taxCents: pricing.taxCents,
+        taxRateBp: pricing.taxRateBp,
+        taxLabel: settings.taxLabel,
+        totalCents: pricing.totalCents,
+        depositRequiredCents: pricing.depositRequiredCents,
+        durationMin: pricing.durationMin,
+        blockMin: settings.setupBufferMin + pricing.durationMin + settings.cleanupBufferMin,
+      },
+    };
+  } catch (err) {
+    if (err instanceof AuthError || err instanceof BookingError || err instanceof PricingError) {
+      return { ok: false, error: err.message };
+    }
+    console.error("quoteManualAppointmentAction failed", err);
+    return { ok: false, error: "Could not price this booking" };
+  }
 }
 
 /** Advisory real-slot lookup for the staff manual-booking form. */
@@ -175,7 +276,7 @@ export async function getManualAppointmentSlotsAction(raw: unknown): Promise<App
 
 export async function createManualAppointmentAction(
   raw: unknown,
-): Promise<{ ok: true; appointmentId: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; appointmentId: string } | { ok: false; error: string } | OverrideConfirmResult> {
   try {
     const staff = await requireStaff("manage_bookings");
     const parsed = createManualSchema.safeParse(raw);
@@ -186,7 +287,12 @@ export async function createManualAppointmentAction(
     if (parsed.data.serviceIds.length === 0 && parsed.data.customLines.every((line) => line.durationMin <= 0)) {
       return { ok: false, error: "Give the work a duration in minutes" };
     }
-    const result = await createStaffAppointment({ ...parsed.data, settings, staffId: staff.id });
+    const result = await createStaffAppointment({
+      ...parsed.data,
+      startMs: chosenStartMs(parsed.data, settings.timezone),
+      settings,
+      staffId: staff.id,
+    });
     // Best-effort: the booking is already committed, so an alert failure must
     // not surface as a failed appointment creation.
     try {
@@ -198,6 +304,9 @@ export async function createManualAppointmentAction(
     revalidatePath(`/admin/appointments/${result.appointmentId}`);
     return { ok: true, appointmentId: result.appointmentId };
   } catch (err) {
+    if (err instanceof OverrideNeedsConfirmError) {
+      return { ok: false, needsOverrideConfirm: true, warnings: err.warnings };
+    }
     if (err instanceof AuthError || err instanceof BookingError || err instanceof PricingError) {
       return { ok: false, error: err.message };
     }
@@ -243,17 +352,25 @@ export async function getRescheduleSlotsAction(raw: unknown): Promise<Appointmen
   }
 }
 
-export async function rescheduleAppointmentAction(raw: unknown): Promise<ActionResult> {
+export async function rescheduleAppointmentAction(raw: unknown): Promise<ActionResult | OverrideConfirmResult> {
   try {
     const staff = await requireStaff("manage_bookings");
     const parsed = rescheduleSchema.safeParse(raw);
     if (!parsed.success) return { ok: false, error: "Choose a valid date and time" };
     const settings = await getSettings();
-    await rescheduleAppointment({ ...parsed.data, settings, staffId: staff.id });
+    await rescheduleAppointment({
+      ...parsed.data,
+      startMs: chosenStartMs(parsed.data, settings.timezone),
+      settings,
+      staffId: staff.id,
+    });
     revalidatePath("/admin/appointments");
     revalidatePath(`/admin/appointments/${parsed.data.appointmentId}`);
     return { ok: true };
   } catch (err) {
+    if (err instanceof OverrideNeedsConfirmError) {
+      return { ok: false, needsOverrideConfirm: true, warnings: err.warnings };
+    }
     if (err instanceof AuthError || err instanceof BookingError) return { ok: false, error: err.message };
     console.error("rescheduleAppointmentAction failed", err);
     return { ok: false, error: "Something went wrong rescheduling the appointment" };

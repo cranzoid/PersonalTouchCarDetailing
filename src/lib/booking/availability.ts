@@ -130,6 +130,80 @@ export function pickFreeBay(
   return freeBays[freeBays.length - 1]; // later bays first; unassigned appts conceptually fill earlier ones
 }
 
+/**
+ * The start of a staff time override: a business-local date and "HH:MM" as
+ * typed, turned into epoch ms on the server so no browser clock or timezone is
+ * ever trusted with it.
+ */
+export function overrideStartMs(timeZone: string, dateISO: string, time: string): number {
+  const [y, m, d] = dateISO.split("-").map(Number);
+  const { hh, mm } = parseHHMM(time);
+  return zonedToUtc(timeZone, y, m, d, hh, mm).getTime();
+}
+
+export type OverrideAssessment = {
+  /** A bay free for the whole window, or null when every bay is taken. */
+  bayIdx: number | null;
+  /** As pickFreeStaff: undefined when staffing is not configured. */
+  staffId: string | null | undefined;
+  /**
+   * Everything this booking breaks, in words staff can act on. Empty means the
+   * time would have been offered as an ordinary slot anyway.
+   */
+  warnings: string[];
+};
+
+/**
+ * Staff time override (a drop-off at closing, a job after hours). The window is
+ * taken as typed: opening hours, closing time, closed days, closures, shifts,
+ * the slot step and the notice window are NOT enforced here. They are
+ * described instead, so the booking goes through only once someone has read
+ * what it overrides and said yes.
+ *
+ * A bay is still assigned when one is free. When none is, the booking holds no
+ * bay and counts as unassigned — which is exactly how the capacity model
+ * already treats one, so everything booked after it still sees the car.
+ */
+export function assessOverrideWindow(
+  ctx: DayContext,
+  window: Interval,
+  formatTime: (ms: number) => string,
+): OverrideAssessment {
+  const warnings: string[] = [];
+  if (ctx.openMs === null || ctx.closeMs === null) {
+    warnings.push("The shop is closed that day.");
+  } else {
+    if (window.start < ctx.openMs) warnings.push(`It starts before opening (${formatTime(ctx.openMs)}).`);
+    if (window.end > ctx.closeMs) {
+      // Worded to end on a bracket: the times already end "p.m.", and a full
+      // stop after one reads as a typo.
+      warnings.push(`It runs until ${formatTime(window.end)}, past closing (${formatTime(ctx.closeMs)}).`);
+    }
+  }
+  if (ctx.globalBlocks.some((block) => overlaps(block, window))) {
+    warnings.push("It falls inside a closure on the schedule.");
+  }
+  const bayIdx = pickFreeBay(ctx, window);
+  if (bayIdx === null) {
+    warnings.push("Every bay is already booked for part of this time, so it will not hold a bay of its own.");
+  }
+  const staffId = pickFreeStaff(ctx, window);
+  if (ctx.staffingConfigured && staffId === null) {
+    warnings.push("No technician is on shift and free for the whole time, so none is assigned.");
+  }
+  return { bayIdx, staffId, warnings };
+}
+
+/**
+ * Refused until confirmed: a staff override that breaks at least one rule.
+ * Carries the reasons so the screen can show them above a "Book anyway".
+ */
+export class OverrideNeedsConfirmError extends Error {
+  constructor(readonly warnings: string[]) {
+    super(warnings.join(" "));
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* DB-backed context loading                                           */
 /* ------------------------------------------------------------------ */
@@ -144,6 +218,11 @@ export async function loadDayContext(input: {
   requiredSkills?: string[];
   /** Staff-only; see DayContext.allowOutsideBookingWindow. */
   allowOutsideBookingWindow?: boolean;
+  /**
+   * A window that may lie outside opening hours (a staff time override). Busy
+   * time is loaded far enough to cover it, including on a day the shop is shut.
+   */
+  window?: Interval;
 }): Promise<{ ctx: DayContext; bayIds: string[] }> {
   const { settings } = input;
   const [y, m, d] = input.dateISO.split("-").map(Number);
@@ -208,9 +287,19 @@ export async function loadDayContext(input: {
     }
   }
 
-  if (openMs !== null && closeMs !== null) {
-    const dayStart = new Date(openMs - 12 * 3600_000);
-    const dayEnd = new Date(closeMs + 12 * 3600_000);
+  // Loaded even on a closed day: no slot is offered then, but a staff override
+  // can still book one and must see what else is on. Extra rows cost nothing —
+  // everything here is only ever tested for overlap with a window.
+  {
+    const midnight = zonedToUtc(tz, y, m, d, 0, 0).getTime();
+    let rangeStart = (openMs ?? midnight) - 12 * 3600_000;
+    let rangeEnd = (closeMs ?? midnight + 86_400_000) + 12 * 3600_000;
+    if (input.window) {
+      rangeStart = Math.min(rangeStart, input.window.start);
+      rangeEnd = Math.max(rangeEnd, input.window.end);
+    }
+    const dayStart = new Date(rangeStart);
+    const dayEnd = new Date(rangeEnd);
 
     const appts = await db()
       .select({

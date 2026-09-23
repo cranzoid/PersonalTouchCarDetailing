@@ -10,12 +10,14 @@ import { priceBooking, type BookingPricing, type CustomBookingLine } from "@/lib
 import { isFirstTimeDetailCustomer, isNewCustomer, type ResolvedPromotion } from "@/lib/promotions";
 import type { ResolvedWashOffer } from "@/lib/wash-offer";
 import { lookupClaim, markClaimBooked } from "@/lib/wash-offer-claims";
-import { localDateISO } from "@/lib/tz";
 import { VEHICLE_CATEGORIES, type VehicleCategory } from "@/lib/types";
 import { createAppointmentDepositAccessToken } from "@/lib/appointment-deposits";
+import { formatInZone, localDateISO } from "@/lib/tz";
 import {
+  assessOverrideWindow,
   computeDaySlots,
   loadDayContext,
+  OverrideNeedsConfirmError,
   pickFreeBay,
   pickFreeStaff,
   type DayContext,
@@ -130,6 +132,13 @@ export type BookingRequest = {
    * Double-booking protection is unaffected.
    */
   allowOutsideBookingWindow?: boolean;
+  /**
+   * Staff-only time override: book `startMs` as given, outside opening hours,
+   * past closing or on a closed day. Ignored for customer bookings. Anything it
+   * overrides is refused with OverrideNeedsConfirmError until `confirmOverride`.
+   */
+  timeOverride?: boolean;
+  confirmOverride?: boolean;
 };
 
 type BookingActor = { type: "customer" } | { type: "staff"; id: string };
@@ -229,14 +238,18 @@ export async function createAppointmentInTransaction(
       washClaimId = lookup.claim.id;
     }
 
+    // Enforced here rather than trusted from the request: a customer-path
+    // caller can never relax the notice window or the hours, whatever it passes.
+    const timeOverride = actor.type === "staff" && req.timeOverride === true && req.startMs !== null;
+    const totalMin = req.settings.setupBufferMin + req.pricing.durationMin + req.settings.cleanupBufferMin;
     const { ctx, bayIds } = await loadDayContext({
       dateISO: req.dateISO,
       workDurationMin: req.pricing.durationMin,
       settings: req.settings,
       requiredSkills: req.pricing.requiredSkills,
-      // Enforced here rather than trusted from the request: a customer-path
-      // caller can never relax the notice window, whatever it passes.
-      allowOutsideBookingWindow: actor.type === "staff" && req.allowOutsideBookingWindow === true,
+      allowOutsideBookingWindow:
+        actor.type === "staff" && (req.allowOutsideBookingWindow === true || timeOverride),
+      window: timeOverride ? { start: req.startMs!, end: req.startMs! + totalMin * 60_000 } : undefined,
     });
 
     // Whether this booking gets a time is decided by the catalogue, not by the
@@ -262,7 +275,18 @@ export async function createAppointmentInTransaction(
     // agrees the time. Everything below this point is the ordinary path.
     let bayIdx: number | null = null;
     let assignedStaffId: string | null | undefined;
-    if (!dateOnly) {
+    let overrideWarnings: string[] | undefined;
+    if (!dateOnly && timeOverride) {
+      const assessment = assessOverrideWindow(ctx, window, (ms) =>
+        formatInZone(new Date(ms), req.settings.timezone, { hour: "numeric", minute: "2-digit" }),
+      );
+      if (assessment.warnings.length > 0 && !req.confirmOverride) {
+        throw new OverrideNeedsConfirmError(assessment.warnings);
+      }
+      bayIdx = assessment.bayIdx;
+      assignedStaffId = assessment.staffId;
+      overrideWarnings = assessment.warnings;
+    } else if (!dateOnly) {
       const slots = computeDaySlots(ctx);
       if (!slots.some((s) => s.start === window.start)) {
         throw new BookingError("That time is no longer available. Please choose another slot.");
@@ -374,6 +398,9 @@ export async function createAppointmentInTransaction(
         timeToBeConfirmed: dateOnly,
         resourceId: bayIdx === null ? null : bayIds[bayIdx],
         assignedStaffId: assignedStaffId ?? null,
+        // What a staff override was confirmed over, so "why is there a car
+        // booked at 7pm" has an answer later.
+        ...(overrideWarnings ? { timeOverride: true, overrideWarnings } : {}),
         requiredSkills: req.pricing.requiredSkills,
         totalCents: req.pricing.totalCents,
         discountCents: req.pricing.discountCents,
@@ -420,6 +447,9 @@ export async function createStaffAppointment(input: {
   staffId: string;
   /** Record a walk-in that already happened, or book same-day. */
   allowOutsideBookingWindow?: boolean;
+  /** Book the time as given, outside hours; see BookingRequest.timeOverride. */
+  timeOverride?: boolean;
+  confirmOverride?: boolean;
 }): Promise<{ appointmentId: string; customerId: string; vehicleId: string; status: string }> {
   return db().transaction(async (tx) => {
     const [customer] = await tx
@@ -477,6 +507,8 @@ export async function createStaffAppointment(input: {
         policiesAccepted: false,
         settings: input.settings,
         allowOutsideBookingWindow: input.allowOutsideBookingWindow,
+        timeOverride: input.timeOverride,
+        confirmOverride: input.confirmOverride,
       },
       { type: "staff", id: input.staffId },
     );

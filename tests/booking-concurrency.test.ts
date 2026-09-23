@@ -6,6 +6,7 @@ import { SETTINGS_DEFAULTS, type BusinessSettings } from "../src/lib/settings";
 import { zonedToUtc, zonedWeekday } from "../src/lib/tz";
 import { createAppointment, createStaffAppointment, type BookingRequest } from "../src/lib/booking/create";
 import { rescheduleAppointment } from "../src/lib/booking/reschedule";
+import { OverrideNeedsConfirmError } from "../src/lib/booking/availability";
 import { priceBooking, type BookingPricing } from "../src/lib/pricing";
 import {
   createCustomerPortalToken,
@@ -713,5 +714,91 @@ describe("createAppointment concurrency", () => {
       startMs: zonedToUtc(tz, y, m, d, 10, 30).getTime(),
     });
     expect(adjacent.status).toBe("confirmed");
+  });
+
+  /* Staff time override: a drop-off at closing, or a job after hours. */
+
+  async function staffCustomerWithVehicle() {
+    const customerId = newId("cus");
+    const vehicleId = newId("veh");
+    await db().insert(schema.customers).values({ id: customerId, firstName: "Drop", lastName: "Off" });
+    await db().insert(schema.vehicles).values({ id: vehicleId, customerId, make: "Ford", model: "Escape", category: "suv_small" });
+    return { customerId, vehicleId };
+  }
+
+  it("refuses a staff override past closing until confirmed, then books it", async () => {
+    const { customerId, vehicleId } = await staffCustomerWithVehicle();
+    // 17:00 is closing on the test day: no ordinary slot exists at all.
+    const startMs = zonedToUtc(tz, y, m, d, 17, 0).getTime();
+    const base = {
+      customerId,
+      vehicleId,
+      serviceIds: ["svc_booking_test"],
+      addonIds: [],
+      dateISO,
+      startMs,
+      settings,
+      staffId: "usr_staff_test",
+      timeOverride: true,
+    };
+    const refused = await createStaffAppointment(base).catch((err: unknown) => err);
+    expect(refused).toBeInstanceOf(OverrideNeedsConfirmError);
+    expect((refused as OverrideNeedsConfirmError).warnings.join(" ")).toMatch(/past closing/);
+    expect(await db().select().from(schema.appointments)).toHaveLength(0);
+
+    const result = await createStaffAppointment({ ...base, confirmOverride: true });
+    const [appointment] = await db().select().from(schema.appointments).where(sql`${schema.appointments.id} = ${result.appointmentId}`);
+    expect(appointment.startsAt.getTime()).toBe(startMs);
+    expect(appointment.endsAt.getTime()).toBe(startMs + 90 * 60_000);
+    expect(appointment.resourceId).not.toBeNull();
+    const [entry] = await db().select().from(schema.auditLog).where(sql`${schema.auditLog.entityId} = ${result.appointmentId}`);
+    expect(entry.after).toMatchObject({ timeOverride: true });
+  });
+
+  it("books a staff override on a closed day, holding no bay when every bay is taken", async () => {
+    await resetDb(1);
+    const { customerId, vehicleId } = await staffCustomerWithVehicle();
+    // The day after the test day has no business_hours row, so it is closed.
+    const next = new Date(Date.UTC(y, m - 1, d + 1));
+    const nextISO = next.toISOString().slice(0, 10);
+    const startMs = zonedToUtc(tz, next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate(), 10, 0).getTime();
+    const booking = {
+      customerId,
+      vehicleId,
+      serviceIds: ["svc_booking_test"],
+      addonIds: [],
+      dateISO: nextISO,
+      startMs,
+      settings,
+      staffId: "usr_staff_test",
+      timeOverride: true,
+      confirmOverride: true,
+    };
+    const first = await createStaffAppointment(booking);
+    // The second sees the first even though the shop is shut that day.
+    const refused = await createStaffAppointment({ ...booking, confirmOverride: false }).catch((err: unknown) => err);
+    expect((refused as OverrideNeedsConfirmError).warnings.join(" ")).toMatch(/Every bay is already booked/);
+    const second = await createStaffAppointment(booking);
+    const rows = await db().select().from(schema.appointments);
+    expect(rows.find((row) => row.id === first.appointmentId)?.resourceId).not.toBeNull();
+    expect(rows.find((row) => row.id === second.appointmentId)?.resourceId).toBeNull();
+  });
+
+  it("never lets a customer booking use the time override", async () => {
+    const late = zonedToUtc(tz, y, m, d, 17, 0).getTime();
+    await expect(
+      createAppointment({ ...request(1), startMs: late, timeOverride: true, confirmOverride: true }),
+    ).rejects.toThrow(/no longer available/);
+  });
+
+  it("reschedules past closing with a confirmed override", async () => {
+    const created = await createAppointment(request(1));
+    const late = zonedToUtc(tz, y, m, d, 18, 30).getTime();
+    const move = { appointmentId: created.appointmentId, dateISO, startMs: late, settings, staffId: "usr_staff_test", timeOverride: true };
+    await expect(rescheduleAppointment(move)).rejects.toBeInstanceOf(OverrideNeedsConfirmError);
+    const moved = await rescheduleAppointment({ ...move, confirmOverride: true });
+    expect(moved.startsAt.getTime()).toBe(late);
+    // Without the override, the same time is still refused.
+    await expect(rescheduleAppointment({ ...move, timeOverride: false })).rejects.toThrow(/no longer available/);
   });
 });

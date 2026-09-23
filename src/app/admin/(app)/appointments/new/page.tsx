@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic";
 export default async function NewAppointmentPage() {
   await requirePageStaff("manage_bookings");
   const settings = await getSettings();
-  const [customers, vehicles, services, categories, addonLinks, addons] = await Promise.all([
+  const [customers, vehicles, services, categories, addonLinks, addons, serviceAdjustments, addonAdjustments] = await Promise.all([
     db().select().from(schema.customers).where(isNull(schema.customers.anonymizedAt)).orderBy(asc(schema.customers.firstName), asc(schema.customers.lastName)),
     db().select().from(schema.vehicles).orderBy(asc(schema.vehicles.make), asc(schema.vehicles.model), asc(schema.vehicles.year)),
     db().select().from(schema.services).where(and(
@@ -21,8 +21,20 @@ export default async function NewAppointmentPage() {
     db().select().from(schema.serviceCategories).orderBy(asc(schema.serviceCategories.sort)),
     db().select().from(schema.serviceAddons),
     db().select().from(schema.addons).where(eq(schema.addons.active, true)).orderBy(asc(schema.addons.sort)),
+    db().select().from(schema.serviceVehicleAdjustments),
+    db().select().from(schema.addonVehicleAdjustments),
   ]);
   const categoryNames = new Map(categories.map((category) => [category.id, category.name]));
+
+  // Size deltas keyed by vehicle category, so each card can show the price for
+  // the car actually selected. Display only: the booking is priced on the
+  // server by priceBooking, which applies these same rows.
+  function deltasFor<T extends { vehicleCategory: string; priceDeltaCents: number; durationDeltaMin: number }>(rows: T[]) {
+    return {
+      priceDeltaByCategory: Object.fromEntries(rows.map((row) => [row.vehicleCategory, row.priceDeltaCents])),
+      durationDeltaByCategory: Object.fromEntries(rows.map((row) => [row.vehicleCategory, row.durationDeltaMin])),
+    };
+  }
 
   // Ordered on the finished label, not in SQL — a business reads as
   // "Company — First Last", so ordering by `first_name` scattered the fleet
@@ -66,16 +78,23 @@ export default async function NewAppointmentPage() {
           id: service.id,
           name: service.name,
           categoryName: categoryNames.get(service.categoryId) ?? "Services",
+          description: service.shortDescription,
           basePriceCents: service.basePriceCents!,
+          baseDurationMin: service.baseDurationMin,
+          ...deltasFor(serviceAdjustments.filter((row) => row.serviceId === service.id)),
           addonIds: addonLinks.filter((link) => link.serviceId === service.id).map((link) => link.addonId),
         }))}
         addons={addons.map((addon) => ({
           id: addon.id,
           name: addon.name,
+          description: addon.description,
           priceCents: addon.priceCents,
+          durationMin: addon.durationMin,
+          ...deltasFor(addonAdjustments.filter((row) => row.addonId === addon.id)),
         }))}
         maxBookingWindowDays={settings.maxBookingWindowDays}
         timezone={settings.timezone}
+        currency={settings.currency}
       />
     </div>
   );

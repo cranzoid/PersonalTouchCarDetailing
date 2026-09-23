@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  assessOverrideWindow,
   computeDaySlots,
+  overrideStartMs,
   pickFreeBay,
   pickFreeStaff,
   type DayContext,
@@ -206,5 +208,59 @@ describe("pickFreeBay", () => {
     expect(
       pickFreeBay({ busyByBay: [[], [window]], unassignedBusy: [window] }, window),
     ).toBeNull();
+  });
+});
+
+describe("assessOverrideWindow", () => {
+  // Labels in hours from the epoch anchor, so assertions read as clock times.
+  const label = (ms: number) => `${(ms - 7 * DAY) / HOUR + 9}h`;
+
+  it("reports why an ordinary slot would not have been offered: a 4h job at 5pm runs past a 5pm close", () => {
+    const c = ctx({ totalDurationMin: 240 });
+    // The reported case: nothing offered after 2pm for a 210-minute job, and
+    // here the whole job would end 4h after closing.
+    const window = { start: c.closeMs!, end: c.closeMs! + 4 * HOUR };
+    const result = assessOverrideWindow(c, window, label);
+    expect(result.warnings).toEqual(["It runs until 21h, past closing (17h)."]);
+    expect(result.bayIdx).toBe(1);
+  });
+
+  it("finds nothing to confirm for a time that is an ordinary open slot", () => {
+    const c = ctx();
+    const window = { start: c.openMs!, end: c.openMs! + 2 * HOUR };
+    expect(assessOverrideWindow(c, window, label).warnings).toEqual([]);
+  });
+
+  it("names a closed day, a closure, a taken bay and a missing technician", () => {
+    const window = { start: 7 * DAY, end: 7 * DAY + 2 * HOUR };
+    const result = assessOverrideWindow(
+      ctx({
+        openMs: null,
+        closeMs: null,
+        busyByBay: [[window], [window]],
+        globalBlocks: [window],
+        staffingConfigured: true,
+      }),
+      window,
+      label,
+    );
+    expect(result.warnings).toHaveLength(4);
+    expect(result.warnings[0]).toMatch(/closed that day/);
+    expect(result.bayIdx).toBeNull();
+    expect(result.staffId).toBeNull();
+  });
+
+  it("flags a start before opening", () => {
+    const c = ctx();
+    const window = { start: c.openMs! - HOUR, end: c.openMs! + HOUR };
+    expect(assessOverrideWindow(c, window, label).warnings).toEqual(["It starts before opening (9h)."]);
+  });
+});
+
+describe("overrideStartMs", () => {
+  it("reads the typed wall time in the business timezone, across DST", () => {
+    // 5pm in Toronto is 21:00 UTC in summer (EDT) and 22:00 UTC in winter (EST).
+    expect(new Date(overrideStartMs("America/Toronto", "2026-07-15", "17:00")).toISOString()).toBe("2026-07-15T21:00:00.000Z");
+    expect(new Date(overrideStartMs("America/Toronto", "2026-12-15", "17:00")).toISOString()).toBe("2026-12-15T22:00:00.000Z");
   });
 });

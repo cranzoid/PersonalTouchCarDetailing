@@ -1421,3 +1421,39 @@ which is otherwise an unexplained gap.
 (the Stripe checkout amount would need to carry it), or tips need attributing to
 a specific detailer for payout — payroll is timesheet-based today and a tip
 reaches staff as an ordinary payroll expense.
+
+## 40. Staff can book any time; the schedule explains instead of refusing
+Reported 2026-09-23: a 210-minute booking (Ultimate Detail on an SUV plus Dog
+Hair Clean) showed no slot after 2 p.m. That was the engine working as built,
+not a fault: a slot is offered only when setup (15) + work + cleanup (15) ends
+by closing, and 240 minutes before an 18:00 close is 14:00. For a customer that
+is right — nobody should be promised a finish after the doors shut. For staff it
+was wrong, because a car dropped off at closing and collected tomorrow is an
+ordinary job the grid had no way to express.
+
+So staff now have **Any time (override)** on the new-appointment screen and on
+reschedule: a typed date and time, booked as entered. It deliberately does NOT
+enforce opening hours, closing time, closed days, closures, technician shifts,
+the slot step or the notice window. It does not skip them silently either.
+`assessOverrideWindow` lists every rule the time breaks, including an
+already-booked bay, and the first press is refused with those reasons. Only a
+second, informed "Book anyway" saves it, and the audit entry records what it
+was confirmed over.
+
+- **Double-booking is allowed, not hidden.** When every bay is taken, the
+  booking holds no bay and counts as unassigned. The capacity model already
+  treats an unassigned appointment as one bay of load (#11), so every booking
+  made after it still sees the car.
+- **The time is resolved on the server.** The browser sends `HH:MM`; the
+  action converts it in the business timezone. No browser clock or offset is
+  trusted with the start.
+- **Customer paths cannot reach it.** `createAppointmentInTransaction` honours
+  `timeOverride` only for a staff actor, the same way it already scopes
+  `allowOutsideBookingWindow`. There is a test for it.
+
+The same screen now prices the car in front of it: package and add-on cards
+show the vehicle-size price (the "From" price only until a vehicle is chosen),
+and the summary is priced by the same `priceBooking` call that saves the
+booking, so bundle discounts, HST and deposits match what gets created.
+**Revisit when:** customers should be able to request an after-hours drop-off
+themselves. That would be a request for staff to confirm, not this override.
