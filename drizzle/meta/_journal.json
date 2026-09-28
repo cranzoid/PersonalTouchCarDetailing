@@ -225,6 +225,13 @@
       "when": 1789220404325,
       "tag": "0031_invoice_tips",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1789224004325,
+      "tag": "0032_booking_pauses",
+      "breakpoints": true
     }
   ]
 }

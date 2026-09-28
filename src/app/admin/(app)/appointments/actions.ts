@@ -262,6 +262,7 @@ export async function getManualAppointmentSlotsAction(raw: unknown): Promise<App
       settings,
       requiredSkills: pricing.requiredSkills,
       allowOutsideBookingWindow: input.allowOutsideBookingWindow,
+      ignoreBookingPauses: true,
     });
     return {
       ok: true,
@@ -353,6 +354,7 @@ export async function getRescheduleSlotsAction(raw: unknown): Promise<Appointmen
       excludeAppointmentId: appointment.id,
       requiredSkills,
       allowOutsideBookingWindow: parsed.data.allowOutsideBookingWindow,
+      ignoreBookingPauses: true,
     });
     return {
       ok: true,

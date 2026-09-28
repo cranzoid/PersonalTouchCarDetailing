@@ -53,6 +53,10 @@ function dateOnlyWindow(ctx: DayContext, req: BookingRequest): Interval {
   if (ctx.globalBlocks.some((block) => block.start <= openMs && block.end >= closeMs)) {
     throw new BookingError("We are closed on that date. Please choose another day.");
   }
+  // A booking pause, on the same terms: only one covering the working day.
+  if (ctx.bookingPauses?.some((pause) => pause.start <= openMs && pause.end >= closeMs)) {
+    throw new BookingError("We are fully booked on that date. Please choose another day.");
+  }
   if (!ctx.allowOutsideBookingWindow) {
     if (req.dateISO <= localDateISO(req.settings.timezone, 0, ctx.nowMs)) {
       throw new BookingError("Please choose a date from tomorrow onwards.");
@@ -249,6 +253,9 @@ export async function createAppointmentInTransaction(
       requiredSkills: req.pricing.requiredSkills,
       allowOutsideBookingWindow:
         actor.type === "staff" && (req.allowOutsideBookingWindow === true || timeOverride),
+      // A pause stops online bookings only; staff taking a booking are the
+      // shop deciding it has room after all.
+      ignoreBookingPauses: actor.type === "staff",
       window: timeOverride ? { start: req.startMs!, end: req.startMs! + totalMin * 60_000 } : undefined,
     });
 

@@ -71,6 +71,8 @@ export async function rescheduleAppointment(input: {
       excludeAppointmentId: appointment.id,
       requiredSkills,
       allowOutsideBookingWindow: input.allowOutsideBookingWindow || input.timeOverride,
+      // Staff-only path: a booking pause stops online bookings, not staff.
+      ignoreBookingPauses: true,
       window: input.timeOverride ? { start: input.startMs, end: input.startMs + totalMin * 60_000 } : undefined,
     });
     const window: Interval = {

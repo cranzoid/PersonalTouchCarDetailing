@@ -416,6 +416,7 @@ export async function getEstimateSlotsAction(
       workDurationMin: parsed.data.durationMin,
       settings,
       requiredSkills,
+      ignoreBookingPauses: true,
     });
     return {
       ok: true,

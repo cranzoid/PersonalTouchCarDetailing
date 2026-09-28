@@ -33,6 +33,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
     label: "Workflow",
     items: [
       { href: "/admin/appointments", label: "Appointments", permission: "manage_bookings", icon: "calendar" },
+      { href: "/admin/appointments/pause", label: "Pause bookings", permission: "manage_bookings", icon: "pause" },
       { href: "/admin/leads", label: "Leads", permission: "manage_customers", icon: "leads" },
       { href: REPLIES_HREF, label: "Replies", permission: "manage_customers", icon: "messages" },
       { href: "/admin/marketing/offer-claims/redeem", label: "Redeem wash code", permission: "manage_bookings", icon: "ticket" },

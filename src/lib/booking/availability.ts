@@ -33,6 +33,12 @@ export type DayContext = {
   unassignedBusy: Interval[];
   /** Whole-business closures (holidays etc.). */
   globalBlocks: Interval[];
+  /**
+   * Times the shop has stopped taking online bookings (see booking_pauses).
+   * Loaded for customer paths only: a pause refuses new customer bookings and
+   * nothing else, so staff contexts leave this empty.
+   */
+  bookingPauses?: Interval[];
   /** False only when the installation has no weekly staff schedule rows. */
   staffingConfigured: boolean;
   /** Skill-matched staff who have at least one shift on this local weekday. */
@@ -69,6 +75,7 @@ export function computeDaySlots(ctx: DayContext): Interval[] {
     const window: Interval = { start, end: start + durMs };
     if (!ctx.allowOutsideBookingWindow && (start < earliest || start > latest)) continue;
     if (ctx.globalBlocks.some((b) => overlaps(b, window))) continue;
+    if (ctx.bookingPauses?.some((p) => overlaps(p, window))) continue;
     if (!hasFreeBay(ctx, window)) continue;
     if (ctx.staffingConfigured && pickFreeStaff(ctx, window) === null) continue;
     out.push(window);
@@ -219,6 +226,11 @@ export async function loadDayContext(input: {
   /** Staff-only; see DayContext.allowOutsideBookingWindow. */
   allowOutsideBookingWindow?: boolean;
   /**
+   * Staff-only: book through a booking pause. Pauses apply unless this is set,
+   * so a customer path that forgets to say which it is stays paused.
+   */
+  ignoreBookingPauses?: boolean;
+  /**
    * A window that may lie outside opening hours (a staff time override). Busy
    * time is loaded far enough to cover it, including on a day the shop is shut.
    */
@@ -254,6 +266,7 @@ export async function loadDayContext(input: {
   const busyByBay: Interval[][] = bayIds.map(() => []);
   const unassignedBusy: Interval[] = [];
   const globalBlocks: Interval[] = [];
+  const bookingPauses: Interval[] = [];
   const unassignedStaffBusy: Interval[] = [];
 
   // Compatibility fallback: an install with zero weekly schedule rows keeps
@@ -357,6 +370,16 @@ export async function loadDayContext(input: {
         staffCapacity.find((candidate) => candidate.id === b.staffUserId)?.busy.push(iv);
       }
     }
+
+    if (!input.ignoreBookingPauses) {
+      const pauses = await db()
+        .select({ startsAt: schema.bookingPauses.startsAt, endsAt: schema.bookingPauses.endsAt })
+        .from(schema.bookingPauses)
+        .where(
+          and(lt(schema.bookingPauses.startsAt, dayEnd), gt(schema.bookingPauses.endsAt, dayStart)),
+        );
+      for (const p of pauses) bookingPauses.push({ start: p.startsAt.getTime(), end: p.endsAt.getTime() });
+    }
   }
 
   const ctx: DayContext = {
@@ -370,6 +393,7 @@ export async function loadDayContext(input: {
     busyByBay,
     unassignedBusy,
     globalBlocks,
+    bookingPauses,
     staffingConfigured,
     staffCapacity,
     unassignedStaffBusy,
@@ -388,6 +412,8 @@ export async function getAvailableSlots(input: {
   requiredSkills?: string[];
   /** Staff-only; see DayContext.allowOutsideBookingWindow. */
   allowOutsideBookingWindow?: boolean;
+  /** Staff-only; see loadDayContext. */
+  ignoreBookingPauses?: boolean;
 }): Promise<Interval[]> {
   const { ctx } = await loadDayContext(input);
   return computeDaySlots(ctx);

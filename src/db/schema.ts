@@ -468,6 +468,25 @@ export const scheduleBlocks = pgTable(
   (t) => [index("schedule_blocks_time_idx").on(t.startsAt, t.endsAt)],
 );
 
+/**
+ * A stretch of time the shop has stopped taking bookings online — a full day,
+ * the rest of this afternoon. Unlike a closure (a schedule block with neither
+ * bay nor staff) it only refuses NEW customer bookings: appointments already
+ * inside it stand, and staff can still book into it from admin.
+ */
+export const bookingPauses = pgTable(
+  "booking_pauses",
+  {
+    id: id(),
+    startsAt: timestamp("starts_at", { withTimezone: true }).notNull(),
+    endsAt: timestamp("ends_at", { withTimezone: true }).notNull(),
+    reason: text("reason"),
+    createdByStaffId: text("created_by_staff_id").references(() => staffUsers.id),
+    createdAt: createdAt(),
+  },
+  (t) => [index("booking_pauses_time_idx").on(t.startsAt, t.endsAt)],
+);
+
 export const appointments = pgTable(
   "appointments",
   {

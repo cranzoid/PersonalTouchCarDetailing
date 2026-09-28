@@ -25,6 +25,7 @@ export type IdPrefix =
   | "add" // addon
   | "res" // resource / bay
   | "blk" // schedule block
+  | "bps" // booking pause
   | "apt" // appointment
   | "aps" // appointment service line
   | "qr" // quote request

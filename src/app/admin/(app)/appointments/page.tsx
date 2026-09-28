@@ -6,6 +6,7 @@ import { appointmentWhenLabel } from "@/lib/appointment-time";
 import { formatCents } from "@/lib/money";
 import { getSettings } from "@/lib/settings";
 import { requirePageStaff } from "@/lib/auth/page";
+import { listCurrentBookingPauses, pauseEdgeLabel } from "@/lib/booking/pauses";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +20,8 @@ export default async function AppointmentsPage({
   await requirePageStaff("manage_bookings");
   const { status } = await searchParams;
   const settings = await getSettings();
+  const now = new Date();
+  const pausedNow = (await listCurrentBookingPauses(now)).find((pause) => pause.startsAt <= now);
   const filter = FILTERS.includes((status ?? "all") as (typeof FILTERS)[number])
     ? (status ?? "all")
     : "all";
@@ -46,8 +49,17 @@ export default async function AppointmentsPage({
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h1 className="text-2xl font-bold text-white">Appointments</h1>
-        <Link href="/admin/appointments/new" className="rounded-lg bg-accent-400 px-4 py-2 text-sm font-semibold text-ink-950">New appointment</Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/admin/appointments/pause" className="rounded-lg border border-ink-600 px-4 py-2 text-sm font-semibold text-white">Pause bookings</Link>
+          <Link href="/admin/appointments/new" className="rounded-lg bg-accent-400 px-4 py-2 text-sm font-semibold text-ink-950">New appointment</Link>
+        </div>
       </div>
+      {pausedNow && (
+        <p className="mt-4 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <span className="font-semibold">Online bookings are paused</span> until {pauseEdgeLabel(pausedNow.endsAt, settings.timezone, true)}.{" "}
+          <Link href="/admin/appointments/pause" className="font-semibold underline">Manage</Link>
+        </p>
+      )}
       <div className="mt-4 flex flex-wrap gap-2">
         {FILTERS.map((f) => (
           <Link
