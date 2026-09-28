@@ -33,7 +33,6 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
     label: "Workflow",
     items: [
       { href: "/admin/appointments", label: "Appointments", permission: "manage_bookings", icon: "calendar" },
-      { href: "/admin/appointments/pause", label: "Pause bookings", permission: "manage_bookings", icon: "pause" },
       { href: "/admin/leads", label: "Leads", permission: "manage_customers", icon: "leads" },
       { href: REPLIES_HREF, label: "Replies", permission: "manage_customers", icon: "messages" },
       { href: "/admin/marketing/offer-claims/redeem", label: "Redeem wash code", permission: "manage_bookings", icon: "ticket" },
@@ -67,6 +66,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
       { href: "/admin/marketing", label: "Outreach", permission: "manage_marketing", icon: "megaphone" },
       { href: "/admin/marketing/wash-nudges", label: "First-wash nudges", permission: "manage_marketing", icon: "messages" },
       { href: "/admin/services", label: "Services", permission: "manage_services", icon: "services" },
+      { href: "/admin/appointments/pause", label: "Pause bookings", permission: "manage_bookings", icon: "pause" },
       { href: "/admin/communications", label: "Message templates", permission: "manage_settings", icon: "messages" },
       { href: "/admin/staff", label: "Staff", permission: "manage_staff", icon: "staff" },
       { href: "/admin/settings", label: "Settings", permission: "manage_settings", icon: "settings" },
