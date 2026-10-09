@@ -26,6 +26,7 @@ export function describeMessage(message: { direction: string; kind: string }): s
     return "Their reply";
   }
   if (message.kind === "manual") return "Your reply";
+  if (message.kind === "follow_up") return "Quote follow-up";
   if (message.kind === "marketing") return "Outreach";
   if (message.kind === "staff_alert") return "Internal alert";
   return message.kind.replaceAll("_", " ");

@@ -6,6 +6,7 @@ import { newId } from "@/lib/id";
 import { getSettings } from "@/lib/settings";
 import { sendMessageTemplate } from "@/lib/messaging";
 import { consumeRateLimit } from "@/lib/rate-limit";
+import { normalizePhone } from "@/lib/phone";
 
 const contactSchema = z.object({
   name: z.string().trim().min(1).max(150),
@@ -35,6 +36,8 @@ export async function submitContactAction(raw: unknown): Promise<ContactResult> 
       name: input.company ? `${input.name} (${input.company})` : input.name,
       email: input.email ?? null,
       phone: input.phone ?? null,
+      // Without this an inbound text from them matches no lead (see leads.phoneNormalized).
+      phoneNormalized: normalizePhone(input.phone),
       kind: input.kind,
       status: "new",
       message: input.message,

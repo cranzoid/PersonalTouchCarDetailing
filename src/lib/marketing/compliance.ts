@@ -19,6 +19,8 @@ export function emailComplianceFooter(
     "businessName" | "addressLine1" | "city" | "province" | "postalCode" | "phone" | "email"
   >,
   unsubscribeLink: string,
+  /** Why this person is hearing from us — CASL wants the basis to be honest. */
+  reason = "You are receiving this because we met and exchanged contact details.",
 ): string {
   const address = [
     settings.addressLine1,
@@ -34,7 +36,7 @@ export function emailComplianceFooter(
     address,
     [settings.phone, settings.email].filter(Boolean).join(" · "),
     "",
-    "You are receiving this because we met and exchanged contact details.",
+    reason,
     `Unsubscribe: ${unsubscribeLink}`,
   ].join("\n");
 }

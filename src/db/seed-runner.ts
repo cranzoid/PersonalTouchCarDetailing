@@ -11,6 +11,12 @@ import {
   DEFAULT_NUDGE_SMS,
   NUDGE_TEMPLATE_KEYS,
 } from "../lib/wash-offer-nudge-message";
+import {
+  DEFAULT_FOLLOW_UP_EMAIL_BODY,
+  DEFAULT_FOLLOW_UP_EMAIL_SUBJECT,
+  DEFAULT_FOLLOW_UP_SMS,
+  FOLLOW_UP_TEMPLATE_KEYS,
+} from "../lib/quote-follow-up-message";
 
 loadEnv();
 
@@ -270,6 +276,13 @@ const MESSAGE_TEMPLATES = [
    */
   { key: NUDGE_TEMPLATE_KEYS.sms, channel: "sms", subject: null, body: DEFAULT_NUDGE_SMS },
   { key: NUDGE_TEMPLATE_KEYS.email, channel: "email", subject: DEFAULT_NUDGE_EMAIL_SUBJECT, body: DEFAULT_NUDGE_EMAIL_BODY },
+  /*
+   * Hand-sent quote follow-ups (a quote or callback request → Follow up).
+   * Same arrangement as the nudges: edited before each send, and the email's
+   * address and unsubscribe footer is appended by the sender.
+   */
+  { key: FOLLOW_UP_TEMPLATE_KEYS.sms, channel: "sms", subject: null, body: DEFAULT_FOLLOW_UP_SMS },
+  { key: FOLLOW_UP_TEMPLATE_KEYS.email, channel: "email", subject: DEFAULT_FOLLOW_UP_EMAIL_SUBJECT, body: DEFAULT_FOLLOW_UP_EMAIL_BODY },
 ];
 
 export async function runSeed() {

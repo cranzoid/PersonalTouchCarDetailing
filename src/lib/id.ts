@@ -29,6 +29,7 @@ export type IdPrefix =
   | "apt" // appointment
   | "aps" // appointment service line
   | "qr" // quote request
+  | "qra" // quote request activity (comment or follow-up)
   | "est" // estimate
   | "eli" // estimate line item
   | "job"

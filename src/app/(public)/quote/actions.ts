@@ -11,6 +11,8 @@ import { inArray } from "drizzle-orm";
 import { VEHICLE_CATEGORIES } from "@/lib/types";
 import { consumeRateLimit } from "@/lib/rate-limit";
 import { putPrivateFile } from "@/lib/storage";
+import { normalizePhone } from "@/lib/phone";
+import { startOfLocalDay } from "@/lib/quote-follow-ups";
 
 const MAX_PHOTOS = 6;
 const MAX_PHOTO_BYTES = 10 * 1024 * 1024;
@@ -105,6 +107,8 @@ export async function submitQuoteAction(formData: FormData): Promise<QuoteResult
       name: input.name,
       email: input.email ?? null,
       phone: input.phone ?? null,
+      // Without this a reply to a follow-up text matches no lead (see leads.phoneNormalized).
+      phoneNormalized: normalizePhone(input.phone),
       kind: "quote",
       status: "new",
       message: input.conditionDescription,
@@ -125,6 +129,8 @@ export async function submitQuoteAction(formData: FormData): Promise<QuoteResult
       },
       requestedServiceIds: validServiceIds,
       conditionDescription: input.conditionDescription,
+      // Due the day it arrives: an untouched request is the first one to chase.
+      nextFollowUpAt: startOfLocalDay(settings.timezone, new Date()),
     });
 
     // Store photos through the private storage abstraction (local in dev,

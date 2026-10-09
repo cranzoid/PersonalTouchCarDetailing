@@ -24,6 +24,12 @@ export type OutboundMessage = {
     | "marketing"
     | "manual"
     /**
+     * A staff-sent follow-up on a quote or callback request. Not marketing:
+     * the request itself is the consent basis, checked by the sender against
+     * CASL's six-month window (src/lib/quote-follow-ups.ts).
+     */
+    | "follow_up"
+    /**
      * Operational alert to our own staff (new booking, connectivity test) —
      * never customer-facing, and deliberately outside MARKETING_KINDS: staff
      * are not customers and have no consent record to check.

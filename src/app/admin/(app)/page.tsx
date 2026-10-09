@@ -6,6 +6,7 @@ import { requirePageStaff } from "@/lib/auth/page";
 import { roleHas } from "@/lib/auth/permissions";
 import { getAttentionQueue } from "@/lib/attention";
 import { getBooksSnapshot, listUnconfirmedBills } from "@/lib/books";
+import { dueFollowUpsOrNone, startOfLocalDay } from "@/lib/quote-follow-ups";
 import { unreadRepliesOrNone } from "@/lib/replies";
 import { getSettings } from "@/lib/settings";
 import { appointmentTimeLabel } from "@/lib/appointment-time";
@@ -14,6 +15,7 @@ import { formatInZone, zonedToUtc } from "@/lib/tz";
 import type { StaffRole } from "@/lib/types";
 import { AttentionCard } from "./attention-card";
 import { ConfirmBillsCard } from "./expenses/confirm-bills-card";
+import { FollowUpsCard } from "./follow-ups-card";
 import { RepliesCard } from "./replies-card";
 
 export const dynamic = "force-dynamic";
@@ -85,6 +87,8 @@ export default async function AdminDashboard() {
   // What a customer texted back is their words to the shop, not shop-floor
   // information — the same gate the customer records themselves are behind.
   const replies = roleHas(role, "manage_customers") ? await unreadRepliesOrNone() : null;
+  // Quote requests are behind the same gate as the screen that answers them.
+  const followUps = roleHas(role, "manage_estimates") ? await dueFollowUpsOrNone(now) : null;
   const canManageExpenses = roleHas(role, "manage_expenses");
   const canManageInvoices = roleHas(role, "manage_invoices");
   const books = canSeeMoney ? await getBooksSnapshot("month", y, m) : null;
@@ -142,6 +146,28 @@ export default async function AdminDashboard() {
             }),
             needsAttention: item.needsAttention,
           }))}
+        />
+      )}
+
+      {followUps && followUps.total > 0 && (
+        <FollowUpsCard
+          total={followUps.total}
+          items={followUps.items.map((item) => {
+            const overdue = item.nextFollowUpAt < startOfLocalDay(tz, now);
+            return {
+              id: item.id,
+              name: item.name,
+              callback: item.callback,
+              vehicle: item.vehicle,
+              overdue,
+              dueLabel: overdue
+                ? `Overdue since ${formatInZone(item.nextFollowUpAt, tz, { month: "short", day: "numeric" })}`
+                : "Due today",
+              lastLabel: item.lastFollowedUpAt
+                ? `Last followed up ${formatInZone(item.lastFollowedUpAt, tz, { month: "short", day: "numeric" })}`
+                : "Not followed up yet",
+            };
+          })}
         />
       )}
 

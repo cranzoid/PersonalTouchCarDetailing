@@ -632,10 +632,49 @@ export const quoteRequests = pgTable(
     conditionDescription: text("condition_description"),
     status: text("status").notNull().default("new"), // new | reviewing | estimated | closed
     estimateId: text("estimate_id"),
+    /**
+     * When somebody last chased this request — a text or email sent from it, or
+     * a call logged against it. Denormalized from quote_request_activities so
+     * the list can show and sort on it without a join.
+     */
+    lastFollowedUpAt: timestamp("last_followed_up_at", { withTimezone: true }),
+    /**
+     * Start of the business-local day the next follow-up is due. Due means this
+     * is at or before now; null means nothing is scheduled. Set to the day of
+     * arrival for new requests, so an untouched one surfaces straight away.
+     */
+    nextFollowUpAt: timestamp("next_follow_up_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("quote_requests_status_idx").on(t.status)],
+  (t) => [
+    index("quote_requests_status_idx").on(t.status),
+    index("quote_requests_next_follow_up_idx").on(t.nextFollowUpAt),
+  ],
+);
+
+/**
+ * The working history of a quote (or callback) request: staff comments, and
+ * every follow-up — sent from the CRM or logged after a call. A sent follow-up
+ * links the communications row that holds the actual message.
+ */
+export const quoteRequestActivities = pgTable(
+  "quote_request_activities",
+  {
+    id: id(),
+    quoteRequestId: text("quote_request_id")
+      .notNull()
+      .references(() => quoteRequests.id),
+    kind: text("kind").notNull(), // comment | follow_up
+    /** follow_up only: sms | email | call | voicemail | in_person | other */
+    method: text("method"),
+    /** The comment, or the note on a logged follow-up. Null on a sent message. */
+    body: text("body"),
+    communicationId: text("communication_id").references(() => communications.id),
+    staffId: text("staff_id").references(() => staffUsers.id),
+    createdAt: createdAt(),
+  },
+  (t) => [index("quote_request_activities_quote_idx").on(t.quoteRequestId, t.createdAt)],
 );
 
 export const estimateCounters = pgTable("estimate_counters", {
@@ -1120,7 +1159,7 @@ export const communications = pgTable(
     direction: text("direction").notNull().default("outbound"), // outbound | inbound | internal
     channel: text("channel").notNull(), // email | sms | phone | internal
     kind: text("kind").notNull(), // confirmation | reminder | estimate | approval_request | deposit_reminder |
-    // delay | ready | invoice | receipt | review_request | maintenance | marketing | manual | note | lead_ack |
+    // delay | ready | invoice | receipt | review_request | maintenance | marketing | manual | follow_up | note | lead_ack |
     // reply | opt_stop | opt_start (inbound, written by the Twilio webhook)
     subject: text("subject"),
     /** Addresses copied on this specific send. Email only; always empty for SMS. */

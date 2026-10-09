@@ -1,7 +1,9 @@
 import { z } from "zod";
+import { FOLLOW_UP_PLACEHOLDERS, FOLLOW_UP_TEMPLATE_KEYS } from "@/lib/quote-follow-up-message";
 import { NUDGE_PLACEHOLDERS, NUDGE_TEMPLATE_KEYS } from "@/lib/wash-offer-nudge-message";
 
 const NUDGE_VARIABLES = NUDGE_PLACEHOLDERS.map((p) => p.key);
+const FOLLOW_UP_VARIABLES = FOLLOW_UP_PLACEHOLDERS.map((p) => p.key);
 
 /**
  * Variables actually supplied by the existing call site for each seeded
@@ -23,6 +25,8 @@ export const TEMPLATE_VARIABLES: Readonly<Record<string, readonly string[]>> = {
   maintenance: ["businessName", "firstName", "vehicle", "bookingUrl"],
   [NUDGE_TEMPLATE_KEYS.sms]: NUDGE_VARIABLES,
   [NUDGE_TEMPLATE_KEYS.email]: NUDGE_VARIABLES,
+  [FOLLOW_UP_TEMPLATE_KEYS.sms]: FOLLOW_UP_VARIABLES,
+  [FOLLOW_UP_TEMPLATE_KEYS.email]: FOLLOW_UP_VARIABLES,
 };
 
 export const messageTemplateUpdateSchema = z.object({

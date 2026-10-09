@@ -1482,3 +1482,45 @@ booking and the staff screen both send it from there: the same
   customer's contact details, and the stored lines are what was actually saved.
 - **Best effort.** The booking is committed first, so a messaging failure never
   turns into a failed booking. This matches the staff alert.
+
+## 42. Quote follow-ups: tracked on the request, sent one at a time, consent from the request
+
+Quote and callback requests had a status and nothing else, so nobody could
+tell who had been chased, when, or what they said. A callback request is a
+quote request: the ceramic-protection enquiry posts to the same action, and
+only `attribution.enquiryType = 'ceramic_callback'` tells the two apart. So
+everything below covers both.
+
+- **Two columns on the request, the detail in its own table.**
+  `quote_requests.last_followed_up_at` and `next_follow_up_at` exist so the list
+  and the dashboard can show and filter without a join.
+  `quote_request_activities` holds every follow-up and every staff comment. A
+  follow-up is never inferred from `communications`, because that table also
+  holds the form's automatic acknowledgement, which is not anyone following up.
+- **A follow-up is a sent text, a sent email, or a logged call.** Sending one
+  stamps the request, sets the next date (three days out by default, or none),
+  and moves a lead that is still `new` to `contacted`. A lead further along is
+  left alone. Comments change nothing else.
+- **"Due" means the scheduled day has started, on a request that is not
+  closed.** The next date is stored as the start of that business-local day.
+  New requests are due the day they arrive. The migration made untouched
+  (`new`) requests from the last 30 days due. Older ones were left unscheduled
+  rather than flooding the dashboard with a backlog nobody will chase.
+- **Sent as `follow_up`, not `marketing`.** Almost nobody ticks the marketing
+  box on a quote form, so the marketing gate would block nearly every
+  follow-up. The request itself is the consent basis: CASL treats an inquiry as
+  implied consent for six months. After that, a follow-up needs recorded
+  marketing consent, or a phone call. The do-not-contact list always applies.
+  Texts must carry the STOP line. Emails get the address and unsubscribe footer
+  appended by the sender, with the lead-signed unsubscribe link.
+- **Texts only between 9am and 8pm; email any time.** A text buzzes a phone,
+  and an email waits in an inbox.
+- **One at a time, from the request.** The owner chose this over bulk sends and
+  automatic sequences. The wording starts from two editable templates
+  (`quote_follow_up_sms`, `quote_follow_up_email`), which the seed creates at
+  boot. Editing the default needs `manage_settings`, like the template editor.
+  Sending needs `manage_estimates`, like the request page.
+- **Leads from the public quote and contact forms now store
+  `phone_normalized`.** They never did, so a reply to anything we texted them
+  matched no lead. The migration backfilled existing leads with the same SQL as
+  0010.
