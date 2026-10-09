@@ -22,6 +22,7 @@ export const dynamic = "force-dynamic";
 // study is actually published. See src/lib/results.ts.
 const PRIMARY_NAV = [
   { href: "/services", label: "Services" },
+  { href: "/winter", label: "Winter" },
   { href: "/results", label: "Results" },
   { href: "/blog", label: "Blog" },
   { href: "/fleet", label: "Commercial" },
@@ -32,6 +33,7 @@ const PRIMARY_NAV = [
 const SECONDARY_NAV = [
   { href: "/reviews", label: "Reviews" },
   { href: "/faq", label: "FAQ" },
+  { href: "/account", label: "My account" },
 ];
 
 // The Services menu is two groups behind one overview link. Detailing and

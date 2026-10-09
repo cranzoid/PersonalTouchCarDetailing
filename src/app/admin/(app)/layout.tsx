@@ -46,6 +46,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
     items: [
       { href: "/admin/customers", label: "Customers", permission: "manage_customers", icon: "customers" },
       { href: "/admin/fleet", label: "Fleet accounts", permission: "manage_customers", icon: "fleet" },
+      { href: "/admin/memberships", label: "Memberships", permission: "manage_memberships", icon: "claims" },
       { href: "/admin/invoices", label: "Invoices", permission: "record_payments", icon: "invoice" },
       { href: "/admin/expenses", label: "Expenses", permission: "manage_expenses", icon: "expenses" },
       { href: "/admin/timesheets", label: "Hours", permission: "manage_timesheets", icon: "calendar" },
@@ -66,6 +67,7 @@ const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
       { href: "/admin/marketing", label: "Outreach", permission: "manage_marketing", icon: "megaphone" },
       { href: "/admin/marketing/wash-nudges", label: "First-wash nudges", permission: "manage_marketing", icon: "messages" },
       { href: "/admin/services", label: "Services", permission: "manage_services", icon: "services" },
+      { href: "/admin/memberships/settings", label: "Membership settings", permission: "manage_memberships", icon: "settings" },
       { href: "/admin/appointments/pause", label: "Pause bookings", permission: "manage_bookings", icon: "pause" },
       { href: "/admin/communications", label: "Message templates", permission: "manage_settings", icon: "messages" },
       { href: "/admin/staff", label: "Staff", permission: "manage_staff", icon: "staff" },

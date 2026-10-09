@@ -19,6 +19,7 @@ const PUBLIC_ROUTES = [
   "/services/ceramic-coating",
   "/services/ceramic-protection",
   "/offers/ceramic-coating",
+  "/winter",
   "/blog",
   "/book",
   "/quote",

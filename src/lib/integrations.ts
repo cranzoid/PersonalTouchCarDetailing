@@ -26,12 +26,22 @@ export const INTEGRATION_KEYS = {
   twilioFromNumber: "TWILIO_FROM_NUMBER",
   resendApiKey: "RESEND_API_KEY",
   emailFrom: "EMAIL_FROM",
+  /** Helcim API token: online checkout, saved-card charges, refunds, terminal. */
+  helcimApiToken: "HELCIM_API_TOKEN",
+  /** Verifier token from Helcim → Integrations → Webhooks, for signed events. */
+  helcimWebhookVerifierToken: "HELCIM_WEBHOOK_VERIFIER_TOKEN",
+  /** Four-character code of the counter's Smart Terminal (API mode on). */
+  helcimTerminalDeviceCode: "HELCIM_TERMINAL_DEVICE_CODE",
 } as const;
 
 export type IntegrationKey = keyof typeof INTEGRATION_KEYS;
 
 /** Values that are configuration rather than secrets — safe to show in full. */
-const NON_SECRET_KEYS: ReadonlySet<IntegrationKey> = new Set(["twilioFromNumber", "emailFrom"]);
+const NON_SECRET_KEYS: ReadonlySet<IntegrationKey> = new Set([
+  "twilioFromNumber",
+  "emailFrom",
+  "helcimTerminalDeviceCode",
+]);
 
 const ALGORITHM = "aes-256-gcm";
 const IV_BYTES = 12;

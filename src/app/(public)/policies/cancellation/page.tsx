@@ -39,6 +39,12 @@ export default async function CancellationPage() {
           </li>
         </ul>
         <p>To cancel or reschedule, reply to your confirmation message or call us.</p>
+        <p>
+          Cancelling a membership is different: it takes effect at the end of the month you have
+          paid for, and payments already made are not refunded. See{" "}
+          <a href="/policies/terms#memberships" className="font-medium text-[#0B2A4A] underline underline-offset-4">Memberships</a>{" "}
+          in our service terms.
+        </p>
       </div>
       </article>
     </Container>

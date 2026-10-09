@@ -7,23 +7,26 @@ const staff = vi.hoisted(() => ({
   email: "financial-integrity@example.com",
   role: "owner" as const,
 }));
-const stripeRefund = vi.hoisted(() => vi.fn());
+const helcim = vi.hoisted(() => ({
+  refund: vi.fn(),
+  reverse: vi.fn(),
+  getTransaction: vi.fn(),
+  findByInvoiceNumber: vi.fn(),
+}));
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/auth/session", () => ({
   requireStaff: vi.fn(async () => staff),
   AuthError: class AuthError extends Error {},
 }));
-vi.mock("@/lib/payments", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../src/lib/payments")>();
+vi.mock("@/lib/helcim/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/lib/helcim/client")>();
   return {
     ...actual,
-    getPaymentProvider: () => ({
-      name: "stripe" as const,
-      createCheckoutSession: vi.fn(),
-      verifyWebhookEvent: vi.fn(),
-      refundPayment: stripeRefund,
-    }),
+    refundCardTransaction: helcim.refund,
+    reverseCardTransaction: helcim.reverse,
+    getCardTransaction: helcim.getTransaction,
+    findCardTransactionsByInvoiceNumber: helcim.findByInvoiceNumber,
   };
 });
 
@@ -32,7 +35,11 @@ import { newId } from "../src/lib/id";
 import { syncOverdueInvoices } from "../src/lib/invoices";
 import { recordAppointmentDepositAction } from "../src/app/admin/(app)/appointments/actions";
 import { issueRefundAction, recordPaymentAction } from "../src/app/admin/(app)/invoices/actions";
-import { finalizeStripeRefund } from "../src/lib/payments";
+import { normalizeTransaction, HelcimApiError } from "../src/lib/helcim/client";
+
+function helcimTx(fields: Record<string, unknown>) {
+  return normalizeTransaction({ status: "APPROVED", currency: "CAD", ...fields });
+}
 
 async function resetDb() {
   await db().execute(sql`
@@ -108,8 +115,7 @@ async function createInvoice(input: {
 describe("financial integrity", () => {
   beforeEach(async () => {
     await resetDb();
-    stripeRefund.mockReset();
-    stripeRefund.mockResolvedValue({ providerRef: "re_test_success", amountCents: 4_000, status: "succeeded" });
+    for (const fn of Object.values(helcim)) fn.mockReset();
   });
 
   afterAll(async () => {
@@ -214,57 +220,54 @@ describe("financial integrity", () => {
     expect(audits.filter((row) => row.action === "invoice.refunded")).toHaveLength(1);
   });
 
-  it("issues a Stripe refund once from the server-reserved ledger amount", async () => {
+  it("refunds to the card through Helcim once, from the server-reserved ledger amount", async () => {
     const { customerId } = await createCustomerAndVehicle();
     const invoiceId = await createInvoice({ customerId, number: 9002, status: "paid" });
-    const chargePaymentId = newId("pay");
     await db().insert(schema.payments).values({
-      id: chargePaymentId,
+      id: newId("pay"),
       invoiceId,
       customerId,
-      provider: "stripe",
-      providerRef: "cs_refundable_001",
-      idempotencyKey: "checkout_stripe_refundable_001",
+      provider: "helcim",
+      providerRef: "70001",
+      idempotencyKey: "checkout_helcim_refundable_001",
       kind: "payment",
       amountCents: 10_000,
       status: "succeeded",
       receivedAt: new Date(),
     });
+    helcim.refund.mockResolvedValue(helcimTx({ transactionId: "70002", type: "refund", amount: 40 }));
     const request = {
       invoiceId,
       amountCents: 4_000,
       reason: "Customer adjustment",
-      method: "stripe" as const,
-      idempotencyKey: "stripe_refund_retry_001",
+      method: "card" as const,
+      idempotencyKey: "card_refund_retry_001",
     };
 
     expect(await issueRefundAction(request)).toEqual({ ok: true, status: "succeeded" });
     expect(await issueRefundAction(request)).toEqual({ ok: true, status: "succeeded" });
-    expect(stripeRefund).toHaveBeenCalledTimes(1);
-    expect(stripeRefund).toHaveBeenCalledWith(expect.objectContaining({
-      checkoutSessionId: "cs_refundable_001",
-      amountCents: 4_000,
-      invoiceId,
-    }));
+    expect(helcim.refund).toHaveBeenCalledTimes(1);
+    expect(helcim.refund).toHaveBeenCalledWith(expect.objectContaining({ originalTransactionId: "70001", amountCents: 4_000 }));
 
     const refunds = (await db().select().from(schema.payments).where(eq(schema.payments.invoiceId, invoiceId)))
       .filter((payment) => payment.kind === "refund");
     expect(refunds).toHaveLength(1);
-    expect(refunds[0]).toMatchObject({ provider: "stripe", amountCents: 4_000, status: "succeeded" });
+    expect(refunds[0]).toMatchObject({ provider: "helcim", amountCents: 4_000, status: "succeeded" });
+    expect(refunds[0].providerRef).toContain("|70002");
     const [invoice] = await db().select().from(schema.invoices).where(eq(schema.invoices.id, invoiceId));
     expect(invoice.status).toBe("partially_paid");
   });
 
-  it("keeps ambiguous Stripe failures pending and retries with the same provider idempotency key", async () => {
+  it("keeps a refund pending when Helcim's answer is lost, and finds it rather than refunding twice", async () => {
     const { customerId } = await createCustomerAndVehicle();
     const invoiceId = await createInvoice({ customerId, number: 9003, status: "paid" });
     await db().insert(schema.payments).values({
       id: newId("pay"),
       invoiceId,
       customerId,
-      provider: "stripe",
-      providerRef: "cs_retry_safe_001",
-      idempotencyKey: "checkout_stripe_retry_safe_001",
+      provider: "helcim",
+      providerRef: "71001",
+      idempotencyKey: "checkout_helcim_retry_safe_001",
       kind: "payment",
       amountCents: 10_000,
       status: "succeeded",
@@ -274,70 +277,66 @@ describe("financial integrity", () => {
       invoiceId,
       amountCents: 4_000,
       reason: "Retry safety",
-      method: "stripe" as const,
-      idempotencyKey: "stripe_refund_ambiguous_001",
+      method: "card" as const,
+      idempotencyKey: "card_refund_ambiguous_001",
     };
-    stripeRefund.mockRejectedValueOnce(new Error("network timeout"));
+    helcim.refund.mockRejectedValueOnce(new Error("network timeout"));
 
     expect(await issueRefundAction(request)).toEqual({
       ok: false,
-      error: "Stripe could not confirm the refund. Retry the same request safely.",
+      error: "Helcim did not confirm the refund. Retry the same request safely.",
     });
     let [refund] = (await db().select().from(schema.payments).where(eq(schema.payments.invoiceId, invoiceId)))
       .filter((payment) => payment.kind === "refund");
     expect(refund.status).toBe("pending");
 
+    // The refund DID happen at Helcim; the retry must find it, not send another.
+    helcim.getTransaction.mockResolvedValue(helcimTx({ transactionId: "71001", type: "purchase", amount: 100, invoiceNumber: "PTCREFUNDSRC" }));
+    helcim.findByInvoiceNumber.mockResolvedValue([
+      helcimTx({ transactionId: "71001", type: "purchase", amount: 100, invoiceNumber: "PTCREFUNDSRC" }),
+      helcimTx({ transactionId: "71002", type: "refund", amount: 40, invoiceNumber: "PTCREFUNDSRC" }),
+    ]);
     expect(await issueRefundAction(request)).toEqual({ ok: true, status: "succeeded" });
-    expect(stripeRefund).toHaveBeenCalledTimes(2);
-    const firstKey = stripeRefund.mock.calls[0][0].idempotencyKey;
-    expect(stripeRefund.mock.calls[1][0].idempotencyKey).toBe(firstKey);
+    expect(helcim.refund).toHaveBeenCalledTimes(1);
     [refund] = (await db().select().from(schema.payments).where(eq(schema.payments.invoiceId, invoiceId)))
       .filter((payment) => payment.kind === "refund");
     expect(refund.status).toBe("succeeded");
+    expect(refund.providerRef).toContain("|71002");
   });
 
-  it("does not reduce the invoice until a pending Stripe refund is verified as succeeded", async () => {
+  it("records a refund Helcim refuses as failed and leaves the invoice paid", async () => {
     const { customerId } = await createCustomerAndVehicle();
     const invoiceId = await createInvoice({ customerId, number: 9004, status: "paid" });
     await db().insert(schema.payments).values({
       id: newId("pay"),
       invoiceId,
       customerId,
-      provider: "stripe",
-      providerRef: "cs_pending_refund_001",
-      idempotencyKey: "checkout_pending_refund_001",
+      provider: "helcim",
+      providerRef: "72001",
+      idempotencyKey: "checkout_helcim_refused_001",
       kind: "payment",
       amountCents: 10_000,
       status: "succeeded",
       receivedAt: new Date(),
     });
-    stripeRefund.mockResolvedValueOnce({ providerRef: "re_pending_001", amountCents: 3_000, status: "pending" });
+    helcim.refund.mockRejectedValueOnce(new HelcimApiError(400, ["Transaction is not settled"]));
+    helcim.getTransaction.mockResolvedValue(helcimTx({ transactionId: "72001", type: "purchase", amount: 100 }));
 
-    expect(await issueRefundAction({
+    const result = await issueRefundAction({
       invoiceId,
       amountCents: 3_000,
-      reason: "Pending provider test",
-      method: "stripe",
-      idempotencyKey: "stripe_refund_pending_001",
-    })).toEqual({ ok: true, status: "pending" });
-
-    let refund = (await db().select().from(schema.payments).where(eq(schema.payments.invoiceId, invoiceId)))
+      reason: "Refused provider test",
+      method: "card",
+      idempotencyKey: "card_refund_refused_001",
+    });
+    expect(result).toEqual({ ok: false, error: "Helcim refused the refund: Transaction is not settled" });
+    // A partial amount cannot fall back to a full reversal.
+    expect(helcim.reverse).not.toHaveBeenCalled();
+    const refund = (await db().select().from(schema.payments).where(eq(schema.payments.invoiceId, invoiceId)))
       .find((payment) => payment.kind === "refund")!;
-    expect(refund.status).toBe("pending");
-    let [invoice] = await db().select().from(schema.invoices).where(eq(schema.invoices.id, invoiceId));
+    expect(refund.status).toBe("failed");
+    const [invoice] = await db().select().from(schema.invoices).where(eq(schema.invoices.id, invoiceId));
     expect(invoice.status).toBe("paid");
-
-    expect(await db().transaction((tx) => finalizeStripeRefund(tx, {
-      refundPaymentId: refund.id,
-      providerRef: "re_pending_001",
-      amountCents: 3_000,
-      providerStatus: "succeeded",
-    }))).toMatchObject({ status: "succeeded", alreadyProcessed: false });
-    refund = (await db().select().from(schema.payments).where(eq(schema.payments.invoiceId, invoiceId)))
-      .find((payment) => payment.kind === "refund")!;
-    expect(refund.status).toBe("succeeded");
-    [invoice] = await db().select().from(schema.invoices).where(eq(schema.invoices.id, invoiceId));
-    expect(invoice.status).toBe("partially_paid");
   });
 
   it("atomically marks only eligible invoices overdue and audits once", async () => {

@@ -64,7 +64,8 @@ export function DepositRefundPanel({
       {originalMethodWasCard && (
         <p className="mt-2 text-xs text-ink-400">
           The deposit was taken online by card. Recording it here logs the refund against the
-          appointment — issue the actual card refund from the Stripe dashboard.
+          appointment — issue the actual card refund in your Helcim account (Transactions → the
+          payment → Refund).
         </p>
       )}
       <div className="mt-3 flex flex-wrap items-end gap-3">

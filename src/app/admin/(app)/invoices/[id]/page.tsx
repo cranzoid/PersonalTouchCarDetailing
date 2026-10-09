@@ -11,7 +11,7 @@ import { summarizePayments, syncOverdueInvoices, tipBaseCents } from "@/lib/invo
 import { StatusBadge } from "@/components/admin";
 import { InvoiceActions } from "./invoice-actions";
 import { requirePageStaff } from "@/lib/auth/page";
-import { getRefundAvailability } from "@/lib/payments";
+import { getRefundAvailability, getTerminalDeviceCode } from "@/lib/payments";
 
 export const dynamic = "force-dynamic";
 
@@ -59,6 +59,7 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
     ? summary
     : summarizePayments(invoice.totalCents - invoice.taxCents, invoice.depositAppliedCents, payments);
   const refundAvailability = getRefundAvailability(payments, invoice.depositAppliedCents);
+  const terminalDeviceCode = await getTerminalDeviceCode().catch(() => null);
 
   // Deposit taken against the originating appointment that this invoice's total
   // cannot absorb — the signature of a downgrade at the counter. Derived here
@@ -180,6 +181,13 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                   }`}
                 </td></tr>
             )}
+            {invoice.customerPayIntent && invoice.status !== "paid" && (
+              <tr><td colSpan={4} className="px-4 py-2 text-xs text-sky-300">
+                  {`The customer said they will pay ${invoice.customerPayIntent === "cheque" ? "by cheque" : "in person"}${
+                    invoice.customerPayIntentAt ? ` (${formatInZone(invoice.customerPayIntentAt, settings.timezone, { month: "short", day: "numeric" })})` : ""
+                  }. Record the payment when it arrives.`}
+                </td></tr>
+            )}
             {invoice.tipCents > 0 && (
               <tr><td colSpan={3} className="px-4 py-2 text-right text-ink-400">
                   Tip{invoice.tipBasisBp ? ` (${(invoice.tipBasisBp / 100).toFixed(invoice.tipBasisBp % 100 === 0 ? 0 : 2)}%)` : ""}
@@ -290,8 +298,9 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         taxSettled={taxSettled}
         currency={settings.currency}
         netPaidCents={summary.netPaidCents}
-        stripeRefundableCents={refundAvailability.stripeRefundableCents}
+        cardRefundableCents={refundAvailability.cardRefundableCents}
         manualRefundableCents={refundAvailability.manualRefundableCents}
+        terminalReady={Boolean(terminalDeviceCode)}
         taxExempt={invoice.taxExempt}
         taxLabel={invoice.taxLabel}
         tipCents={invoice.tipCents}

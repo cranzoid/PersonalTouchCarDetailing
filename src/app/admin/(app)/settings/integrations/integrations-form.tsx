@@ -7,6 +7,7 @@ import {
   clearIntegrationCredentialAction,
   saveIntegrationCredentialsAction,
   sendTestMessageAction,
+  testHelcimAction,
 } from "./actions";
 
 type Message = { ok: boolean; text: string } | null;
@@ -17,6 +18,9 @@ const EMPTY = {
   twilioFromNumber: "",
   resendApiKey: "",
   emailFrom: "",
+  helcimApiToken: "",
+  helcimWebhookVerifierToken: "",
+  helcimTerminalDeviceCode: "",
 };
 
 export function IntegrationsForm({
@@ -32,6 +36,15 @@ export function IntegrationsForm({
   const [msg, setMsg] = useState<Message>(null);
   const [testTo, setTestTo] = useState({ sms: "", email: "" });
   const [testMsg, setTestMsg] = useState<{ sms: Message; email: Message }>({ sms: null, email: null });
+  const [helcimMsg, setHelcimMsg] = useState<Message>(null);
+
+  async function testHelcim() {
+    setBusy(true);
+    setHelcimMsg(null);
+    const res = await testHelcimAction();
+    setBusy(false);
+    setHelcimMsg({ ok: res.ok, text: res.ok ? res.message ?? "Connected." : res.error });
+  }
 
   const byKey = new Map(status.map((s) => [s.key, s]));
   const input = "w-full rounded-lg border border-ink-600 bg-ink-950 px-3 py-2 text-sm text-white";
@@ -177,6 +190,33 @@ export function IntegrationsForm({
           rejected.
         </p>
         {testRow("email", "you@example.com")}
+      </section>
+
+      <section>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-ink-300">Card payments — Helcim</h2>
+        <div className="grid gap-3 sm:grid-cols-2">
+          {credentialField("helcimApiToken", "API token", "From Helcim → Integrations → API Access", true)}
+          {credentialField("helcimWebhookVerifierToken", "Webhook verifier token", "From Helcim → Integrations → Webhooks", true)}
+          {credentialField("helcimTerminalDeviceCode", "Smart Terminal device code", "4 characters, e.g. AB12", false)}
+        </div>
+        <p className="mt-2 text-xs text-ink-500">
+          Online checkout, membership billing, refunds and the counter terminal all use the API token. When you
+          create it in Helcim, tick HelcimPay.js and add https://www.personaltouchcardetailing.ca as a checkout
+          domain. Set the webhook URL to https://www.personaltouchcardetailing.ca/api/webhooks/card-payments (Card
+          Transaction and Processing Account Cancel events). The device code appears on the terminal once API mode is
+          on.
+        </p>
+        <div className="mt-3 flex flex-wrap items-start gap-2">
+          <button
+            type="button"
+            onClick={() => void testHelcim()}
+            disabled={busy}
+            className="rounded-lg border border-ink-600 px-4 py-2 text-sm font-medium text-ink-200 hover:bg-ink-800 disabled:opacity-40"
+          >
+            Test Helcim connection
+          </button>
+          {helcimMsg && <p className={`w-full text-xs ${helcimMsg.ok ? "text-emerald-300" : "text-red-300"}`}>{helcimMsg.text}</p>}
+        </div>
       </section>
 
       {msg && <p className={msg.ok ? "text-sm text-emerald-300" : "text-sm text-red-300"}>{msg.text}</p>}

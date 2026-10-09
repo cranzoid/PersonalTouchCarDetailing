@@ -291,6 +291,12 @@ export async function removeCustomerVehicleAction(raw: unknown): Promise<Custome
       const [file] = await tx.select({ id: schema.files.id }).from(schema.files)
         .where(and(eq(schema.files.entityType, "vehicle"), eq(schema.files.entityId, vehicle.id))).limit(1);
       references.push({ label: "a file or photo", exists: Boolean(file) });
+      const [membership] = await tx.select({ id: schema.memberships.id }).from(schema.memberships)
+        .where(eq(schema.memberships.vehicleId, vehicle.id)).limit(1);
+      references.push({ label: "a membership", exists: Boolean(membership) });
+      const [pass] = await tx.select({ id: schema.winterPasses.id }).from(schema.winterPasses)
+        .where(eq(schema.winterPasses.vehicleId, vehicle.id)).limit(1);
+      references.push({ label: "a Winter Pass", exists: Boolean(pass) });
 
       const firstReference = references.find((reference) => reference.exists);
       if (firstReference) {

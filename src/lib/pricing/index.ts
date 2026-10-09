@@ -11,6 +11,7 @@ import type { BusinessSettings } from "@/lib/settings";
 import type { VehicleCategory } from "@/lib/types";
 import { bestOfAllocations, bundleDiscountAllocations, bundlePerkFor } from "@/lib/bundle-offers";
 import { washOfferAllocation, washOfferPriceCents, type ResolvedWashOffer } from "@/lib/wash-offer";
+import { memberAllocation, type AppliedEntitlement, type MemberPricing } from "@/lib/memberships/pricing";
 
 export type PricedLine = {
   serviceId?: string;
@@ -60,6 +61,12 @@ export type BookingPricing = {
    * catalogue and risking a different answer.
    */
   serviceSlugs: string[];
+  /**
+   * Prepaid entitlements this price spends — a member's monthly wash, a Winter
+   * Pass wash. The booking transaction records each one as a redemption, which
+   * is what stops the same month's wash being spent twice.
+   */
+  entitlements?: AppliedEntitlement[];
 };
 
 /** A resolved discount, ready to apply. `cents` is authoritative. */
@@ -107,6 +114,12 @@ export async function priceBooking(input: {
    * discount is the difference from the catalogue price computed here.
    */
   washOffer?: ResolvedWashOffer | null;
+  /**
+   * Server-resolved membership / Winter Pass context for the car being booked
+   * (see resolveMemberPricing). Its discount competes per line with the other
+   * offers; it never stacks on them.
+   */
+  member?: MemberPricing | null;
 }): Promise<BookingPricing> {
   const { serviceIds, addonIds, vehicleCategory, settings, promo } = input;
   const customLines = input.customLines ?? [];
@@ -271,10 +284,15 @@ export async function priceBooking(input: {
   // one the customer was shown a specific dollar price for and the one whose
   // code has to end up on the appointment. In practice they cannot collide —
   // the wash is not a bundle service and is not on the campaign's list.
+  const member = input.member
+    ? memberAllocation(lines, input.member)
+    : { allocation: new Array(lines.length).fill(0) as number[], entitlements: [] as AppliedEntitlement[] };
+
   const resolved = bestOfAllocations([
     { key: "wash", allocation: wash.allocation },
     { key: "bundle", allocation: bundle.allocation },
     { key: "campaign", allocation: campaignAllocation },
+    { key: "member", allocation: member.allocation },
   ]);
   const allocation = resolved.allocation;
   const discountCents = allocation.reduce((sum, cents) => sum + cents, 0);
@@ -285,6 +303,7 @@ export async function priceBooking(input: {
     ...(washContributes && input.washOffer ? [input.washOffer.label] : []),
     ...(resolved.contributing.has("bundle") ? bundle.labels : []),
     ...(campaignContributes && promo ? [promo.label] : []),
+    ...(resolved.contributing.has("member") && input.member ? [input.member.label] : []),
   ];
   const discountLabel = contributingLabels.length > 1
     ? "Best available offers"
@@ -328,6 +347,9 @@ export async function priceBooking(input: {
     }),
     requiredSkills: [...new Set(services.flatMap((service) => service.requiredSkills.map(normalizeSkill)).filter(Boolean))],
     serviceSlugs: services.map((service) => service.slug),
+    // An included line is the whole price, so the member source always wins
+    // it; the entitlement is spent exactly when its line is free.
+    entitlements: member.entitlements,
   };
 }
 

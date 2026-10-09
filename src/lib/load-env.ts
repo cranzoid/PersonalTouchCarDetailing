@@ -13,6 +13,8 @@ export function loadEnv(file = ".env.local"): void {
     if (!m) continue;
     const [, key, raw] = m;
     if (process.env[key] !== undefined) continue;
-    process.env[key] = raw.replace(/^["']|["']$/g, "");
+    // `\$` is how a literal dollar sign is written for Next.js, whose loader
+    // expands `$NAME` references — keep both loaders reading the same value.
+    process.env[key] = raw.replace(/^["']|["']$/g, "").replace(/\\\$/g, "$");
   }
 }

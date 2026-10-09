@@ -12,6 +12,7 @@ import {
   type IntegrationKey,
 } from "@/lib/integrations";
 import { sendMessage } from "@/lib/messaging";
+import { HelcimApiError, HelcimNotConfiguredError, listTerminalDevices, testHelcimConnection } from "@/lib/helcim/client";
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string };
 
@@ -53,6 +54,9 @@ const credentialsInput = z.object({
   ),
   resendApiKey: shaped(200, /^re_/, 'Resend API key must start with "re_".'),
   emailFrom: optional(200),
+  helcimApiToken: shaped(300, /^\S{20,300}$/, "The Helcim API token looks too short — copy it again from Helcim → Integrations → API Access."),
+  helcimWebhookVerifierToken: optional(300),
+  helcimTerminalDeviceCode: shaped(4, /^[A-Za-z0-9]{1,4}$/, "The terminal device code is up to four letters or digits."),
 });
 
 const CREDENTIAL_KEYS = [
@@ -61,6 +65,9 @@ const CREDENTIAL_KEYS = [
   "twilioFromNumber",
   "resendApiKey",
   "emailFrom",
+  "helcimApiToken",
+  "helcimWebhookVerifierToken",
+  "helcimTerminalDeviceCode",
 ] as const satisfies readonly IntegrationKey[];
 
 export async function saveIntegrationCredentialsAction(raw: unknown): Promise<ActionResult> {
@@ -171,5 +178,26 @@ export async function sendTestMessageAction(raw: unknown): Promise<ActionResult>
     if (error instanceof AuthError) return { ok: false, error: "Not allowed" };
     console.error("[integrations] test send failed");
     return { ok: false, error: "Could not send the test message." };
+  }
+}
+
+/** Calls Helcim with the saved token and lists the terminals it can see. */
+export async function testHelcimAction(): Promise<ActionResult> {
+  try {
+    await requireStaff("manage_integrations");
+    const connected = await testHelcimConnection();
+    if (!connected) return { ok: false, error: "Helcim answered, but did not confirm the connection." };
+    const devices = await listTerminalDevices().catch(() => []);
+    return {
+      ok: true,
+      message: devices.length
+        ? `Connected to Helcim. Terminals in API mode: ${devices.map((d) => d.code).join(", ")}.`
+        : "Connected to Helcim. No Smart Terminal in API mode was found.",
+    };
+  } catch (error) {
+    if (error instanceof AuthError) return { ok: false, error: "Not allowed" };
+    if (error instanceof HelcimNotConfiguredError) return { ok: false, error: "Save the Helcim API token first." };
+    if (error instanceof HelcimApiError) return { ok: false, error: `Helcim refused the token: ${error.message}` };
+    return { ok: false, error: "Could not reach Helcim." };
   }
 }

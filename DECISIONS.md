@@ -1549,3 +1549,82 @@ no-show, or checked in again properly.
   rows in `before`.
 - **Same permission as check-in** (`work_jobs`), since whoever can make the
   mistake should be able to fix it.
+
+## 44. Helcim replaces Stripe; memberships bill from our own cron
+
+The shop already takes cards on a Helcim terminal, and the owners wanted online
+payments, fleet invoice payment, the terminal button and monthly memberships on
+the same processor. Stripe had been wired in but never used against the owner's
+account, and it was removed rather than kept as a second path.
+
+- **Helcim's API is the only witness.** HelcimPay.js runs Helcim's card form
+  over our page, so card numbers never reach us. What the browser reports back
+  is a hint: the server re-reads the transaction from Helcim and matches it to
+  the checkout before the ledger moves. Each checkout sends Helcim our own
+  reference as its invoice number, which is what makes a payment findable
+  after a browser closes or a webhook is lost. A hash-verified response, or the
+  answer to our own charge call, is accepted even if Helcim does not echo that
+  reference. Otherwise a format difference could leave real money unrecorded.
+- **One finalizer, three ways in.** The browser's confirmation, the
+  `cardTransaction` webhook and the hourly reconciliation all call the same
+  locked `finalizeCheckout`. Whichever arrives first records the payment, and
+  the rest are no-ops. A payment Helcim reports after its checkout was closed
+  is still recorded — money is never turned away. Staff see the result in the
+  needs-attention queue as an overpaid invoice.
+- **The webhook URL avoids the word "helcim"** (`/api/webhooks/card-payments`),
+  because Helcim refuses to save a URL containing it.
+- **Every membership month is an invoice with HST.** Memberships, upgrades and
+  the Winter Pass are sold through ordinary `sent` invoices, so the invoice
+  stays the one tax document and #18's rule applies unchanged. A card keeps
+  the tax, and a pass sold for cash at the counter does not.
+  `recalculateInvoiceStatus` calls `settlePaidInvoice` when an invoice reaches
+  `paid`. That is what issues the pass or starts the month, whichever way the
+  money arrived.
+- **We charge the saved card ourselves, from the cron tick, instead of using
+  Helcim's Recurring API.** The owners' rules need three things:
+  - the difference is charged the moment a member upgrades;
+  - every member moves to a new plan when the season turns;
+  - each charge lands as an invoice we raised first.
+
+  All three are simple when we run the schedule, and unclear in Helcim's
+  subscription API. The costs:
+  - we retry declined charges ourselves (3/5/7 days, editable);
+  - billing depends on the cron, which has failed for weeks before.
+
+  So billing is written to catch up: a month is due whenever the paid one has
+  ended. The unique (membership, period start) index makes a month impossible
+  to bill twice. Admin shows the last run, and the needs-attention queue flags
+  it after three hours of silence.
+- **Never retry blind.** Helcim forgets idempotency keys after five minutes. A
+  charge whose answer was lost stays open, and before anything charges that
+  month again it asks Helcim, by reference, whether it already went through.
+  Card refunds follow the same rule.
+- **Benefits are spent in the database, not in the UI.**
+  `membership_redemptions` is unique per (period, benefit) and pass washes per
+  (pass, wash number), among rows that have not been voided. A booking spends
+  its benefit inside its own transaction, so two tabs racing for the month's
+  wash produce one booking. Cancelling the visit voids the redemption.
+- **One car per membership** is the partial unique index on `memberships`.
+- **Member discounts compete; they do not stack.** The member allocation is one
+  more source in `bestOfAllocations`, per line. Owner's answer, 2026-10-08:
+  - Club 15%, Complete 20%;
+  - on detailing packages #1–#3, and on add-ons booked with one of them;
+  - never on coatings, PPF, tint or dash cams;
+  - the best single offer wins.
+- **Accounts sign in by a code, and a session belongs to a proved contact.**
+  #14 forbids looking anyone up by phone on the public site. Nothing is
+  shown until the visitor proves they receive messages at that address, and
+  then every customer record carrying it is theirs (the CRM has duplicates).
+- **The public booking wizard stays anonymous.** Member washes and member
+  pricing are booked from `/account`, where the shop knows who is asking, or
+  applied at the counter by staff with the car in front of them.
+- **Fleet invoice emails link the workspace, and do not revoke older links.**
+  Last month's email must keep working when this month's goes out. "Issue &
+  send portal link" on the customer page still revokes every earlier link, and
+  is how staff shut one off.
+
+**Not decided here:** whether a Winter Pass is refundable. Terms say only that
+it is prepaid and that unused washes expire with the season.
+**Revisit when:** Helcim's subscription API demonstrably supports changing a
+subscription's plan and amount — then billing could move to it, with the cron
+kept as the reconciler.

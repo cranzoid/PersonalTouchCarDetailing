@@ -153,6 +153,8 @@ export type BookingResult =
       totalLabel: string;
       depositLabel: string | null;
       depositUrl: string | null;
+      /** Optional prepayment link for a booking that needs no deposit. */
+      payAheadUrl: string | null;
       confirmationDelivery: Array<"email" | "sms">;
     }
   | {
@@ -236,7 +238,7 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
     }
     // Validate external-link configuration before committing a booking that
     // requires online confirmation, avoiding an orphaned unpaid reservation.
-    const baseUrl = pricing.depositRequiredCents > 0 ? getAppBaseUrl() : null;
+    const baseUrl = pricing.totalCents > 0 ? getAppBaseUrl() : null;
     const result = await createAppointment({
       customer: input.customer,
       vehicle: input.vehicle,
@@ -274,6 +276,10 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
     });
 
     let depositUrl: string | null = null;
+    const payAheadUrl =
+      pricing.depositRequiredCents <= 0 && result.depositAccessToken && baseUrl
+        ? `${baseUrl}/portal/deposits/${result.depositAccessToken}`
+        : null;
     let delivery: Array<"email" | "sms"> = [];
     try {
       if (pricing.depositRequiredCents > 0) {
@@ -321,6 +327,7 @@ export async function submitBookingAction(raw: unknown): Promise<BookingResult> 
       depositLabel:
         pricing.depositRequiredCents > 0 ? formatCents(pricing.depositRequiredCents) : null,
       depositUrl,
+      payAheadUrl,
       confirmationDelivery: delivery,
     };
   } catch (err) {

@@ -19,6 +19,9 @@ describe("PAYMENT_METHOD_TAXABLE", () => {
       cash: false,
       etransfer: false,
       card_terminal: true,
+      // Helcim online and the Smart Terminal button are card, so taxed.
+      helcim: true,
+      helcim_terminal: true,
       stripe: true,
       cheque: true,
     });

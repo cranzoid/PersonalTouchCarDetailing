@@ -18,18 +18,24 @@ const GOOGLE_TAG_IMG_SRC =
   "https://www.googletagmanager.com https://*.google-analytics.com https://www.google.com https://*.g.doubleclick.net";
 const GOOGLE_TAG_FRAME_SRC = "https://www.googletagmanager.com";
 
+// HelcimPay.js: start.js is served from secure.helcim.app and renders the card
+// form in an iframe from the same host. The form's own requests run inside
+// that iframe under Helcim's policy, not ours; connect/img cover what start.js
+// itself loads on our page.
+const HELCIM_SRC = "https://secure.helcim.app https://*.helcim.app";
+
 const scriptPolicy = process.env.NODE_ENV === "production"
-  ? `script-src 'self' 'unsafe-inline' ${META_PIXEL_SCRIPT_SRC} ${GOOGLE_TAG_SCRIPT_SRC}`
-  : `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${META_PIXEL_SCRIPT_SRC} ${GOOGLE_TAG_SCRIPT_SRC}`;
+  ? `script-src 'self' 'unsafe-inline' ${META_PIXEL_SCRIPT_SRC} ${GOOGLE_TAG_SCRIPT_SRC} ${HELCIM_SRC}`
+  : `script-src 'self' 'unsafe-inline' 'unsafe-eval' ${META_PIXEL_SCRIPT_SRC} ${GOOGLE_TAG_SCRIPT_SRC} ${HELCIM_SRC}`;
 const contentSecurityPolicy = [
   "default-src 'self'",
   scriptPolicy,
   "style-src 'self' 'unsafe-inline'",
-  `img-src 'self' data: blob: ${META_PIXEL_IMG_SRC} ${GOOGLE_TAG_IMG_SRC}`,
+  `img-src 'self' data: blob: ${META_PIXEL_IMG_SRC} ${GOOGLE_TAG_IMG_SRC} ${HELCIM_SRC}`,
   "font-src 'self' data:",
-  `connect-src 'self' ${META_PIXEL_CONNECT_SRC} ${GOOGLE_TAG_CONNECT_SRC}`,
+  `connect-src 'self' ${META_PIXEL_CONNECT_SRC} ${GOOGLE_TAG_CONNECT_SRC} ${HELCIM_SRC}`,
   "media-src 'self'",
-  `frame-src 'self' ${GOOGLE_TAG_FRAME_SRC}`,
+  `frame-src 'self' ${GOOGLE_TAG_FRAME_SRC} ${HELCIM_SRC}`,
   "object-src 'none'",
   "base-uri 'self'",
   "form-action 'self'",

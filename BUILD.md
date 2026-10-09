@@ -53,7 +53,7 @@ requiring confirmation". Placeholder copy in the public site must be neutral
 | Validation | Zod at every untrusted boundary (forms, route handlers, webhooks) | |
 | Auth (staff) | Database-backed sessions: random 256-bit token in httpOnly/secure/SameSite=Lax cookie → `staff_sessions` table; passwords hashed with bcryptjs (cost 12) | Revocable, auditable, no external dependency. |
 | Auth (customers) | No accounts required. Secure single-purpose token links (estimate approval, invoice payment, portal access) stored hashed in `access_tokens` with purpose, expiry, and usage audit. A future password-based portal can layer on top. |
-| Payments | Provider abstraction in `src/lib/payments/` shaped around Stripe Checkout. Development can use a `FakePaymentProvider`; production refuses fake checkout and requires Stripe configuration. **No live keys in repo.** Webhook routes verify signatures before trusting events. |
+| Payments | Helcim (since 2026-10-08, replacing Stripe): HelcimPay.js on our pages, the Smart Terminal at the counter, and saved cards for memberships, all through the checkout engine in `src/lib/payments/`. **No live keys in repo.** Webhooks are verified, and every payment is confirmed against Helcim's API before the ledger moves. See DECISIONS.md #40. |
 | Email/SMS | Provider abstraction in `src/lib/messaging/` (development transport records delivery attempts in `communications`; production uses Resend/Twilio and records missing configuration as failure rather than simulated success). |
 | Tests | Vitest. Unit tests for pricing/availability/state machines; DB integration tests against `ptcd_test` database (each test file runs in a transaction-per-test or truncates). |
 | IDs | Prefixed random IDs (`cus_…`, `veh_…`, `apt_…`, `job_…`, `est_…`, `inv_…`) generated in `src/lib/id.ts`. Human-scannable in logs and URLs. |
@@ -166,7 +166,7 @@ All tables have `id` (text, prefixed), `created_at`, `updated_at`. Soft-delete
 ### Money
 - **invoices** — number (sequential via `invoice_counters` row lock), customer_id, vehicle_id, job_id, status (`draft|sent|partially_paid|paid|overdue|cancelled|refunded`), line items table, subtotal/discount/tax(with rate snapshot)/total/deposit_applied/balance cents, due_at, pdf ref, cancelled (by/reason, audited — **never deleted**).
 - **invoice_line_items**
-- **payments** — invoice_id, provider (`fake|stripe|cash|etransfer|card_terminal`), provider_ref, **idempotency_key (unique)**, amount_cents, kind (`deposit|payment|refund`), status (`pending|succeeded|failed`), received_at. Webhook events recorded in **webhook_events** (provider, event_id unique, payload, processed_at) → duplicate provider events are no-ops.
+- **payments** — invoice_id, provider (`helcim|helcim_terminal|cash|cheque|etransfer|card_terminal`, plus historical `stripe|fake`), provider_ref, **idempotency_key (unique)**, amount_cents, kind (`deposit|payment|refund`), status (`pending|succeeded|failed`), received_at. Webhook events recorded in **webhook_events** (provider, event_id unique, payload, processed_at) → duplicate provider events are no-ops.
 - **tax snapshot** — every estimate/invoice stores the tax rate + registration label used at issue time; changing settings never rewrites history.
 
 ### Communications

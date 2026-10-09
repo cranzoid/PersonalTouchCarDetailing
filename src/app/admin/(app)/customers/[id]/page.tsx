@@ -9,12 +9,13 @@ import { getSettings } from "@/lib/settings";
 import { CustomerActionPanels } from "./customer-actions";
 import { VehicleList } from "./vehicle-list";
 import { requirePageStaff } from "@/lib/auth/page";
+import { roleHas } from "@/lib/auth/permissions";
 import { summarizeRevenue } from "@/lib/reporting";
 
 export const dynamic = "force-dynamic";
 
 export default async function CustomerDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  await requirePageStaff("manage_customers");
+  const staff = await requirePageStaff("manage_customers");
   const { id } = await params;
   const settings = await getSettings();
   const rows = await db().select().from(schema.customers).where(eq(schema.customers.id, id)).limit(1);
@@ -22,6 +23,12 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
   if (!customer) notFound();
 
   const vehicles = await db().select().from(schema.vehicles).where(eq(schema.vehicles.customerId, id));
+  const memberships = await db()
+    .select({ membership: schema.memberships, plan: schema.membershipPlans })
+    .from(schema.memberships)
+    .innerJoin(schema.membershipPlans, eq(schema.membershipPlans.id, schema.memberships.planId))
+    .where(eq(schema.memberships.customerId, id));
+  const passes = await db().select().from(schema.winterPasses).where(eq(schema.winterPasses.customerId, id));
   const appointments = await db()
     .select()
     .from(schema.appointments)
@@ -75,7 +82,34 @@ export default async function CustomerDetailPage({ params }: { params: Promise<{
         anonymizedAt: customer.anonymizedAt?.toISOString() ?? null,
       }} />
 
-      <VehicleList customerId={customer.id} vehicles={vehicles} />
+      <VehicleList customerId={customer.id} vehicles={vehicles} canSellPass={roleHas(staff.role, "record_payments")} />
+
+      {(memberships.length > 0 || passes.length > 0) && (
+        <section className="mt-8">
+          <h2 className="text-lg font-semibold text-white">Memberships &amp; passes</h2>
+          <div className="mt-3 space-y-2">
+            {memberships.map(({ membership, plan }) => (
+              <Link
+                key={membership.id}
+                href={`/admin/memberships/${membership.id}`}
+                className="flex items-center justify-between rounded-xl border border-ink-800 p-4 text-sm hover:border-accent-500/50"
+              >
+                <span className="text-white">{plan.name}</span>
+                <StatusBadge status={membership.status} />
+              </Link>
+            ))}
+            {passes.map((pass) => (
+              <div key={pass.id} className="flex items-center justify-between rounded-xl border border-ink-800 p-4 text-sm">
+                <span className="text-white">Winter Pass · {pass.washesTotal} washes</span>
+                <span className="flex items-center gap-3">
+                  {pass.saleInvoiceId && <Link href={`/admin/invoices/${pass.saleInvoiceId}`} className="text-accent-300 hover:underline">Invoice</Link>}
+                  <StatusBadge status={pass.status} />
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold text-white">Appointments ({appointments.length})</h2>

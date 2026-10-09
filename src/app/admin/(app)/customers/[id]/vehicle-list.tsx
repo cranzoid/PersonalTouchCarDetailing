@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { removeCustomerVehicleAction } from "../actions";
+import { sellWinterPassAction } from "../../memberships/actions";
 
 export type VehicleListItem = {
   id: string;
@@ -22,12 +23,15 @@ export function VehicleList({
   title = "Vehicles",
   emptyText = "No vehicles on file.",
   columns = "sm:grid-cols-2",
+  canSellPass = false,
 }: {
   customerId: string;
   vehicles: VehicleListItem[];
   title?: string;
   emptyText?: string;
   columns?: string;
+  /** Shows "Sell Winter Pass" on each car (staff who can record payments). */
+  canSellPass?: boolean;
 }) {
   const router = useRouter();
   const [confirmId, setConfirmId] = useState<string | null>(null);
@@ -35,6 +39,15 @@ export function VehicleList({
   const [hiddenIds, setHiddenIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const visible = vehicles.filter((vehicle) => !hiddenIds.includes(vehicle.id));
+
+  async function sellPass(vehicle: VehicleListItem) {
+    setBusyId(vehicle.id);
+    setError(null);
+    const result = await sellWinterPassAction({ customerId, vehicleId: vehicle.id });
+    setBusyId(null);
+    if (!result.ok) return setError(result.error);
+    if ("invoiceId" in result && result.invoiceId) router.push(`/admin/invoices/${result.invoiceId}`);
+  }
 
   async function remove(vehicle: VehicleListItem) {
     setBusyId(vehicle.id);
@@ -79,6 +92,16 @@ export function VehicleList({
                   </button>
                 )}
               </div>
+              {canSellPass && !confirming && (
+                <button
+                  type="button"
+                  onClick={() => void sellPass(vehicle)}
+                  disabled={busyId === vehicle.id}
+                  className="mt-3 rounded-lg border border-ink-600 px-3 py-1.5 text-xs font-semibold text-ink-200 hover:bg-ink-800 disabled:opacity-50"
+                >
+                  {busyId === vehicle.id ? "Creating…" : "Sell Winter Pass"}
+                </button>
+              )}
               {confirming && (
                 <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3">
                   <p className="text-xs font-semibold text-red-800">Remove {label}?</p>

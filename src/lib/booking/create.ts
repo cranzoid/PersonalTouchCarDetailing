@@ -23,6 +23,7 @@ import {
   type DayContext,
   type Interval,
 } from "./availability";
+import { MembershipError, reserveMembershipBenefit, reservePassWash } from "@/lib/memberships/service";
 
 export class BookingError extends Error {}
 
@@ -392,6 +393,34 @@ export async function createAppointmentInTransaction(
       throw new OfferChangedError("spent");
     }
 
+    // Spend any prepaid entitlement the price used — a member's monthly wash,
+    // a Winter Pass wash — against THIS booking, inside its transaction. The
+    // redemption's unique index is what refuses a second booking racing for
+    // the same month's wash; losing that race rolls the booking back.
+    for (const entitlement of req.pricing.entitlements ?? []) {
+      try {
+        if (entitlement.type === "membership_benefit") {
+          await reserveMembershipBenefit(tx, {
+            membershipId: entitlement.membershipId,
+            benefit: entitlement.benefit,
+            appointmentId,
+            staffId: actor.type === "staff" ? actor.id : null,
+            at: new Date(),
+          });
+        } else {
+          await reservePassWash(tx, {
+            passId: entitlement.passId,
+            appointmentId,
+            staffId: actor.type === "staff" ? actor.id : null,
+            at: new Date(window.start),
+          });
+        }
+      } catch (error) {
+        if (error instanceof MembershipError) throw new BookingError(error.message);
+        throw error;
+      }
+    }
+
     await audit(tx, {
       actorType: actor.type,
       actorId: actor.type === "staff" ? actor.id : undefined,
@@ -415,12 +444,15 @@ export async function createAppointmentInTransaction(
       },
     });
 
+    // Every paid customer booking gets a secure payment link: required for a
+    // deposit, optional ("pay ahead") otherwise. A deposit link keeps its 48
+    // hours; a pay-ahead link lasts until the day after the visit.
     const depositAccessToken =
-      actor.type === "customer" && req.pricing.depositRequiredCents > 0
+      actor.type === "customer" && req.pricing.totalCents > 0
         ? await createAppointmentDepositAccessToken(tx, {
             appointmentId,
             customerId,
-            expiresAt: new Date(Date.now() + 48 * 60 * 60_000),
+            expiresAt: new Date(Math.max(Date.now() + 48 * 60 * 60_000, window.start + 24 * 60 * 60_000)),
           })
         : undefined;
 

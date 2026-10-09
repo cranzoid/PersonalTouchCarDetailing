@@ -44,8 +44,10 @@ export default function PrivacyPage() {
         <section>
           <h2 className="font-display text-2xl text-[#0B2A4A]">Payment information</h2>
           <p className="mt-2">
-            We do not store credit card numbers. Online payments are processed by a payment
-            provider; we retain only transaction references and receipts.
+            We do not store credit card numbers. Online and in-store card payments are processed by
+            Helcim, our payment processor: you enter your card on Helcim&apos;s secure form, and
+            when you save a card for a membership it is held in Helcim&apos;s vault. We retain only
+            transaction references, the card type and last four digits, and receipts.
           </p>
         </section>
         <section>

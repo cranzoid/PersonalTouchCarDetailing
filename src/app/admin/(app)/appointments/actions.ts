@@ -30,6 +30,8 @@ import { notifyStaffOfNewAppointment } from "@/lib/staff-notifications";
 import { priceBooking, PricingError } from "@/lib/pricing";
 import { resolveActivePromotion } from "@/lib/promotions";
 import { formatInZone } from "@/lib/tz";
+import { voidEntitlementsForAppointment } from "@/lib/memberships/service";
+import { applyMemberBenefitsToAppointment } from "@/lib/memberships/counter";
 
 /** Legal appointment status transitions (staff-driven). */
 const TRANSITIONS: Partial<Record<AppointmentStatus, AppointmentStatus[]>> = {
@@ -553,6 +555,12 @@ export async function transitionAppointmentAction(raw: unknown): Promise<ActionR
         })
         .where(eq(schema.appointments.id, appointmentId));
 
+      // A cancelled visit gives back the member's wash or the pass wash it
+      // held. A no-show does not: the slot was kept for them.
+      if (to === "cancelled") {
+        await voidEntitlementsForAppointment(tx, appointmentId, "Booking cancelled");
+      }
+
       await audit(tx, {
         actorType: "staff",
         actorId: staff.id,
@@ -1067,5 +1075,35 @@ export async function refundAppointmentDepositAction(raw: unknown): Promise<Acti
     if (err instanceof AuthError) return { ok: false, error: err.message };
     console.error("refundAppointmentDepositAction failed", err);
     return { ok: false, error: "Something went wrong refunding the deposit" };
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Memberships and Winter Pass at the counter                          */
+/* ------------------------------------------------------------------ */
+
+export async function applyMemberBenefitsAction(raw: unknown): Promise<ActionResult> {
+  try {
+    const staff = await requireStaff("manage_bookings");
+    const parsed = z
+      .object({
+        appointmentId: z.string().min(1),
+        benefits: z.array(z.enum(["wash", "interior"])).max(2),
+        passWash: z.boolean(),
+      })
+      .safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Invalid request" };
+    const result = await applyMemberBenefitsToAppointment({
+      appointmentId: parsed.data.appointmentId,
+      staffId: staff.id,
+      spendBenefits: parsed.data.benefits,
+      spendPassWash: parsed.data.passWash,
+    });
+    revalidatePath(`/admin/appointments/${parsed.data.appointmentId}`);
+    return result.ok ? { ok: true } : result;
+  } catch (err) {
+    if (err instanceof AuthError) return { ok: false, error: err.message };
+    console.error("applyMemberBenefitsAction failed", err);
+    return { ok: false, error: "Something went wrong" };
   }
 }

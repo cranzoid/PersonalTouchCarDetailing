@@ -13,6 +13,7 @@ import {
   setInvoiceTaxExemptAction,
   setInvoiceTipAction,
 } from "../actions";
+import { TerminalCollect } from "./terminal-collect";
 
 const PAYMENT_METHODS = [
   { value: "cash", label: "Cash" },
@@ -41,8 +42,9 @@ export function InvoiceActions({
   taxSettled,
   currency,
   netPaidCents,
-  stripeRefundableCents,
+  cardRefundableCents,
   manualRefundableCents,
+  terminalReady,
   taxExempt,
   taxLabel,
   tipCents,
@@ -67,8 +69,10 @@ export function InvoiceActions({
   taxSettled: boolean;
   currency: string;
   netPaidCents: number;
-  stripeRefundableCents: number;
+  cardRefundableCents: number;
   manualRefundableCents: number;
+  /** A Smart Terminal device code is configured, so "Collect on terminal" can work. */
+  terminalReady: boolean;
   taxExempt: boolean;
   taxLabel: string;
   /** Gratuity currently on the invoice. */
@@ -102,8 +106,8 @@ export function InvoiceActions({
   const [refundAmount, setRefundAmount] = useState("");
   const [refundReason, setRefundReason] = useState("");
   const [refundMessage, setRefundMessage] = useState<string | null>(null);
-  const [refundMethod, setRefundMethod] = useState<"stripe" | ManualPaymentMethod>(
-    stripeRefundableCents > 0 ? "stripe" : "cash",
+  const [refundMethod, setRefundMethod] = useState<"card" | ManualPaymentMethod>(
+    cardRefundableCents > 0 ? "card" : "cash",
   );
   const [refundIdempotencyKey, setRefundIdempotencyKey] = useState(() => newIdempotencyKey("refund"));
   const [cancelReason, setCancelReason] = useState("");
@@ -114,7 +118,7 @@ export function InvoiceActions({
 
   const canSend = ["draft", "sent", "partially_paid", "overdue"].includes(status);
   const canTakePayment = balanceCents > 0 && !["cancelled", "refunded"].includes(status);
-  const canRefund = netPaidCents > 0 && stripeRefundableCents + manualRefundableCents > 0;
+  const canRefund = netPaidCents > 0 && cardRefundableCents + manualRefundableCents > 0;
   const canCancel = ["draft", "sent", "overdue"].includes(status) && netPaidCents === 0;
   // Totals are an immutable snapshot once money has moved against the invoice.
   const canChangeTax = ["draft", "sent", "overdue"].includes(status) && netPaidCents === 0;
@@ -216,8 +220,10 @@ export function InvoiceActions({
     if (res.ok) {
       setRefundMessage(
         res.status === "pending"
-          ? "Stripe accepted the request and is still processing it. The invoice will update after confirmation."
-          : "Refund recorded successfully.",
+          ? "Helcim accepted the request and is still processing it. The invoice will update after confirmation."
+          : refundMethod === "card"
+            ? "Refunded to the card through Helcim."
+            : "Refund recorded successfully.",
       );
       setRefundAmount("");
       setRefundReason("");
@@ -390,10 +396,16 @@ export function InvoiceActions({
         </div>
       )}
 
+      {canTakePayment && terminalReady && (
+        <TerminalCollect invoiceId={invoiceId} balanceCents={balanceCents} currency={currency} disabled={busy} />
+      )}
+
       {canTakePayment && (
         <div className="border-t border-ink-800 pt-5">
           <p className="text-sm font-medium text-white">Record a manual payment</p>
-          <p className="mt-1 text-xs text-ink-500">Cash, e-transfer or a card terminal handled outside Stripe.</p>
+          <p className="mt-1 text-xs text-ink-500">
+            Cash, cheque, e-transfer — or a card payment taken on the terminal by hand rather than with the button above.
+          </p>
           {!taxSettled && untaxedBalanceCents !== balanceCents && (
             <p className={`mt-2 text-xs ${stripsTax ? "text-amber-300" : "text-ink-500"}`}>
               {stripsTax
@@ -516,7 +528,7 @@ export function InvoiceActions({
         <div className="border-t border-ink-800 pt-5">
           <p className="text-sm font-medium text-white">Issue a refund</p>
           <p className="mt-1 text-xs text-ink-500">
-            Stripe refunds are issued here. Select a manual route only after returning the funds outside this app.
+            Card refunds go back to the customer&apos;s card through Helcim. Select a manual route only after returning the funds outside this app.
           </p>
           <div className="mt-3 flex flex-wrap items-end gap-2">
             <label className="block text-xs text-ink-400">
@@ -526,8 +538,8 @@ export function InvoiceActions({
                 value={refundMethod}
                 onChange={(event) => setRefundMethod(event.target.value as typeof refundMethod)}
               >
-                {stripeRefundableCents > 0 && (
-                  <option value="stripe">Stripe ({(stripeRefundableCents / 100).toFixed(2)} available)</option>
+                {cardRefundableCents > 0 && (
+                  <option value="card">Refund to card ({(cardRefundableCents / 100).toFixed(2)} available)</option>
                 )}
                 {manualRefundableCents > 0 && MANUAL_REFUND_METHODS.map((refundMethodOption) => (
                   <option key={refundMethodOption.value} value={refundMethodOption.value}>

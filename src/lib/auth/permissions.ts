@@ -37,6 +37,12 @@ export const PERMISSIONS = {
    * their own hours would need its own own-row-only gate, which is not built.
    */
   manage_timesheets: ["owner", "manager"],
+  /**
+   * Memberships and Winter Passes: plans and prices, cancelling for someone,
+   * gifting a month. Using a member's benefit at the counter is not this — it
+   * is part of taking the booking, under manage_bookings.
+   */
+  manage_memberships: ["owner", "manager"],
   view_private_files: ["owner", "manager", "reception", "technician"],
   view_dashboard: ["owner", "manager", "reception", "technician", "accountant"],
 } as const satisfies Record<string, readonly StaffRole[]>;

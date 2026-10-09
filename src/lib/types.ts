@@ -54,8 +54,9 @@ export function isQuoteOnlyVehicleCategory(category: string): boolean {
  * — these values were previously repeated inline in five places, so adding one
  * meant finding all of them.
  *
- * `payments.provider` also accepts "stripe" (online checkout) and "fake"
- * (development), neither of which staff can select.
+ * `payments.provider` also accepts "helcim" (online checkout or a card on
+ * file) and "helcim_terminal" (the Smart Terminal button), neither of which
+ * staff select by hand. "stripe" and "fake" appear only on historical rows.
  */
 /**
  * The percentages the tip control offers as one-tap buttons, in basis points.
@@ -84,6 +85,9 @@ export const QUOTED_PAYMENT_METHODS = [
   "cash",
   "etransfer",
   "card_terminal",
+  "helcim",
+  "helcim_terminal",
+  /** Historical: Stripe online checkout, removed 2026-10-08. */
   "stripe",
   "cheque",
 ] as const;
@@ -93,7 +97,9 @@ export const QUOTED_PAYMENT_METHOD_LABELS: Record<QuotedPaymentMethod, string> =
   cash: "Cash",
   etransfer: "Interac e-transfer",
   card_terminal: "Credit / debit card",
-  stripe: "Card online",
+  helcim: "Card online",
+  helcim_terminal: "Card (Smart Terminal)",
+  stripe: "Card online (Stripe)",
   cheque: "Cheque",
 };
 
@@ -116,6 +122,8 @@ export const PAYMENT_METHOD_TAXABLE: Record<QuotedPaymentMethod, boolean> = {
   cash: false,
   etransfer: false,
   card_terminal: true,
+  helcim: true,
+  helcim_terminal: true,
   stripe: true,
   cheque: true,
 };

@@ -8,6 +8,7 @@ import { getSettings } from "@/lib/settings";
 import { sendMessageTemplate } from "@/lib/messaging";
 import { parseCcList } from "@/lib/email";
 import { audit } from "@/lib/audit";
+import { settlePaidInvoice } from "@/lib/memberships/settle";
 import {
   PAYMENT_METHOD_TAXABLE,
   QUOTED_PAYMENT_METHOD_LABELS,
@@ -400,7 +401,7 @@ export function deriveInvoiceStatus(input: {
  * payments never resurrect a cancelled invoice automatically.
  */
 export async function recalculateInvoiceStatus(
-  tx: Pick<Db, "select" | "update">,
+  tx: Pick<Db, "select" | "update" | "insert">,
   invoiceId: string,
 ): Promise<{ status: InvoiceStatus; balanceCents: number }> {
   const rows = await tx.select().from(schema.invoices).where(eq(schema.invoices.id, invoiceId)).for("update");
@@ -426,6 +427,12 @@ export async function recalculateInvoiceStatus(
       updatedAt: new Date(),
     })
     .where(eq(schema.invoices.id, invoiceId));
+
+  // Reaching `paid` is the moment a Winter Pass is issued or a membership
+  // month starts, whichever route the money took — see settlePaidInvoice.
+  if (status === "paid" && invoice.status !== "paid") {
+    await settlePaidInvoice(tx, invoiceId);
+  }
 
   return { status, balanceCents: summary.balanceCents };
 }
@@ -491,8 +498,8 @@ export async function syncOverdueInvoices(): Promise<string[]> {
 
 /**
  * Sends the "receipt" template for a payment through its configured channel. Shared by the manual-payment
- * admin action and the online-checkout finalization paths (fake dev
- * provider + Stripe webhook) so every successful payment sends the same
+ * admin action and the Helcim checkout finalizer (browser, webhook or
+ * reconciliation) so every successful payment sends the same
  * receipt regardless of payment channel. Safely no-ops if the active
  * template's configured destination is unavailable — payment finalization must not
  * fail because a receipt couldn't be sent.

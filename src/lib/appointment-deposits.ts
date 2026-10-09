@@ -143,6 +143,7 @@ export async function sendAppointmentDepositRequest(
 export async function sendAppointmentDepositConfirmation(
   appointmentId: string,
   amountCents: number,
+  options: { prepaid?: boolean } = {},
 ): Promise<void> {
   const context = await loadDepositMessageContext(appointmentId);
   if (!context) return;
@@ -162,13 +163,22 @@ export async function sendAppointmentDepositConfirmation(
     channel: destination.channel,
     kind: "confirmation",
     to: destination.to,
-    subject: destination.channel === "email" ? `Deposit received — booking confirmed` : undefined,
+    subject:
+      destination.channel === "email"
+        ? options.prepaid
+          ? "Payment received — you're all set"
+          : `Deposit received — booking confirmed`
+        : undefined,
     body: [
       `Hi ${customer.firstName},`,
       "",
-      `We received your deposit of ${formatCents(amountCents, settings.currency)}. Your appointment is now confirmed for ${when}.`,
+      options.prepaid
+        ? `We received your payment of ${formatCents(amountCents, settings.currency)} for your appointment on ${when}.`
+        : `We received your deposit of ${formatCents(amountCents, settings.currency)}. Your appointment is now confirmed for ${when}.`,
       `Vehicle: ${[vehicle?.year, vehicle?.make, vehicle?.model].filter(Boolean).join(" ") || "Vehicle on file"}.`,
-      `Estimated balance after deposit: ${formatCents(balance, settings.currency)}.`,
+      balance > 0
+        ? `Estimated balance remaining: ${formatCents(balance, settings.currency)}.`
+        : "Nothing more is due unless the work changes at the shop.",
       "",
       `Payment reference: ${appointment.id}`,
       `— ${settings.businessName}`,

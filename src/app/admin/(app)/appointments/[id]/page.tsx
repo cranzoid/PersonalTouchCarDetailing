@@ -16,6 +16,9 @@ import { DepositRefundPanel } from "./deposit-refund-panel";
 import { CreateInvoicePanel } from "./create-invoice-panel";
 import { VehiclePanel, type AppointmentVehicle } from "./vehicle-panel";
 import { OfferRedemptionPanel } from "./offer-redemption-panel";
+import { MemberBenefitsPanel } from "./member-benefits-panel";
+import { MEMBERSHIP_BENEFITS, WINTER_PASS_SERVICE_SLUG } from "@/lib/memberships/config";
+import { getVehicleEntitlements } from "@/lib/memberships/service";
 import { formatClaimCode } from "@/lib/wash-offer";
 import { isRevisableAppointmentStatus } from "@/lib/booking/revise";
 import { VEHICLE_CATEGORIES, VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
@@ -115,6 +118,57 @@ export default async function AppointmentDetailPage({
   // visits the server had been widened to allow (DECISIONS.md §22). The action
   // re-checks under a row lock, so this is presentation, not enforcement.
   const canRevise = isRevisableAppointmentStatus(appt.status);
+  // The car's membership / Winter Pass, for the counter panel.
+  const entitlements = await getVehicleEntitlements(appt.vehicleId, appt.startsAt);
+  const bookedSlugs = new Set(
+    (
+      await db()
+        .select({ slug: schema.services.slug })
+        .from(schema.appointmentServices)
+        .innerJoin(schema.services, eq(schema.services.id, schema.appointmentServices.serviceId))
+        .where(eq(schema.appointmentServices.appointmentId, appt.id))
+    ).map((row) => row.slug),
+  );
+  const appliedHere = [
+    ...(await db()
+      .select({ benefit: schema.membershipRedemptions.benefit })
+      .from(schema.membershipRedemptions)
+      .where(and(eq(schema.membershipRedemptions.appointmentId, appt.id), isNull(schema.membershipRedemptions.voidedAt)))).map((r) =>
+      r.benefit === "interior" ? "interior clean" : "member wash",
+    ),
+    ...(await db()
+      .select({ n: schema.winterPassRedemptions.washNumber })
+      .from(schema.winterPassRedemptions)
+      .where(and(eq(schema.winterPassRedemptions.appointmentId, appt.id), isNull(schema.winterPassRedemptions.voidedAt)))).map(
+      (r) => `Winter Pass wash #${r.n}`,
+    ),
+  ];
+  const memberPanel =
+    entitlements.membership || entitlements.passes.length > 0
+      ? {
+          membership: entitlements.membership
+            ? {
+                planName: entitlements.membership.planName,
+                status: entitlements.membership.status,
+                discountPercent: entitlements.membership.discountBp / 100,
+                benefits: entitlements.membership.included.map((key) => ({
+                  key,
+                  label: MEMBERSHIP_BENEFITS[key].label,
+                  available: entitlements.membership!.available.includes(key),
+                  onBooking: bookedSlugs.has(MEMBERSHIP_BENEFITS[key].serviceSlug),
+                })),
+              }
+            : null,
+          pass: entitlements.passes[0]
+            ? {
+                washesLeft: entitlements.passes[0].washesTotal - entitlements.passes[0].washesUsed,
+                washesTotal: entitlements.passes[0].washesTotal,
+                usableNow: entitlements.passes[0].usableNow,
+                washOnBooking: bookedSlugs.has(WINTER_PASS_SERVICE_SLUG),
+              }
+            : null,
+        }
+      : null;
   // The invoice a finished visit produced, reached through its job — invoices
   // hang off `jobs`, and an appointment invoiced from this screen has the job
   // materialised for it by createInvoiceFromAppointmentAction.
@@ -208,6 +262,16 @@ export default async function AppointmentDetailPage({
           )}
         </section>
       </div>
+
+      {memberPanel && (
+        <MemberBenefitsPanel
+          appointmentId={appt.id}
+          membership={memberPanel.membership}
+          pass={memberPanel.pass}
+          applied={appliedHere}
+          canApply={canRevise && !invoice}
+        />
+      )}
 
       {offerClaim && offerClaim.status !== "void" && (
         <OfferRedemptionPanel
@@ -385,7 +449,7 @@ export default async function AppointmentDetailPage({
           refundableCents={depositRefundableCents}
           depositPaidCents={appt.depositPaidCents}
           currency={settings.currency}
-          originalMethodWasCard={depositPayments.some((p) => p.provider === "stripe")}
+          originalMethodWasCard={depositPayments.some((p) => ["helcim", "helcim_terminal", "stripe"].includes(p.provider))}
         />
       )}
 

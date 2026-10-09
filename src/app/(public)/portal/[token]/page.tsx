@@ -7,6 +7,9 @@ import { formatCents } from "@/lib/money";
 import { resolveCustomerPortalToken } from "@/lib/portal";
 import { getSettings } from "@/lib/settings";
 import { appointmentWhenLabel } from "@/lib/appointment-time";
+import { InvoicePicker } from "@/components/invoice-picker";
+import { loadPortalInvoices } from "@/lib/portal-invoices";
+import { confirmWorkspacePaymentAction, setWorkspacePayIntentAction, startWorkspacePaymentAction } from "./actions";
 import { formatInZone } from "@/lib/tz";
 
 export const metadata = { title: "Customer Portal" };
@@ -18,14 +21,14 @@ export default async function CustomerPortalPage({ params }: { params: Promise<{
   if (!resolved) notFound();
   const { customer } = resolved;
   const settings = await getSettings();
-  const [vehicles, appointments, estimates, jobs, invoices] = await Promise.all([
+  const [vehicles, appointments, estimates, jobs] = await Promise.all([
     db().select().from(schema.vehicles).where(eq(schema.vehicles.customerId, customer.id)).orderBy(desc(schema.vehicles.createdAt)),
     db().select().from(schema.appointments).where(eq(schema.appointments.customerId, customer.id)).orderBy(desc(schema.appointments.startsAt)).limit(50),
     db().select().from(schema.estimates).where(and(eq(schema.estimates.customerId, customer.id), ne(schema.estimates.status, "draft"))).orderBy(desc(schema.estimates.createdAt)).limit(50),
     db().select().from(schema.jobs).where(eq(schema.jobs.customerId, customer.id)).orderBy(desc(schema.jobs.createdAt)).limit(50),
-    db().select().from(schema.invoices).where(and(eq(schema.invoices.customerId, customer.id), ne(schema.invoices.status, "draft"))).orderBy(desc(schema.invoices.createdAt)).limit(50),
   ]);
   const vehiclesById = new Map(vehicles.map((vehicle) => [vehicle.id, vehicle]));
+  const portalInvoices = await loadPortalInvoices([customer.id], settings);
   const displayName = customer.customerType === "business" && customer.companyName
     ? customer.companyName
     : `${customer.firstName} ${customer.lastName}`;
@@ -93,15 +96,16 @@ export default async function CustomerPortalPage({ params }: { params: Promise<{
       </section>
 
       <section aria-labelledby="portal-invoices" className="mt-10">
-        <PortalHeading title="Invoices" count={invoices.length} />
-        <div className="mt-3 space-y-2">
-          {invoices.map((invoice) => (
-            <Link key={invoice.id} href={`/portal/${token}/invoices/${invoice.id}`} className="flex min-h-14 items-center justify-between rounded-2xl border border-ink-700/70 bg-ink-900/60 p-4 text-sm shadow-lg shadow-black/10 transition-colors hover:border-accent-500/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent-400">
-              <span><span className="block font-medium text-white">INV-{invoice.number}</span><span className="text-xs text-ink-500">{formatInZone(invoice.createdAt, settings.timezone, { month: "short", day: "numeric", year: "numeric" })}</span></span>
-              <span className="flex items-center gap-3"><span className="text-ink-300">{formatCents(invoice.totalCents, settings.currency)}</span><PortalStatus status={invoice.status} /></span>
-            </Link>
-          ))}
-          {invoices.length === 0 && <Empty>No invoices yet.</Empty>}
+        <PortalHeading title="Invoices" count={portalInvoices.length} />
+        <div className="mt-3">
+          <InvoicePicker
+            invoices={portalInvoices}
+            currency={settings.currency}
+            viewHref={`/portal/${token}/invoices/{id}`}
+            startPayment={startWorkspacePaymentAction.bind(null, token)}
+            confirmPayment={confirmWorkspacePaymentAction.bind(null, token)}
+            setPayIntent={setWorkspacePayIntentAction.bind(null, token)}
+          />
         </div>
       </section>
 

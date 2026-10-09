@@ -239,6 +239,13 @@
       "when": 1789231204325,
       "tag": "0033_quote_follow_ups",
       "breakpoints": true
+    },
+    {
+      "idx": 34,
+      "version": "7",
+      "when": 1789234804325,
+      "tag": "0034_helcim_memberships",
+      "breakpoints": true
     }
   ]
 }

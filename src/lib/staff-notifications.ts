@@ -254,3 +254,19 @@ export async function notifyStaffOfCustomerReply(input: {
     input.customerId ?? undefined,
   );
 }
+
+/**
+ * A one-off operational alert that needs no template of its own — a fleet
+ * customer saying a cheque is coming, say. Same recipients, same best-effort
+ * delivery as the booking alerts.
+ */
+export async function notifyStaff(input: {
+  subject: string;
+  body: string;
+  relatedType: string;
+  relatedId: string;
+  customerId?: string;
+}): Promise<StaffAlertOutcome> {
+  const settings = await getSettings();
+  return fanOut(settings, input.subject, input.body, { type: input.relatedType, id: input.relatedId }, input.customerId);
+}

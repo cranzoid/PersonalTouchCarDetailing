@@ -1,5 +1,6 @@
 import { db, schema } from "@/db";
 import type { WashOffer } from "@/lib/wash-offer";
+import { MEMBERSHIP_SETTINGS_DEFAULTS, type MembershipSettings } from "@/lib/memberships/config";
 
 /**
  * Typed business settings over the key/value businessSettings table.
@@ -72,6 +73,11 @@ export type BusinessSettings = {
    * src/lib/wash-offer.ts for why, and for how it is resolved.
    */
   washOffer: WashOffer;
+  /**
+   * Memberships and the Winter Pass. Read through `membershipSettings()` in
+   * src/lib/memberships/config.ts, which fills any field a stored value lacks.
+   */
+  memberships: MembershipSettings;
 };
 
 /**
@@ -185,6 +191,7 @@ export const SETTINGS_DEFAULTS: BusinessSettings = {
     // this in Admin to test handing the code over only once a time is booked.
     flow: "code_first",
   },
+  memberships: MEMBERSHIP_SETTINGS_DEFAULTS,
 };
 
 export async function getSettings(): Promise<BusinessSettings> {

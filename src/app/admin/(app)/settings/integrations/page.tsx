@@ -19,7 +19,7 @@ export default async function IntegrationsPage() {
     <div className="max-w-5xl">
       <h1 className="text-2xl font-bold text-white">Integrations</h1>
       <p className="mt-1 text-sm text-ink-400">
-        Credentials for the services that deliver customer messages. Values are encrypted before
+        Credentials for the services that deliver customer messages and take card payments. Values are encrypted before
         storage and are never shown again in full — only the owner can view this page, and every
         change is audited.
       </p>

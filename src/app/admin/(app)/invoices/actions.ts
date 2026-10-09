@@ -28,12 +28,17 @@ import { resolveCatalogPrices } from "@/lib/pricing";
 import { MANUAL_PAYMENT_METHODS, MAX_TIP_BP, VEHICLE_CATEGORIES, type VehicleCategory } from "@/lib/types";
 import { getAppBaseUrl } from "@/lib/urls";
 import {
-  decodeStripeRefundReference,
-  encodeStripeRefundReference,
-  finalizeStripeRefund,
-  getPaymentProvider,
+  closeCheckout,
+  decodeHelcimRefundReference,
+  encodeHelcimRefundReference,
+  executeCardRefund,
   getRefundAvailability,
+  reconcileCheckout,
+  startInvoiceTerminalCheckout,
 } from "@/lib/payments";
+import { fromHelcimAmount } from "@/lib/helcim/client";
+import { requestIp } from "@/lib/request-ip";
+import { createCustomerPortalToken } from "@/lib/portal";
 
 export type ActionResult<T = object> =
   | ({ ok: true } & T)
@@ -576,7 +581,7 @@ export async function sendInvoiceAction(
 
     const result = await db().transaction(async (tx): Promise<
       | { ok: false; error: string }
-      | { ok: true; token: string; invoice: typeof schema.invoices.$inferSelect }
+      | { ok: true; token: string; workspace: boolean; invoice: typeof schema.invoices.$inferSelect }
     > => {
       const rows = await tx.select().from(schema.invoices).where(eq(schema.invoices.id, invoiceId)).for("update");
       const invoice = rows[0];
@@ -584,11 +589,26 @@ export async function sendInvoiceAction(
       if (!["draft", "sent", "partially_paid", "overdue"].includes(invoice.status)) {
         return { ok: false, error: `A ${invoice.status.replaceAll("_", " ")} invoice cannot be sent` };
       }
-      const token = await createInvoiceAccessToken(tx, {
-        invoiceId,
-        customerId: invoice.customerId,
-        expiresAt: new Date(Date.now() + 90 * 86_400_000),
-      });
+      // A fleet account gets its whole workspace — every open and paid
+      // invoice, pay any selection at once — rather than a link to this one
+      // bill. Earlier workspace links keep working (no revoke), because each
+      // invoice email carries one and the bookkeeper may use any of them.
+      const [owner] = await tx
+        .select({ customerType: schema.customers.customerType })
+        .from(schema.customers)
+        .where(eq(schema.customers.id, invoice.customerId));
+      const workspace = owner?.customerType === "business";
+      const token = workspace
+        ? await createCustomerPortalToken(tx, {
+            customerId: invoice.customerId,
+            expiresAt: new Date(Date.now() + 180 * 86_400_000),
+            revokeExisting: false,
+          })
+        : await createInvoiceAccessToken(tx, {
+            invoiceId,
+            customerId: invoice.customerId,
+            expiresAt: new Date(Date.now() + 90 * 86_400_000),
+          });
       await tx
         .update(schema.invoices)
         .set({
@@ -610,12 +630,12 @@ export async function sendInvoiceAction(
         before: { status: invoice.status, cc: invoice.ccEmails },
         after: { status: invoice.status === "draft" ? "sent" : invoice.status, cc },
       });
-      return { ok: true, token, invoice };
+      return { ok: true, token, workspace, invoice };
     });
     if (!result.ok) return { ok: false, error: result.error };
 
     const base = getAppBaseUrl();
-    const link = `${base}/portal/invoices/${result.token}`;
+    const link = result.workspace ? `${base}/portal/${result.token}` : `${base}/portal/invoices/${result.token}`;
 
     const customer = (
       await db().select().from(schema.customers).where(eq(schema.customers.id, result.invoice.customerId)).limit(1)
@@ -819,7 +839,9 @@ export async function issueRefundAction(
         amountCents: z.number().int().min(1).max(10_000_000),
         reason: z.string().trim().min(1).max(1000),
         idempotencyKey: idempotencyKeySchema,
-        method: z.enum(["stripe", ...MANUAL_PAYMENT_METHODS]).default("cash"),
+        // "card" returns money to the card through Helcim; the rest are
+        // refunds staff hand over themselves and record here.
+        method: z.enum(["card", ...MANUAL_PAYMENT_METHODS]).default("cash"),
       })
       .safeParse(raw);
     if (!parsed.success) return { ok: false, error: "A reason and amount are required" };
@@ -829,19 +851,12 @@ export async function issueRefundAction(
     const prepared = await db().transaction(async (tx): Promise<
       | { ok: false; error: string }
       | { ok: true; status: "succeeded"; route: "manual" }
-      | {
-          ok: true;
-          status: "pending";
-          route: "stripe";
-          refundPaymentId: string;
-          amountCents: number;
-          checkoutSessionId: string;
-          invoiceId: string;
-        }
+      | { ok: true; status: "pending"; route: "card"; refundPaymentId: string }
     > => {
       const rows = await tx.select().from(schema.invoices).where(eq(schema.invoices.id, input.invoiceId)).for("update");
       const invoice = rows[0];
       if (!invoice) return { ok: false, error: "Invoice not found" };
+      const provider = input.method === "card" ? "helcim" : input.method;
 
       const existing = (
         await tx
@@ -856,24 +871,17 @@ export async function issueRefundAction(
           existing.appointmentId === null &&
           existing.customerId === invoice.customerId &&
           existing.kind === "refund" &&
-          existing.provider === input.method &&
+          (existing.provider === provider || (input.method === "card" && existing.provider === "helcim_terminal")) &&
           existing.amountCents === input.amountCents;
         if (!sameOperation) return { ok: false, error: "That idempotency key was already used for a different refund" };
         if (existing.status === "succeeded") return { ok: true, status: "succeeded", route: "manual" };
-        if (input.method !== "stripe" || existing.status !== "pending") {
+        if (input.method !== "card" || existing.status !== "pending") {
           return { ok: false, error: "That refund attempt failed; submit a new refund request" };
         }
-        const reference = decodeStripeRefundReference(existing.providerRef);
-        if (!reference) return { ok: false, error: "The pending Stripe refund has invalid provider data" };
-        return {
-          ok: true,
-          status: "pending",
-          route: "stripe",
-          refundPaymentId: existing.id,
-          amountCents: existing.amountCents,
-          checkoutSessionId: reference.checkoutSessionId,
-          invoiceId: invoice.id,
-        };
+        if (!decodeHelcimRefundReference(existing.providerRef)) {
+          return { ok: false, error: "The pending card refund has invalid provider data" };
+        }
+        return { ok: true, status: "pending", route: "card", refundPaymentId: existing.id };
       }
       const payments = await tx.select().from(schema.payments).where(eq(schema.payments.invoiceId, input.invoiceId));
       const summary = summarizePayments(invoice.totalCents, invoice.depositAppliedCents, payments);
@@ -886,30 +894,31 @@ export async function issueRefundAction(
       }
 
       const availability = getRefundAvailability(payments, invoice.depositAppliedCents);
-      if (input.method === "stripe") {
-        if (input.amountCents > availability.stripeRefundableCents) {
+      if (input.method === "card") {
+        if (input.amountCents > availability.cardRefundableCents) {
           return {
             ok: false,
-            error: `Only ${formatCents(availability.stripeRefundableCents, settings.currency)} remains refundable through Stripe`,
+            error: `Only ${formatCents(availability.cardRefundableCents, settings.currency)} remains refundable to the card`,
           };
         }
-        const source = availability.stripeSources.find((candidate) => candidate.refundableCents >= input.amountCents);
+        const source = availability.cardSources.find((candidate) => candidate.refundableCents >= input.amountCents);
         if (!source) {
-          const largest = Math.max(0, ...availability.stripeSources.map((candidate) => candidate.refundableCents));
+          const largest = Math.max(0, ...availability.cardSources.map((candidate) => candidate.refundableCents));
           return {
             ok: false,
-            error: `Stripe funds are split across charges; refund at most ${formatCents(largest, settings.currency)} per request`,
+            error: `Card payments are split across transactions; refund at most ${formatCents(largest, settings.currency)} per request`,
           };
         }
+        const sourcePayment = payments.find((payment) => payment.id === source.paymentId);
         const refundPaymentId = newId("pay");
         await tx.insert(schema.payments).values({
           id: refundPaymentId,
           invoiceId: input.invoiceId,
           customerId: invoice.customerId,
-          provider: "stripe",
-          providerRef: encodeStripeRefundReference({
+          provider: sourcePayment?.provider ?? "helcim",
+          providerRef: encodeHelcimRefundReference({
             sourcePaymentId: source.paymentId,
-            checkoutSessionId: source.checkoutSessionId,
+            sourceTransactionId: source.transactionId,
           }),
           idempotencyKey: input.idempotencyKey,
           kind: "refund",
@@ -923,18 +932,10 @@ export async function issueRefundAction(
           action: "invoice.refund_requested",
           entityType: "invoice",
           entityId: input.invoiceId,
-          after: { refundPaymentId, amountCents: input.amountCents, provider: "stripe" },
+          after: { refundPaymentId, amountCents: input.amountCents, provider: "helcim", sourceTransactionId: source.transactionId },
           reason: input.reason,
         });
-        return {
-          ok: true,
-          status: "pending",
-          route: "stripe",
-          refundPaymentId,
-          amountCents: input.amountCents,
-          checkoutSessionId: source.checkoutSessionId,
-          invoiceId: invoice.id,
-        };
+        return { ok: true, status: "pending", route: "card", refundPaymentId };
       }
 
       if (input.amountCents > availability.manualRefundableCents) {
@@ -975,45 +976,14 @@ export async function issueRefundAction(
       return { ok: true, status: "succeeded" };
     }
 
-    let provider;
-    try {
-      provider = getPaymentProvider();
-    } catch {
-      return { ok: false, error: "Stripe refunds are unavailable because the payment provider is not configured" };
-    }
-    if (provider.name !== "stripe") {
-      return { ok: false, error: "Stripe refunds are unavailable in the development payment provider" };
-    }
-
-    let providerResult;
-    try {
-      providerResult = await provider.refundPayment({
-        checkoutSessionId: prepared.checkoutSessionId,
-        amountCents: prepared.amountCents,
-        refundPaymentId: prepared.refundPaymentId,
-        invoiceId: prepared.invoiceId,
-        idempotencyKey: `stripe_refund_${prepared.refundPaymentId}`,
-      });
-    } catch {
-      // Keep the row pending. Retrying the same staff request reuses both the
-      // local row and Stripe idempotency key, so an ambiguous network failure
-      // cannot produce a second refund.
-      return { ok: false, error: "Stripe could not confirm the refund. Retry the same request safely." };
-    }
-
-    const finalized = await db().transaction((tx) =>
-      finalizeStripeRefund(tx, {
-        refundPaymentId: prepared.refundPaymentId,
-        providerRef: providerResult.providerRef,
-        amountCents: providerResult.amountCents,
-        providerStatus: providerResult.status,
-      }),
-    );
-    if (!finalized) return { ok: false, error: "Stripe returned refund details that did not match the ledger reservation" };
+    const result = await executeCardRefund({ refundPaymentId: prepared.refundPaymentId, ipAddress: await requestIp() });
     revalidatePath(`/admin/invoices/${input.invoiceId}`);
     revalidatePath("/admin/invoices");
-    if (finalized.status === "failed") return { ok: false, error: "Stripe declined the refund" };
-    return { ok: true, status: finalized.status };
+    if (result.status === "failed") return { ok: false, error: result.message ?? "Helcim declined the refund" };
+    if (result.status === "pending") {
+      return { ok: false, error: result.message ?? "Helcim did not confirm the refund. Retry the same request safely." };
+    }
+    return { ok: true, status: "succeeded" };
   } catch (err) {
     if (err instanceof AuthError) return { ok: false, error: err.message };
     console.error("issueRefundAction failed", err);
@@ -1550,6 +1520,105 @@ export async function setInvoiceTipAction(raw: unknown): Promise<ActionResult<{ 
   } catch (err) {
     if (err instanceof AuthError) return { ok: false, error: err.message };
     console.error("setInvoiceTipAction failed", err);
+    return { ok: false, error: "Something went wrong" };
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Smart Terminal                                                       */
+/* ------------------------------------------------------------------ */
+
+export type TerminalStatus =
+  | { ok: true; state: "waiting" | "paid"; amountCents: number; tipCents?: number }
+  | { ok: true; state: "failed"; reason: string }
+  | { ok: false; error: string };
+
+/** Sends the invoice's balance to the counter's Smart Terminal. */
+export async function startTerminalCollectionAction(
+  raw: unknown,
+): Promise<ActionResult<{ checkoutId: string; amountCents: number }>> {
+  try {
+    const staff = await requireStaff("record_payments");
+    const parsed = z.object({ invoiceId: z.string().min(1) }).safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Invalid request" };
+    const result = await startInvoiceTerminalCheckout({ invoiceId: parsed.data.invoiceId, staffId: staff.id });
+    if (!result.ok) return result;
+    return { ok: true, checkoutId: result.checkoutId, amountCents: result.amountCents };
+  } catch (err) {
+    if (err instanceof AuthError) return { ok: false, error: err.message };
+    console.error("startTerminalCollectionAction failed", err);
+    return { ok: false, error: "Something went wrong" };
+  }
+}
+
+const lastTerminalCheck = new Map<string, number>();
+
+/**
+ * Polled by the waiting screen. The webhook normally settles the payment the
+ * moment the customer taps; this also asks Helcim directly every few seconds,
+ * so the counter is never stuck waiting on a webhook that was delayed.
+ */
+export async function pollTerminalCollectionAction(raw: unknown): Promise<TerminalStatus> {
+  try {
+    await requireStaff("record_payments");
+    const parsed = z.object({ checkoutId: z.string().min(1) }).safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Invalid request" };
+    const { checkoutId } = parsed.data;
+    const load = async () =>
+      (await db().select().from(schema.paymentCheckouts).where(eq(schema.paymentCheckouts.id, checkoutId)).limit(1))[0];
+    let checkout = await load();
+    if (!checkout || checkout.channel !== "terminal") return { ok: false, error: "Payment request not found" };
+    if (checkout.status === "open") {
+      const last = lastTerminalCheck.get(checkoutId) ?? 0;
+      if (Date.now() - last > 6_000 && Date.now() - checkout.createdAt.getTime() > 8_000) {
+        lastTerminalCheck.set(checkoutId, Date.now());
+        await reconcileCheckout(checkoutId).catch((error) => console.error("terminal poll reconcile failed", error));
+        checkout = (await load())!;
+      }
+    }
+    if (checkout.status === "succeeded") {
+      lastTerminalCheck.delete(checkoutId);
+      const paid = fromHelcimAmount((checkout.transaction as { amount?: unknown } | null)?.amount);
+      const amountCents = Number.isFinite(paid) ? paid : checkout.amountCents;
+      return { ok: true, state: "paid", amountCents, tipCents: Math.max(0, amountCents - checkout.amountCents) };
+    }
+    if (checkout.status === "failed" || checkout.status === "expired") {
+      lastTerminalCheck.delete(checkoutId);
+      return { ok: true, state: "failed", reason: checkout.failureReason ?? "The payment did not go through" };
+    }
+    return { ok: true, state: "waiting", amountCents: checkout.amountCents };
+  } catch (err) {
+    if (err instanceof AuthError) return { ok: false, error: err.message };
+    console.error("pollTerminalCollectionAction failed", err);
+    return { ok: false, error: "Could not check the terminal" };
+  }
+}
+
+/**
+ * Stops waiting. If the customer does tap after this, the payment is still
+ * recorded when Helcim reports it — a late success is never thrown away.
+ */
+export async function stopTerminalCollectionAction(raw: unknown): Promise<ActionResult> {
+  try {
+    const staff = await requireStaff("record_payments");
+    const parsed = z.object({ checkoutId: z.string().min(1) }).safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Invalid request" };
+    const outcome = await reconcileCheckout(parsed.data.checkoutId);
+    if (outcome.status === "succeeded") return { ok: false, error: "That payment has already gone through." };
+    await db().transaction(async (tx) => {
+      await closeCheckout(tx, parsed.data.checkoutId, "failed", "Stopped by staff before the card was tapped");
+      await audit(tx, {
+        actorType: "staff",
+        actorId: staff.id,
+        action: "invoice.terminal_payment_stopped",
+        entityType: "payment_checkout",
+        entityId: parsed.data.checkoutId,
+      });
+    });
+    return { ok: true };
+  } catch (err) {
+    if (err instanceof AuthError) return { ok: false, error: err.message };
+    console.error("stopTerminalCollectionAction failed", err);
     return { ok: false, error: "Something went wrong" };
   }
 }

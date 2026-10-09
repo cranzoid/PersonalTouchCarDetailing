@@ -1,6 +1,7 @@
-import { and, asc, eq, gt, gte, isNull } from "drizzle-orm";
+import { and, asc, eq, gt, gte, inArray, isNull, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { formatCents } from "@/lib/money";
+import { lastBillingRunAt } from "@/lib/memberships/billing";
 
 /**
  * The "needs attention" queue (spec §5) — soft rules, not blocking ones.
@@ -21,7 +22,7 @@ import { formatCents } from "@/lib/money";
  */
 
 export type AttentionItem = {
-  kind: "uninvoiced_job" | "refundable_deposit";
+  kind: "uninvoiced_job" | "refundable_deposit" | "overpaid_invoice" | "membership_past_due" | "billing_stale";
   id: string;
   label: string;
   detail: string;
@@ -51,6 +52,16 @@ export function buildAttentionQueue(input: {
     refundableCents: number;
     currency?: string;
   }[];
+  /**
+   * Invoices holding more money than they are for — a card payment that
+   * landed after the bill was already settled another way, or on a cancelled
+   * invoice. Money is never turned away when Helcim reports it taken, so this
+   * is where the shop sees it and refunds the difference.
+   */
+  overpaidInvoices?: readonly { id: string; number: number; overpaidCents: number; currency?: string }[];
+  pastDueMemberships?: readonly { id: string; name: string; planName: string }[];
+  /** Set when there are members and monthly billing has not run recently. */
+  billingStaleSince?: string | null;
 }): AttentionQueue {
   const uninvoicedJobs: AttentionItem[] = input.uninvoicedJobs.map((job) => ({
     kind: "uninvoiced_job",
@@ -69,7 +80,32 @@ export function buildAttentionQueue(input: {
     detail: `${formatCents(appt.refundableCents, appt.currency ?? "CAD")} of deposit is more than the revised total`,
     href: `/admin/appointments/${appt.id}`,
   }));
-  const items = [...uninvoicedJobs, ...refundableDeposits];
+  const overpaid: AttentionItem[] = (input.overpaidInvoices ?? []).map((invoice) => ({
+    kind: "overpaid_invoice",
+    id: invoice.id,
+    label: `INV-${invoice.number} has been paid more than it is for`,
+    detail: `${formatCents(invoice.overpaidCents, invoice.currency ?? "CAD")} to refund or apply`,
+    href: `/admin/invoices/${invoice.id}`,
+  }));
+  const pastDue: AttentionItem[] = (input.pastDueMemberships ?? []).map((membership) => ({
+    kind: "membership_past_due",
+    id: membership.id,
+    label: `${membership.name}'s ${membership.planName} payment failed`,
+    detail: "Benefits are paused until the card is updated or the month is collected",
+    href: `/admin/memberships/${membership.id}`,
+  }));
+  const stale: AttentionItem[] = input.billingStaleSince
+    ? [
+        {
+          kind: "billing_stale",
+          id: "membership-billing",
+          label: "Membership billing has stopped running",
+          detail: `Last run ${input.billingStaleSince} — check the hourly scheduler`,
+          href: "/admin/memberships",
+        },
+      ]
+    : [];
+  const items = [...stale, ...overpaid, ...uninvoicedJobs, ...refundableDeposits, ...pastDue];
   return {
     items,
     uninvoicedJobs: uninvoicedJobs.length,
@@ -135,7 +171,51 @@ export async function getAttentionQueue(input: {
     .orderBy(asc(schema.appointments.revisedAt))
     .limit(input.limit ?? 10);
 
+  // Net money held against each recently touched invoice, from the ledger.
+  const overpaidRows = await db().execute<{ id: string; number: number; overpaid_cents: number }>(sql`
+    SELECT i.id, i.number,
+           (COALESCE(SUM(CASE WHEN p.status = 'succeeded' AND p.kind IN ('payment', 'deposit') THEN p.amount_cents END), 0)
+            - COALESCE(SUM(CASE WHEN p.status = 'succeeded' AND p.kind = 'refund' THEN p.amount_cents END), 0)
+            + LEAST(i.deposit_applied_cents, i.total_cents)
+            - CASE WHEN i.status = 'cancelled' THEN 0 ELSE i.total_cents END)::int AS overpaid_cents
+    FROM invoices i
+    JOIN payments p ON p.invoice_id = i.id
+    WHERE i.updated_at >= ${input.since}
+    GROUP BY i.id
+    HAVING (COALESCE(SUM(CASE WHEN p.status = 'succeeded' AND p.kind IN ('payment', 'deposit') THEN p.amount_cents END), 0)
+            - COALESCE(SUM(CASE WHEN p.status = 'succeeded' AND p.kind = 'refund' THEN p.amount_cents END), 0)
+            + LEAST(i.deposit_applied_cents, i.total_cents)
+            - CASE WHEN i.status = 'cancelled' THEN 0 ELSE i.total_cents END) > 0
+    LIMIT ${input.limit ?? 10}
+  `);
+  const pastDue = await db()
+    .select({
+      id: schema.memberships.id,
+      firstName: schema.customers.firstName,
+      lastName: schema.customers.lastName,
+      planName: schema.membershipPlans.name,
+    })
+    .from(schema.memberships)
+    .innerJoin(schema.customers, eq(schema.customers.id, schema.memberships.customerId))
+    .innerJoin(schema.membershipPlans, eq(schema.membershipPlans.id, schema.memberships.planId))
+    .where(eq(schema.memberships.status, "past_due"))
+    .limit(input.limit ?? 10);
+  const [{ live }] = await db()
+    .select({ live: sql<number>`count(*)::int` })
+    .from(schema.memberships)
+    .where(inArray(schema.memberships.status, ["active", "past_due"]));
+  const lastRun = live > 0 ? await lastBillingRunAt() : null;
+  const billingStale = live > 0 && (!lastRun || Date.now() - lastRun.getTime() > 3 * 3_600_000);
+
   return buildAttentionQueue({
+    overpaidInvoices: overpaidRows.rows.map((row) => ({
+      id: row.id,
+      number: Number(row.number),
+      overpaidCents: Number(row.overpaid_cents),
+      currency: input.currency,
+    })),
+    pastDueMemberships: pastDue.map((row) => ({ id: row.id, name: `${row.firstName} ${row.lastName}`.trim(), planName: row.planName })),
+    billingStaleSince: billingStale ? (lastRun ? input.formatDate(lastRun) : "never") : null,
     uninvoicedJobs: uninvoiced.map((row) => ({
       id: row.id,
       vehicleLabel: [row.year, row.make, row.model].filter(Boolean).join(" ") || "Vehicle",

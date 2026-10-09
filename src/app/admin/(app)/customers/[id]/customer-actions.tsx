@@ -186,7 +186,11 @@ export function CustomerActionPanels({
 
       <section className="rounded-xl border border-ink-800 p-5">
         <h2 className="text-lg font-semibold text-white">Customer portal</h2>
-        <p className="mt-2 text-sm text-ink-400">Issue a new 90-day link. Any older portal link is revoked.</p>
+        <p className="mt-2 text-sm text-ink-400">
+          Issue a new 90-day link to the customer&apos;s account workspace, where they can see and pay their invoices.
+          Every older link stops working — including the ones in earlier fleet invoice emails — so this is also how to
+          shut off a link that reached the wrong person.
+        </p>
         <button onClick={issuePortal} disabled={portalBusy} className="mt-4 rounded-lg bg-accent-400 px-4 py-2 text-sm font-semibold text-ink-950 disabled:opacity-50">
           {portalBusy ? "Issuing…" : "Issue & send portal link"}
         </button>

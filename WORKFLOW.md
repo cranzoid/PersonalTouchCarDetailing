@@ -104,16 +104,16 @@ review, and HTTP smoke tests.
 - Appointment deposit links use hashed, purpose-bound, expiring tokens. Deposit
   amount, payment ledger, appointment balance, and confirmation move atomically
   and idempotently.
-- Stripe Checkout sessions embed and validate payment, subject, amount, and
-  currency metadata. Signed webhook delivery is idempotent.
-- Checkout retry handling is provider-authenticated: open sessions resume,
-  delayed paid sessions finalize once, processing/ambiguous sessions remain
-  reserved, and a replacement is allowed only after Stripe confirms expiry.
-  Concurrent retries share one payment reservation and Stripe idempotency key.
-- Stripe refunds reserve the ledger first, call the provider outside database
-  locks, and are finalized from authenticated provider results/webhooks. Manual
-  and provider refund capacity is tracked separately.
-- Fake checkout is available only in development and is refused in production.
+- Card payments run through Helcim (Stripe was removed 2026-10-08; see
+  DECISIONS.md #40). HelcimPay.js renders Helcim's card form on our own pages;
+  every checkout carries our own reference to Helcim as its invoice number, and
+  nothing is marked paid until the transaction is re-read from Helcim's API and
+  matched to that checkout. Browser confirmation, the signed webhook and the
+  hourly reconciliation all finalize through the same locked path, so any of
+  them can arrive first, twice, or not at all.
+- Card refunds reserve the ledger first, then call Helcim; a lost answer leaves
+  the refund pending, and a retry looks for the refund at Helcim before sending
+  another. Manual and card refund capacity is tracked separately.
 
 ### Phase 5 — communications and automation
 
@@ -220,10 +220,13 @@ features:
 2. Configure `DATABASE_URL`, a strong `SESSION_SECRET`, HTTPS `APP_BASE_URL`, and
    production-only `SEED_ADMIN_NAME`, `SEED_ADMIN_EMAIL`, and
    `SEED_ADMIN_PASSWORD`; run migrations, then the idempotent seed.
-3. Configure Stripe keys and the `/api/webhooks/stripe` endpoint, then exercise
-   invoice checkout, appointment deposit, delayed webhook reconciliation, and a
-   real Stripe test-mode refund. These paths are code- and test-verified but were
-   not called against the owner's Stripe account.
+3. Enter the Helcim API token, webhook verifier token and Smart Terminal device
+   code in Admin → Integrations; point Helcim's webhook at
+   `https://www.personaltouchcardetailing.ca/api/webhooks/card-payments`. Then
+   take one real online payment, one terminal payment and one refund, and only
+   then open membership sales in Memberships → Settings. The checkout engine is
+   test-verified against a simulated Helcim ledger; HelcimPay.js itself cannot
+   render on localhost and must be exercised through an https origin.
 4. Configure Resend/`EMAIL_FROM` and Twilio, then verify real email/SMS delivery
    and sender-domain/number status. No provider credentials were available in
    this session.

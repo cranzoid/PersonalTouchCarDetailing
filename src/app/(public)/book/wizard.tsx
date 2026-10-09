@@ -481,6 +481,19 @@ export function BookingWizard({
             </a>
           </div>
         )}
+        {result.payAheadUrl && (
+          <div className="mt-5 rounded-2xl border border-ink-700 bg-ink-950/40 p-5">
+            <p className="text-sm text-ink-300">
+              Prefer to settle up before you arrive? You can pay online now — or simply pay at the shop.
+            </p>
+            <a
+              href={result.payAheadUrl}
+              className={`mt-4 inline-flex min-h-11 items-center justify-center rounded-xl border border-accent-400/60 px-6 py-3 text-sm font-semibold text-accent-200 hover:bg-accent-400/10 ${focusRing}`}
+            >
+              Pay ahead online (optional)
+            </a>
+          </div>
+        )}
         <p className="mt-4 text-sm text-ink-400">
           {deliveryLabel
             ? result.depositUrl

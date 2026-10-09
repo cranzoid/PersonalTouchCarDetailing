@@ -56,7 +56,16 @@ export type IdPrefix =
   | "sup" // marketing suppression (do-not-contact)
   | "ocm" // outreach campaign
   | "orc" // outreach recipient
-  | "ofc"; // new-customer offer claim
+  | "ofc" // new-customer offer claim
+  | "chk" // Helcim payment checkout
+  | "mpl" // membership plan
+  | "mem" // membership
+  | "mpd" // membership billing period
+  | "mrd" // membership benefit redemption
+  | "wpa" // Winter Pass
+  | "wpr" // Winter Pass wash redemption
+  | "lgc" // customer sign-in code
+  | "cse"; // customer session
 
 export function newId(prefix: IdPrefix): string {
   return `${prefix}_${randomId()}`;

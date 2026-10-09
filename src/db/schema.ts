@@ -150,10 +150,20 @@ export const customers = pgTable(
      * (DECISIONS.md #14).
      */
     phoneNormalized: text("phone_normalized"),
+    /**
+     * This customer's record in Helcim's card vault, created the first time
+     * they save a card (a membership). Monthly charges go to the default card
+     * stored there. Unique when set: two of our customers sharing one Helcim
+     * record would let one of them be billed on the other's card.
+     */
+    helcimCustomerCode: text("helcim_customer_code"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
+    uniqueIndex("customers_helcim_code_uq")
+      .on(t.helcimCustomerCode)
+      .where(sql`${t.helcimCustomerCode} is not null`),
     index("customers_email_idx").on(t.email),
     index("customers_phone_idx").on(t.phone),
     index("customers_phone_normalized_idx").on(t.phoneNormalized),
@@ -1062,6 +1072,14 @@ export const invoices = pgTable(
     ccEmails: text("cc_emails").array().notNull().default([]),
     /** Stamped once the post-payment review-request send fires — prevents duplicate sends. */
     reviewRequestSentAt: timestamp("review_request_sent_at", { withTimezone: true }),
+    /**
+     * What the customer told us from their account workspace: "we'll pay by
+     * cheque" or "we'll pay in person". Information for staff only — it moves
+     * no status and settles nothing, because a promise to pay is not a
+     * payment. Cleared by nothing; the payment that arrives is what matters.
+     */
+    customerPayIntent: text("customer_pay_intent"), // cheque | in_person
+    customerPayIntentAt: timestamp("customer_pay_intent_at", { withTimezone: true }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -1118,8 +1136,17 @@ export const payments = pgTable(
     invoiceId: text("invoice_id").references(() => invoices.id),
     appointmentId: text("appointment_id").references(() => appointments.id),
     customerId: text("customer_id").references(() => customers.id),
-    provider: text("provider").notNull(), // see MANUAL_PAYMENT_METHODS in src/lib/types.ts, plus "stripe" and "fake"
+    // See MANUAL_PAYMENT_METHODS in src/lib/types.ts, plus "helcim" (online or
+    // card on file) and "helcim_terminal". "stripe" and "fake" survive only on
+    // rows written before Helcim replaced them.
+    provider: text("provider").notNull(),
     providerRef: text("provider_ref"),
+    /**
+     * The Helcim checkout this row was paid through. One checkout can settle
+     * several invoices — a fleet paying a month's bills at once — so the link
+     * runs from each payment to its checkout, not the other way round.
+     */
+    checkoutId: text("checkout_id").references(() => paymentCheckouts.id),
     /** Client- or system-supplied key; unique constraint makes retries no-ops. */
     idempotencyKey: text("idempotency_key").notNull().unique(),
     kind: text("kind").notNull(), // deposit | payment | refund
@@ -1131,7 +1158,10 @@ export const payments = pgTable(
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("payments_invoice_idx").on(t.invoiceId)],
+  (t) => [
+    index("payments_invoice_idx").on(t.invoiceId),
+    index("payments_checkout_idx").on(t.checkoutId),
+  ],
 );
 
 /** Raw provider webhook events; unique event id = duplicate deliveries are no-ops. */
@@ -1634,3 +1664,361 @@ export const offerClaims = pgTable(
     index("offer_claims_appointment_idx").on(t.appointmentId),
   ],
 );
+
+/* ------------------------------------------------------------------ */
+/* Online payments (Helcim)                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * What a checkout pays for. Every money-moving checkout settles one or more
+ * INVOICES (or, for a deposit or prepayment, one appointment), so the invoice
+ * stays the tax document for everything the shop sells — memberships and
+ * Winter Passes included. The membership and pass ids ride along so the
+ * finalizer can do the one extra thing those sales need: store the card, or
+ * switch a plan.
+ */
+export type CheckoutSubject = {
+  /** Invoice balances this checkout pays, each to the cent. */
+  allocations?: { invoiceId: string; amountCents: number }[];
+  /** Deposit or full prepayment against a booking (no invoice exists yet). */
+  appointmentId?: string;
+  appointmentPurpose?: "deposit" | "prepay";
+  membershipId?: string;
+  periodId?: string;
+  /** Upgrade target, applied once the difference is paid. */
+  toPlanId?: string;
+  passId?: string;
+};
+
+/**
+ * One attempt to take a card payment through Helcim: a HelcimPay.js session on
+ * our page, a push to the Smart Terminal, or a charge to a card on file.
+ *
+ * `reference` is ours and unique. It travels to Helcim as the invoice number on
+ * the transaction, which is what lets the hourly reconciliation ask Helcim
+ * "did this one get paid?" after a browser closed mid-payment or a webhook
+ * never arrived. It is also why a retried charge is never a guess: Helcim
+ * forgets idempotency keys after five minutes, but not invoice numbers.
+ */
+export const paymentCheckouts = pgTable(
+  "payment_checkouts",
+  {
+    id: id(),
+    // invoices | appointment_deposit | appointment_prepay | winter_pass |
+    // membership_signup | membership_charge | membership_upgrade | card_update | terminal
+    kind: text("kind").notNull(),
+    channel: text("channel").notNull(), // online | terminal | card_on_file
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => customers.id),
+    reference: text("reference").notNull().unique(),
+    amountCents: integer("amount_cents").notNull(),
+    currency: text("currency").notNull().default("CAD"),
+    status: text("status").notNull().default("open"), // open | succeeded | failed | expired
+    subject: jsonb("subject").$type<CheckoutSubject>().notNull().default({}),
+    /**
+     * HelcimPay.js session tokens, valid for 60 minutes. Stored so a customer
+     * who reloads the page resumes the SAME session rather than opening a
+     * second one for the same bill. Low sensitivity by design: the checkout
+     * token can only render a form that pays us, and the secret token only
+     * checks a response hash — the transaction itself is always re-read from
+     * Helcim's API before anything is marked paid.
+     */
+    checkoutToken: text("checkout_token"),
+    secretToken: text("secret_token"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    helcimTransactionId: text("helcim_transaction_id").unique(),
+    helcimCustomerCode: text("helcim_customer_code"),
+    /** Card token Helcim returned, kept when the checkout saved a card. */
+    cardToken: text("card_token"),
+    cardLabel: text("card_label"),
+    deviceCode: text("device_code"),
+    failureReason: text("failure_reason"),
+    /** The transaction as Helcim's API reported it, for support and audit. */
+    transaction: jsonb("transaction"),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    createdByStaffId: text("created_by_staff_id").references(() => staffUsers.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("payment_checkouts_status_idx").on(t.status, t.createdAt),
+    index("payment_checkouts_customer_idx").on(t.customerId),
+  ],
+);
+
+/* ------------------------------------------------------------------ */
+/* Memberships & Winter Pass                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A monthly plan. Data, not code: the owners rename and reprice these in
+ * Memberships → Settings, and a summer plan is a new row.
+ *
+ * `includedBenefits` uses a fixed vocabulary (see MEMBERSHIP_BENEFITS in
+ * src/lib/memberships/plans.ts) — "wash", "interior" — each mapped to the
+ * catalogue service it stands for. `rank` orders the plans so "upgrade" has a
+ * direction: a higher rank is an upgrade, and only an upgrade is charged now.
+ */
+export const membershipPlans = pgTable("membership_plans", {
+  id: id(),
+  slug: text("slug").notNull().unique(),
+  name: text("name").notNull(),
+  tagline: text("tagline"),
+  /** Bullet points shown on /winter and in the account, in order. */
+  features: text("features").array().notNull().default([]),
+  /** Before tax. HST is added on the invoice, like every other sale. */
+  monthlyPriceCents: integer("monthly_price_cents").notNull(),
+  /** Member discount on eligible detailing packages and add-ons. */
+  discountBp: integer("discount_bp").notNull().default(0),
+  includedBenefits: text("included_benefits").array().notNull().default([]),
+  rank: integer("rank").notNull().default(0),
+  active: boolean("active").notNull().default(true),
+  sort: integer("sort").notNull().default(0),
+  createdAt: createdAt(),
+  updatedAt: updatedAt(),
+});
+
+/**
+ * One car's membership. One live membership per vehicle is a database rule
+ * (the partial unique index below), because the benefit is the car's — a
+ * household sharing one plan across three cars is the abuse it prevents.
+ *
+ * Status: pending (sign-up started, first month not paid) | active |
+ * past_due (a monthly charge failed; benefits paused while it is retried) |
+ * canceled. "Cancel at the end of the month" is `cancelAtPeriodEnd` on an
+ * active membership, not a status of its own: the member keeps every benefit
+ * until the paid month runs out.
+ */
+export const memberships = pgTable(
+  "memberships",
+  {
+    id: id(),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => customers.id),
+    vehicleId: text("vehicle_id")
+      .notNull()
+      .references(() => vehicles.id),
+    planId: text("plan_id")
+      .notNull()
+      .references(() => membershipPlans.id),
+    status: text("status").notNull().default("pending"),
+    /**
+     * Pre-tax monthly price this member pays. Snapshotted from the plan at
+     * sign-up and on every plan change, so the owner repricing a plan for new
+     * members never silently reprices the ones who already agreed to a figure.
+     */
+    priceCents: integer("price_cents").notNull(),
+    helcimCustomerCode: text("helcim_customer_code"),
+    cardToken: text("card_token"),
+    /** e.g. "Visa •••• 9990" — display only. */
+    cardLabel: text("card_label"),
+    currentPeriodStart: timestamp("current_period_start", { withTimezone: true }),
+    /** When the paid month ends — and therefore when the next charge is due. */
+    currentPeriodEnd: timestamp("current_period_end", { withTimezone: true }),
+    cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    cancelRequestedAt: timestamp("cancel_requested_at", { withTimezone: true }),
+    canceledAt: timestamp("canceled_at", { withTimezone: true }),
+    cancelReason: text("cancel_reason"),
+    failedAttempts: integer("failed_attempts").notNull().default(0),
+    nextAttemptAt: timestamp("next_attempt_at", { withTimezone: true }),
+    pastDueSince: timestamp("past_due_since", { withTimezone: true }),
+    /**
+     * A scheduled move to another plan (the season changing), applied at the
+     * first billing date on or after `nextPlanFrom`. The member is told
+     * `noticeDays` before; `nextPlanNoticeSentAt` is what stops the cron
+     * telling them twice.
+     */
+    nextPlanId: text("next_plan_id").references(() => membershipPlans.id),
+    nextPlanFrom: timestamp("next_plan_from", { withTimezone: true }),
+    nextPlanNoticeSentAt: timestamp("next_plan_notice_sent_at", { withTimezone: true }),
+    /** Terms and recurring-charge authorization as accepted at sign-up. */
+    termsVersion: text("terms_version").notNull().default(""),
+    authorizedAt: timestamp("authorized_at", { withTimezone: true }),
+    lastReminderAt: timestamp("last_reminder_at", { withTimezone: true }),
+    createdByStaffId: text("created_by_staff_id").references(() => staffUsers.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("memberships_live_vehicle_uq")
+      .on(t.vehicleId)
+      .where(sql`${t.status} in ('pending', 'active', 'past_due')`),
+    index("memberships_customer_idx").on(t.customerId),
+    index("memberships_due_idx").on(t.status, t.currentPeriodEnd),
+  ],
+);
+
+/**
+ * One billed month. The unique (membership, period start) index is what makes
+ * billing idempotent: two racing cron ticks, or a tick that dies after charging
+ * and is run again, can only ever produce one row — and so one invoice and one
+ * charge — per month.
+ */
+export const membershipPeriods = pgTable(
+  "membership_periods",
+  {
+    id: id(),
+    membershipId: text("membership_id")
+      .notNull()
+      .references(() => memberships.id),
+    planId: text("plan_id")
+      .notNull()
+      .references(() => membershipPlans.id),
+    periodStart: timestamp("period_start", { withTimezone: true }).notNull(),
+    periodEnd: timestamp("period_end", { withTimezone: true }).notNull(),
+    /** Pre-tax amount billed for this month. */
+    amountCents: integer("amount_cents").notNull(),
+    invoiceId: text("invoice_id").references(() => invoices.id),
+    status: text("status").notNull().default("due"), // due | paid | failed | waived
+    attempts: integer("attempts").notNull().default(0),
+    lastAttemptAt: timestamp("last_attempt_at", { withTimezone: true }),
+    lastError: text("last_error"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    uniqueIndex("membership_periods_start_uq").on(t.membershipId, t.periodStart),
+    index("membership_periods_invoice_idx").on(t.invoiceId),
+  ],
+);
+
+/**
+ * A monthly benefit used. Unique per (period, benefit) among live rows, so
+ * "one wash a month, no rollover" is enforced by the database rather than by
+ * whoever is at the counter. Voiding (a cancelled booking) frees the month's
+ * benefit again.
+ */
+export const membershipRedemptions = pgTable(
+  "membership_redemptions",
+  {
+    id: id(),
+    membershipId: text("membership_id")
+      .notNull()
+      .references(() => memberships.id),
+    periodId: text("period_id")
+      .notNull()
+      .references(() => membershipPeriods.id),
+    benefit: text("benefit").notNull(), // wash | interior
+    appointmentId: text("appointment_id").references(() => appointments.id),
+    invoiceId: text("invoice_id").references(() => invoices.id),
+    redeemedAt: timestamp("redeemed_at", { withTimezone: true }).notNull().defaultNow(),
+    redeemedByStaffId: text("redeemed_by_staff_id").references(() => staffUsers.id),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidReason: text("void_reason"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("membership_redemptions_live_uq")
+      .on(t.periodId, t.benefit)
+      .where(sql`${t.voidedAt} is null`),
+    index("membership_redemptions_appointment_idx").on(t.appointmentId),
+  ],
+);
+
+/**
+ * A prepaid Winter Pass: a fixed number of hand washes for one car, valid
+ * between two dates. Issued `pending_payment` with its sale invoice and
+ * activated by that invoice being paid in full — whether the customer paid
+ * online or in cash at the counter, which is what keeps the pass inside the
+ * payment-method tax rule like any other sale.
+ */
+export const winterPasses = pgTable(
+  "winter_passes",
+  {
+    id: id(),
+    customerId: text("customer_id")
+      .notNull()
+      .references(() => customers.id),
+    vehicleId: text("vehicle_id")
+      .notNull()
+      .references(() => vehicles.id),
+    saleInvoiceId: text("sale_invoice_id").references(() => invoices.id),
+    status: text("status").notNull().default("pending_payment"), // pending_payment | active | void
+    washesTotal: integer("washes_total").notNull(),
+    /** Pre-tax price as sold, for support and reporting. */
+    priceCents: integer("price_cents").notNull(),
+    validFrom: timestamp("valid_from", { withTimezone: true }).notNull(),
+    validUntil: timestamp("valid_until", { withTimezone: true }).notNull(),
+    termsVersion: text("terms_version").notNull().default(""),
+    activatedAt: timestamp("activated_at", { withTimezone: true }),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidReason: text("void_reason"),
+    createdByStaffId: text("created_by_staff_id").references(() => staffUsers.id),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    index("winter_passes_customer_idx").on(t.customerId),
+    index("winter_passes_vehicle_idx").on(t.vehicleId),
+    index("winter_passes_invoice_idx").on(t.saleInvoiceId),
+  ],
+);
+
+/** One wash taken from a pass. Wash numbers are unique among live rows. */
+export const winterPassRedemptions = pgTable(
+  "winter_pass_redemptions",
+  {
+    id: id(),
+    passId: text("pass_id")
+      .notNull()
+      .references(() => winterPasses.id),
+    washNumber: integer("wash_number").notNull(),
+    appointmentId: text("appointment_id").references(() => appointments.id),
+    invoiceId: text("invoice_id").references(() => invoices.id),
+    redeemedAt: timestamp("redeemed_at", { withTimezone: true }).notNull().defaultNow(),
+    redeemedByStaffId: text("redeemed_by_staff_id").references(() => staffUsers.id),
+    voidedAt: timestamp("voided_at", { withTimezone: true }),
+    voidReason: text("void_reason"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("winter_pass_redemptions_live_uq")
+      .on(t.passId, t.washNumber)
+      .where(sql`${t.voidedAt} is null`),
+    index("winter_pass_redemptions_appointment_idx").on(t.appointmentId),
+  ],
+);
+
+/* ------------------------------------------------------------------ */
+/* Customer accounts                                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * A six-digit sign-in code sent to an email address or phone number. Only the
+ * hash is stored. `contact` is normalized (lower-cased email, or bare phone
+ * digits from src/lib/phone.ts) — the same keys the customer records are
+ * matched on once the code is proved.
+ */
+export const customerLoginCodes = pgTable(
+  "customer_login_codes",
+  {
+    id: id(),
+    channel: text("channel").notNull(), // email | sms
+    contact: text("contact").notNull(),
+    codeHash: text("code_hash").notNull(),
+    attempts: integer("attempts").notNull().default(0),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("customer_login_codes_contact_idx").on(t.channel, t.contact, t.createdAt)],
+);
+
+/**
+ * A signed-in customer. The session belongs to a PROVED CONTACT — an email
+ * address or phone number the visitor showed they control — not to one
+ * customer row, because the CRM holds duplicates and a person's history can be
+ * split across them. Every customer record carrying that contact is theirs to
+ * see, and nothing else.
+ */
+export const customerSessions = pgTable("customer_sessions", {
+  id: id(),
+  tokenHash: text("token_hash").notNull().unique(),
+  channel: text("channel").notNull(), // email | sms
+  contact: text("contact").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+  createdAt: createdAt(),
+});

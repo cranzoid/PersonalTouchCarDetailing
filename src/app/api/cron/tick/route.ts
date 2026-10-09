@@ -9,6 +9,8 @@ import {
 } from "@/lib/scheduling";
 import { getPool } from "@/db";
 import { pruneExpiredRateLimits } from "@/lib/rate-limit";
+import { reconcileOpenCheckouts } from "@/lib/payments";
+import { runMembershipBilling } from "@/lib/memberships/billing";
 
 const CRON_ADVISORY_LOCK = 7_214_031;
 
@@ -53,6 +55,10 @@ async function runTick(req: Request) {
     const offerClaims = await sendDueOfferClaimReminders();
     const recurringBills = await generateRecurringBills();
     const expiredRateLimitBuckets = await pruneExpiredRateLimits();
+    // Card payments first: a checkout a browser abandoned mid-payment is
+    // settled with Helcim before billing looks at what is still owed.
+    const checkouts = await runGuarded("checkouts", () => reconcileOpenCheckouts());
+    const memberships = await runGuarded("memberships", () => runMembershipBilling());
 
     return NextResponse.json({
       ok: true,
@@ -64,10 +70,26 @@ async function runTick(req: Request) {
       offerClaimsExpired: offerClaims.expired,
       recurringBills,
       expiredRateLimitBuckets,
+      checkouts,
+      memberships,
     });
   } finally {
     await client.query("SELECT pg_advisory_unlock($1)", [CRON_ADVISORY_LOCK]).catch(() => undefined);
     client.release();
+  }
+}
+
+/**
+ * Payment work talks to Helcim over the network. One failing call must not
+ * stop the rest of the tick (reminders, bills), and its error is reported in
+ * the tick's JSON rather than swallowed.
+ */
+async function runGuarded<T>(label: string, task: () => Promise<T>): Promise<T | { error: string }> {
+  try {
+    return await task();
+  } catch (error) {
+    console.error(`[cron] ${label} failed`, error);
+    return { error: error instanceof Error ? error.message : "failed" };
   }
 }
 

@@ -4,6 +4,8 @@
  * subtly different wording ("Card" vs "Card (Stripe)") for the same payment.
  */
 export const PAYMENT_PROVIDER_LABELS: Record<string, string> = {
+  helcim: "Card (online)",
+  helcim_terminal: "Card (terminal)",
   fake: "Test payment",
   stripe: "Card (Stripe)",
   cash: "Cash",

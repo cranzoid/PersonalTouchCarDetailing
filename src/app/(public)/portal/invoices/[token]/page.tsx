@@ -1,12 +1,12 @@
-import { notFound, redirect } from "next/navigation";
+import { notFound } from "next/navigation";
 import { asc, desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { Container } from "@/components/ui";
+import { HelcimCheckoutButton } from "@/components/helcim-checkout";
 import { formatCents } from "@/lib/money";
 import { getSettings } from "@/lib/settings";
-import { resolveInvoiceToken, sendInvoiceReceipt, summarizePayments, syncOverdueInvoices } from "@/lib/invoices";
-import { finalizeSucceededPayment } from "@/lib/payments";
-import { PayButton } from "./pay-button";
+import { resolveInvoiceToken, summarizePayments, syncOverdueInvoices } from "@/lib/invoices";
+import { confirmInvoicePaymentAction, startInvoicePaymentAction } from "./actions";
 
 export const metadata = { title: "Your Invoice" };
 export const dynamic = "force-dynamic";
@@ -17,45 +17,12 @@ export const dynamic = "force-dynamic";
  * estimate token, this one is not single-use: the customer may return to pay
  * a balance or just look at a receipt.
  */
-export default async function PortalInvoicePage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ token: string }>;
-  searchParams: Promise<{ fake_session?: string; payment_id?: string }>;
-}) {
+export default async function PortalInvoicePage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   await syncOverdueInvoices();
   const resolved = await resolveInvoiceToken(token);
   if (!resolved) notFound();
   const { invoice } = resolved;
-
-  // Dev-only: the fake payment provider redirects here instead of firing a
-  // real webhook. Finalize only if the session ref matches a pending payment
-  // on THIS invoice using the fake provider — never trusts the query alone.
-  const { fake_session: fakeSession, payment_id: paymentId } = await searchParams;
-  if (fakeSession && paymentId && process.env.NODE_ENV !== "production") {
-    const [payment] = await db().select().from(schema.payments).where(eq(schema.payments.id, paymentId)).limit(1);
-    if (
-      payment &&
-      payment.invoiceId === invoice.id &&
-      payment.provider === "fake" &&
-      payment.providerRef === fakeSession
-    ) {
-      const result = await db().transaction((tx) =>
-        finalizeSucceededPayment(tx, {
-          paymentId: payment.id,
-          provider: "fake",
-          providerRef: fakeSession,
-          invoiceId: invoice.id,
-        }),
-      );
-      if (result && !result.alreadyProcessed) {
-        await sendInvoiceReceipt(result.invoiceId, result.amountCents);
-      }
-    }
-    redirect(`/portal/invoices/${token}`);
-  }
 
   const settings = await getSettings();
   const customer = (
@@ -181,10 +148,15 @@ export default async function PortalInvoicePage({
         </div>
       ) : (
         <div className="mt-6 rounded-[2rem] border border-accent-500/25 bg-gradient-to-br from-[#0B2A4A]/80 to-ink-950 p-6 shadow-xl shadow-black/15">
-          <PayButton token={token} />
-          <p className="mt-3 text-center text-xs text-ink-500">
-            Secure checkout. You can also pay in person by cash, e-transfer or card.
+          <p className="mb-4 text-sm text-ink-300">
+            Balance due: <strong className="text-white">{formatCents(summary.balanceCents, settings.currency)}</strong>
           </p>
+          <HelcimCheckoutButton
+            label={`Pay ${formatCents(summary.balanceCents, settings.currency)} by card`}
+            start={startInvoicePaymentAction.bind(null, token)}
+            confirm={confirmInvoicePaymentAction.bind(null, token)}
+          />
+          <p className="mt-2 text-center text-xs text-ink-500">You can also pay in person by cash, e-transfer or card.</p>
         </div>
       )}
 

@@ -34,7 +34,11 @@ export type OutboundMessage = {
      * never customer-facing, and deliberately outside MARKETING_KINDS: staff
      * are not customers and have no consent record to check.
      */
-    | "staff_alert";
+    | "staff_alert"
+    /** Membership and Winter Pass service messages: welcome, billing, plan changes. */
+    | "membership"
+    /** A one-time code to sign in to the customer account. Never marketing. */
+    | "sign_in_code";
   to: string;
   /**
    * Extra addresses copied on the message. Email only — SMS has no CC, and

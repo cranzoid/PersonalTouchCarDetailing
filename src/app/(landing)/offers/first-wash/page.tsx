@@ -156,7 +156,9 @@ export default async function FirstWashOfferPage() {
               <p className="mt-6 max-w-2xl text-xl font-bold leading-snug sm:text-2xl">
                 {onePrice ? "Car, SUV, pickup or van. One simple price." : `${money(carOfferCents)} for a car. ${money(largeOfferCents)} for an SUV, pickup or van.`}
               </p>
-              <p className="mt-2 text-base text-white/70">100% hand washed. No tunnel. No brushes. No membership.</p>
+              {/* "No membership" was dropped here on 2026-10-08: the shop now sells
+                  memberships, and this offer is simply a one-off first wash. */}
+              <p className="mt-2 text-base text-white/70">100% hand washed. No tunnel. No brushes.</p>
 
               <div className="relative mt-8 overflow-hidden rounded-[1.75rem] border border-white/15 shadow-[0_32px_80px_-35px_rgba(0,0,0,0.9)]">
                 <Image

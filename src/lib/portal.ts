@@ -7,19 +7,19 @@ import { newId } from "@/lib/id";
 /** Reusable customer portal token. Only its SHA-256 hash is persisted. */
 export async function createCustomerPortalToken(
   tx: Pick<Db, "insert" | "update">,
-  input: { customerId: string; expiresAt: Date },
+  input: {
+    customerId: string;
+    expiresAt: Date;
+    /**
+     * Revoke the customer's earlier links (the default — an explicit "issue a
+     * new link" means the old one should stop working). Invoice sends to a
+     * fleet account pass false: every invoice email carries a workspace link,
+     * and last month's email must keep working when this month's goes out.
+     */
+    revokeExisting?: boolean;
+  },
 ): Promise<string> {
-  await tx
-    .update(schema.accessTokens)
-    .set({ revokedAt: new Date() })
-    .where(
-      and(
-        eq(schema.accessTokens.purpose, "portal"),
-        eq(schema.accessTokens.subjectType, "customer"),
-        eq(schema.accessTokens.subjectId, input.customerId),
-        isNull(schema.accessTokens.revokedAt),
-      ),
-    );
+  if (input.revokeExisting !== false) await revokeCustomerPortalTokens(tx, input.customerId);
 
   const raw = randomBytes(32).toString("hex");
   await tx.insert(schema.accessTokens).values({
@@ -68,4 +68,21 @@ export async function resolveCustomerPortalToken(rawToken: string) {
 /** Explicit guard used by every nested portal resource read. */
 export function portalOwnsCustomer(portalCustomerId: string, entityCustomerId: string): boolean {
   return portalCustomerId === entityCustomerId;
+}
+
+/** Stops every workspace link this customer holds from working. */
+export async function revokeCustomerPortalTokens(tx: Pick<Db, "update">, customerId: string): Promise<number> {
+  const revoked = await tx
+    .update(schema.accessTokens)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(schema.accessTokens.purpose, "portal"),
+        eq(schema.accessTokens.subjectType, "customer"),
+        eq(schema.accessTokens.subjectId, customerId),
+        isNull(schema.accessTokens.revokedAt),
+      ),
+    )
+    .returning({ id: schema.accessTokens.id });
+  return revoked.length;
 }

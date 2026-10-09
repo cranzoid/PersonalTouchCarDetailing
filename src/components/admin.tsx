@@ -297,6 +297,13 @@ export function StatusBadge({ status }: { status: string }) {
     refunded: "border-violet-200 bg-violet-50 text-violet-700",
     succeeded: "border-emerald-200 bg-emerald-50 text-emerald-700",
     failed: "border-red-200 bg-red-50 text-red-700",
+    active: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    past_due: "border-red-200 bg-red-50 text-red-700",
+    canceled: "border-slate-200 bg-slate-100 text-slate-600",
+    pending_payment: "border-amber-200 bg-amber-50 text-amber-700",
+    void: "border-slate-200 bg-slate-100 text-slate-600",
+    due: "border-amber-200 bg-amber-50 text-amber-700",
+    waived: "border-violet-200 bg-violet-50 text-violet-700",
   };
   return (
     <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold capitalize leading-none ${tones[status] ?? "border-slate-200 bg-slate-100 text-slate-700"}`}>
