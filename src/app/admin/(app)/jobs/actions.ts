@@ -3,7 +3,7 @@
 import { randomBytes } from "crypto";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { newId } from "@/lib/id";
 import { requireStaff, AuthError } from "@/lib/auth/session";
@@ -152,6 +152,131 @@ export async function checkInAppointmentAction(
   } catch (err) {
     if (err instanceof AuthError) return { ok: false, error: err.message };
     console.error("checkInAppointmentAction failed", err);
+    return { ok: false, error: "Something went wrong" };
+  }
+}
+
+/**
+ * Undo a check-in made by mistake: the job is deleted and the appointment goes
+ * back to the status it had before (confirmed or arrived), so it can be
+ * cancelled, marked a no-show or checked in again for real.
+ *
+ * Only while the job is still "checked in", and never once money or the
+ * customer is involved — an invoice, or an extra-work request the customer may
+ * already have a link for. Anything else recorded on the job is cleared: the
+ * inspection and QC checklist are deleted, and photos are kept on the vehicle
+ * rather than lost.
+ */
+export async function undoCheckInAction(
+  raw: unknown,
+): Promise<ActionResult<{ appointmentId: string }>> {
+  try {
+    const staff = await requireStaff("work_jobs");
+    const parsed = z.object({ jobId: z.string().min(1) }).safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Invalid request" };
+    const { jobId } = parsed.data;
+
+    const result = await db().transaction(async (tx): Promise<ActionResult<{ appointmentId: string }>> => {
+      const job = (await tx.select().from(schema.jobs).where(eq(schema.jobs.id, jobId)).for("update"))[0];
+      if (!job) return { ok: false, error: "Job not found" };
+      if (normalizeJobStatus(job.status) !== "checked_in") {
+        return { ok: false, error: "Only a job that is still checked in can be undone" };
+      }
+      if (!job.appointmentId) return { ok: false, error: "This job did not come from an appointment" };
+
+      const appt = (
+        await tx.select().from(schema.appointments).where(eq(schema.appointments.id, job.appointmentId)).for("update")
+      )[0];
+      if (!appt || appt.jobId !== job.id) {
+        return { ok: false, error: "This job is no longer linked to its appointment" };
+      }
+
+      const invoiced =
+        job.invoiceId !== null ||
+        (await tx.select({ id: schema.invoices.id }).from(schema.invoices).where(eq(schema.invoices.jobId, jobId)).limit(1))
+          .length > 0 ||
+        (await tx.select({ id: schema.invoiceJobs.id }).from(schema.invoiceJobs).where(eq(schema.invoiceJobs.jobId, jobId)).limit(1))
+          .length > 0;
+      if (invoiced) return { ok: false, error: "This job has an invoice, so the check-in cannot be undone" };
+      const workRequests = await tx
+        .select({ id: schema.additionalWorkRequests.id })
+        .from(schema.additionalWorkRequests)
+        .where(eq(schema.additionalWorkRequests.jobId, jobId))
+        .limit(1);
+      if (workRequests.length > 0) {
+        return { ok: false, error: "Extra work was requested on this job, so the check-in cannot be undone" };
+      }
+
+      // The check-in audit entry is the only record of where the appointment
+      // was before. Confirmed is the fallback: it is what nearly every
+      // check-in starts from.
+      const checkInEntry = (
+        await tx
+          .select({ before: schema.auditLog.before })
+          .from(schema.auditLog)
+          .where(and(
+            eq(schema.auditLog.entityType, "job"),
+            eq(schema.auditLog.entityId, jobId),
+            eq(schema.auditLog.action, "job.checked_in"),
+          ))
+          .limit(1)
+      )[0];
+      const recorded = (checkInEntry?.before as { appointmentStatus?: string } | null)?.appointmentStatus;
+      const restoredStatus = recorded && CHECK_IN_FROM.includes(recorded) ? recorded : "confirmed";
+
+      const inspection = (
+        await tx.select().from(schema.inspections).where(eq(schema.inspections.jobId, jobId)).limit(1)
+      )[0];
+      const photoParents = inspection ? [jobId, inspection.id] : [jobId];
+      const movedPhotos = await tx
+        .update(schema.files)
+        .set({ entityType: "vehicle", entityId: job.vehicleId })
+        .where(and(
+          inArray(schema.files.entityType, ["job", "inspection"]),
+          inArray(schema.files.entityId, photoParents),
+        ))
+        .returning({ id: schema.files.id });
+      if (inspection) {
+        await tx.delete(schema.inspectionFindings).where(eq(schema.inspectionFindings.inspectionId, inspection.id));
+        await tx.delete(schema.inspections).where(eq(schema.inspections.id, inspection.id));
+      }
+      const removedQc = await tx
+        .delete(schema.qcChecklists)
+        .where(eq(schema.qcChecklists.jobId, jobId))
+        .returning({ id: schema.qcChecklists.id });
+
+      await tx
+        .update(schema.appointments)
+        .set({ jobId: null, status: restoredStatus, updatedAt: new Date() })
+        .where(eq(schema.appointments.id, appt.id));
+      await tx.delete(schema.jobs).where(eq(schema.jobs.id, jobId));
+
+      await audit(tx, {
+        actorType: "staff",
+        actorId: staff.id,
+        action: "job.check_in_undone",
+        entityType: "job",
+        entityId: jobId,
+        before: { job, appointmentStatus: appt.status, inspection: inspection ?? null },
+        after: {
+          appointmentId: appt.id,
+          appointmentStatus: restoredStatus,
+          photosMovedToVehicle: movedPhotos.map((f) => f.id),
+          qcChecklistRemoved: removedQc.length > 0,
+        },
+      });
+      return { ok: true, appointmentId: appt.id };
+    });
+
+    if (result.ok) {
+      revalidatePath("/admin/appointments");
+      revalidatePath(`/admin/appointments/${result.appointmentId}`);
+      revalidatePath("/admin/jobs");
+    }
+    return result;
+  } catch (err) {
+    if (err instanceof AuthError) return { ok: false, error: err.message };
+    console.error("undoCheckInAction failed", err);
     return { ok: false, error: "Something went wrong" };
   }
 }

@@ -8,6 +8,7 @@ import { formatInZone } from "@/lib/tz";
 import { getSettings } from "@/lib/settings";
 import { isJobOpenForRepricing, isJobOpenForSideWork, normalizeJobStatus } from "@/lib/job-status";
 import { JobTransitionButtons } from "./job-transition-buttons";
+import { UndoCheckInButton } from "./undo-check-in-button";
 import { AdditionalWorkPanel } from "./additional-work";
 import { QcChecklistForm } from "./qc-checklist";
 import { PhotoUpload } from "./photo-upload";
@@ -146,6 +147,11 @@ export default async function JobDetailPage({ params }: { params: Promise<{ id: 
       </div>
 
       <JobTransitionButtons jobId={job.id} status={job.status} />
+      {/* Offered only where the action would accept it; it re-checks all of this. */}
+      {normalizeJobStatus(job.status) === "checked_in" &&
+        job.appointmentId &&
+        !job.invoiceId &&
+        workRequests.length === 0 && <UndoCheckInButton jobId={job.id} />}
 
       <div className="mt-6 grid gap-6 sm:grid-cols-2">
         <section className="rounded-xl border border-ink-800 p-5">

@@ -1524,3 +1524,28 @@ everything below covers both.
   `phone_normalized`.** They never did, so a reply to anything we texted them
   matched no lead. The migration backfilled existing leads with the same SQL as
   0010.
+
+## 43. A mistaken check-in can be undone, until money or the customer is involved
+
+Checking a car in created a job and stamped the appointment `converted`, and
+nothing could take that back: a converted appointment has no buttons, and a
+job only moves forward. A car checked in by mistake sat on the jobs board for
+good. "Undo check-in" on the job screen deletes the job and returns the
+appointment to the status it had before, so it can be cancelled, marked a
+no-show, or checked in again properly.
+
+- **Only while the job is still "checked in".** Once work has started, "Back
+  to checked in" comes first, which keeps the undo a deliberate two steps.
+- **Never with an invoice or an extra-work request.** An invoice is a money
+  record, and an extra-work request may already have sent the customer an
+  approval link. Either one means the visit was real enough to keep.
+- **The previous status comes from the check-in audit entry**
+  (`before.appointmentStatus`), confirmed or arrived, falling back to
+  confirmed.
+- **Everything else on the job is cleared, not refused.** The inspection, its
+  findings and the QC checklist are deleted. Photos are moved to the vehicle
+  rather than deleted, so nothing uploaded is lost and case-study links stay
+  valid. The undo entry in the audit log keeps the deleted job and inspection
+  rows in `before`.
+- **Same permission as check-in** (`work_jobs`), since whoever can make the
+  mistake should be able to fix it.
