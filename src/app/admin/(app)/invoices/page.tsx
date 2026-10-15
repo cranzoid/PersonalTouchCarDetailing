@@ -1,18 +1,62 @@
 import Link from "next/link";
-import { desc, eq, inArray } from "drizzle-orm";
+import { and, count, desc, eq, ilike, inArray, or, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { formatCents } from "@/lib/money";
 import { summarizePayments, syncOverdueInvoices } from "@/lib/invoices";
 import { getSettings } from "@/lib/settings";
 import { StatusBadge } from "@/components/admin";
 import { requirePageStaff } from "@/lib/auth/page";
+import { INVOICE_STATUSES } from "@/lib/types";
+import {
+  INVOICE_PAGE_SIZE,
+  invoiceNumberFromQuery,
+  parseInvoiceListParams,
+  statusesForFilter,
+} from "@/lib/invoice-list";
 
 export const dynamic = "force-dynamic";
 
-export default async function InvoicesPage() {
+const label = (s: string) => s.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+
+export default async function InvoicesPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ status?: string; q?: string; page?: string }>;
+}) {
   await requirePageStaff("record_payments");
+  const { filter, q, page: requestedPage } = parseInvoiceListParams(await searchParams);
   await syncOverdueInvoices();
   const settings = await getSettings();
+  const statuses = statusesForFilter(filter);
+  const number = q ? invoiceNumberFromQuery(q) : null;
+  const where = and(
+    statuses ? inArray(schema.invoices.status, statuses) : undefined,
+    q
+      ? or(
+          number !== null ? eq(schema.invoices.number, number) : undefined,
+          ilike(schema.customers.firstName, `%${q}%`),
+          ilike(schema.customers.lastName, `%${q}%`),
+          ilike(sql`${schema.customers.firstName} || ' ' || ${schema.customers.lastName}`, `%${q}%`),
+          ilike(schema.customers.email, `%${q}%`),
+        )
+      : undefined,
+  );
+  const [{ total }] = await db()
+    .select({ total: count() })
+    .from(schema.invoices)
+    .innerJoin(schema.customers, eq(schema.invoices.customerId, schema.customers.id))
+    .where(where);
+  const pageCount = Math.max(1, Math.ceil(total / INVOICE_PAGE_SIZE));
+  const page = Math.min(requestedPage, pageCount);
+  const href = (over: { status?: string; page?: number }) => {
+    const params = new URLSearchParams();
+    const status = over.status ?? filter;
+    if (status !== "all") params.set("status", status);
+    if (q) params.set("q", q);
+    if ((over.page ?? 1) > 1) params.set("page", String(over.page));
+    const qs = params.toString();
+    return qs ? `/admin/invoices?${qs}` : "/admin/invoices";
+  };
   const invoices = await db()
     .select({
       invoice: schema.invoices,
@@ -20,8 +64,10 @@ export default async function InvoicesPage() {
     })
     .from(schema.invoices)
     .innerJoin(schema.customers, eq(schema.invoices.customerId, schema.customers.id))
-    .orderBy(desc(schema.invoices.createdAt))
-    .limit(100);
+    .where(where)
+    .orderBy(desc(schema.invoices.createdAt), desc(schema.invoices.number))
+    .limit(INVOICE_PAGE_SIZE)
+    .offset((page - 1) * INVOICE_PAGE_SIZE);
 
   const paymentRows = invoices.length
     ? await db()
@@ -53,7 +99,42 @@ export default async function InvoicesPage() {
         Use <span className="text-ink-200">New invoice</span> for walk-ins and work done outside a
         booked job.
       </p>
-      <div className="mt-6 overflow-x-auto rounded-xl border border-ink-800">
+      <form action="/admin/invoices" role="search" className="mt-4 flex max-w-md gap-2">
+        {filter !== "all" && <input type="hidden" name="status" value={filter} />}
+        <input
+          name="q"
+          type="search"
+          defaultValue={q}
+          autoComplete="off"
+          placeholder="Search invoice #, name or email…"
+          aria-label="Search invoices"
+          className="w-full rounded-lg border border-ink-600 bg-ink-900 px-4 py-2 text-sm text-white placeholder:text-ink-600"
+        />
+        <button className="rounded-lg border border-ink-600 px-4 py-2 text-sm text-ink-200 hover:bg-ink-800">
+          Search
+        </button>
+      </form>
+      <nav aria-label="Filter by status" className="mt-3 flex flex-wrap gap-2 text-sm">
+        {(["all", "unpaid", ...INVOICE_STATUSES] as const).map((s) => (
+          <Link
+            key={s}
+            href={href({ status: s })}
+            aria-current={filter === s ? "page" : undefined}
+            className={`rounded-full border px-3 py-1 ${
+              filter === s
+                ? "border-accent-400 bg-accent-400 font-semibold text-ink-950"
+                : "border-ink-700 text-ink-300 hover:bg-ink-800"
+            }`}
+          >
+            {label(s)}
+          </Link>
+        ))}
+      </nav>
+      <p className="mt-3 text-xs text-ink-500">
+        {total} {total === 1 ? "invoice" : "invoices"}
+        {pageCount > 1 ? ` · page ${page} of ${pageCount}` : ""}
+      </p>
+      <div className="mt-3 overflow-x-auto rounded-xl border border-ink-800">
         <table className="w-full text-left text-sm">
           <thead className="border-b border-ink-800 text-xs uppercase tracking-wider text-ink-400">
             <tr>
@@ -94,13 +175,23 @@ export default async function InvoicesPage() {
             {invoices.length === 0 && (
               <tr>
                 <td colSpan={6} className="px-4 py-10 text-center text-ink-500">
-                  No invoices yet. Create one from a ready-for-pickup or completed job.
+                  {filter === "all" && !q ? "No invoices yet. Create one from a ready-for-pickup or completed job." : "No invoices match."}
                 </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
+      {pageCount > 1 && (
+        <div className="mt-4 flex items-center justify-between text-sm">
+          {page > 1 ? (
+            <Link href={href({ page: page - 1 })} className="text-accent-300 hover:underline">← Newer</Link>
+          ) : <span />}
+          {page < pageCount ? (
+            <Link href={href({ page: page + 1 })} className="text-accent-300 hover:underline">Older →</Link>
+          ) : <span />}
+        </div>
+      )}
     </div>
   );
 }
