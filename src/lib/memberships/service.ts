@@ -504,13 +504,20 @@ async function resolveVehicle(
 export async function ensureHelcimCustomerCode(customer: typeof schema.customers.$inferSelect): Promise<string> {
   if (customer.helcimCustomerCode) return customer.helcimCustomerCode;
   const code = `PTC-${customer.id.replace(/^cus_/, "").toUpperCase()}`;
+  const record = {
+    customerCode: code,
+    contactName: `${customer.firstName} ${customer.lastName}`.trim() || "Customer",
+    businessName: customer.companyName ?? undefined,
+  };
   try {
-    await createHelcimCustomer({
-      customerCode: code,
-      contactName: `${customer.firstName} ${customer.lastName}`.trim() || "Customer",
-      businessName: customer.companyName ?? undefined,
-      cellPhone: normalizePhone(customer.phone) ?? undefined,
-    });
+    try {
+      await createHelcimCustomer({ ...record, cellPhone: normalizePhone(customer.phone) ?? undefined });
+    } catch (error) {
+      // Helcim refuses numbers it doesn't consider valid. The phone is only a
+      // convenience on their side, so it must never block a payment.
+      if (!(error instanceof HelcimApiError) || !/phone/i.test(error.message)) throw error;
+      await createHelcimCustomer(record);
+    }
   } catch (error) {
     // Created on an earlier attempt whose answer was lost: the code is ours
     // either way, because it is derived from our own customer id.
