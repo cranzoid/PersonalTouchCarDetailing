@@ -121,9 +121,10 @@ export const SETTINGS_DEFAULTS: BusinessSettings = {
   phone: "905-679-0143",
   email: "info@personaltouchcardetailing.ca",
   googleReviewUrl: "https://share.google/s5WvXvgHbcWAiornU",
-  // Verified against the public Google listing on 2026-08-30.
+  // Verified against the public Google listing on 2026-10-22. Migration 0035
+  // moves installations that already saved these to the same numbers.
   googleReviewRating: 4.7,
-  googleReviewCount: 73,
+  googleReviewCount: 91,
   // Owner-confirmed for the 2026-08-30 public-site redesign.
   yearsInBusinessLabel: "25+ years",
   timezone: "America/Toronto",

@@ -1628,3 +1628,24 @@ it is prepaid and that unused washes expire with the season.
 **Revisit when:** Helcim's subscription API demonstrably supports changing a
 subscription's plan and amount — then billing could move to it, with the cron
 kept as the reconciler.
+
+## 45. Google rating and review count are moved by migration; the nav carries Sign in
+
+The homepage rating, count and review cards are not fetched from Google. The
+rating and count live in `business_settings`, and the excerpts in
+`src/lib/public-content.ts`. There is no Places API key, and none is exposed to
+the browser.
+
+- **Changing the code default is not enough.** Defaults apply only to a key that
+  was never saved, and Admin -> Settings writes every field on save. Migration
+  0035 raises the stored count to 91 and sets the rating to 4.7 with it. It only
+  raises, so a hand-entered number at or past 91 is left alone.
+- **Excerpts are quoted word for word** from the five newest listing reviews and
+  shortened only at sentence breaks. Names are a first name and an initial. The
+  listing page showed a star rating for one of the five, so the rest are
+  recorded as 5 on the strength of the text, not the page.
+- **The numbers go stale again.** Refresh them in Admin -> Settings, or by
+  another migration for the excerpts.
+- **Sign in sits in the header**, beside Book Now from the `sm` width up, and in
+  the mobile menu below that. It reads "My account" for a signed-in member. It
+  links to `/account`, which is the sign-in page when there is no session.

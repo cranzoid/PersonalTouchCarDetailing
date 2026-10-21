@@ -113,25 +113,36 @@ export function servicePresentation(slug: string): ServicePresentation {
 }
 
 /**
- * Short excerpts from the business's public Google listing, verified on
- * 2026-08-30. Keeping the excerpts local avoids inventing testimonials or
- * exposing a third-party API key in the browser.
+ * Short excerpts from the business's public Google listing, the five newest as
+ * of 2026-10-22, quoted word for word and shortened only at sentence breaks.
+ * Keeping the excerpts local avoids inventing testimonials or exposing a
+ * third-party API key in the browser. Names are shortened to a first name and
+ * an initial, as the listing's own cards do.
  */
 export const VERIFIED_GOOGLE_REVIEWS = [
   {
-    name: "C D",
+    name: "Bhupinder S.",
     rating: 5,
-    quote: "They assured me they could remove the scratches as most were paint transfer.",
+    quote: "Got ceramic coating done on my car including alloys, glass, and cladding. It looks absolutely picture-perfect!",
   },
   {
-    name: "Nyjo C.",
+    name: "Brian D.",
     rating: 5,
-    quote: "Now the Nissan Rogue looks like new.",
+    quote: "Great guys and they did a beautiful job on my interior",
   },
   {
-    name: "Dani O.",
+    name: "Neil N.",
     rating: 5,
-    quote: "Highly recommended. I am so happy—thanks for the amazing job.",
+    quote: "The quality of service was exceptional, and the attention to detail truly exceeded my expectations.",
+  },
+  {
+    name: "Dennis B.",
+    rating: 5,
+    quote: "Great experience. The ceramic made my 25 yrs old car look like new. I would recommend.",
+  },
+  {
+    name: "Nadine P.",
+    rating: 5,
+    quote: "They cleaned my car so I can sell … I almost kept it !! Such good work Highly recommend !",
   },
 ] as const;
-

@@ -11,6 +11,7 @@ import { StructuredData } from "@/components/structured-data";
 import { ServicesMenu } from "@/components/site-nav";
 import { db, schema } from "@/db";
 import { hasPublishedResults } from "@/lib/results";
+import { getAccountSession } from "@/lib/accounts/session";
 import { getPublicSettings } from "@/lib/settings";
 import { absoluteUrl, BUSINESS_ENTITY_ID, PUBLIC_SITE_URL, WEBSITE_ENTITY_ID } from "@/lib/seo";
 
@@ -30,10 +31,10 @@ const PRIMARY_NAV = [
   { href: "/contact", label: "Contact" },
 ];
 
+// The account link is added in the layout, where the visitor's session is known.
 const SECONDARY_NAV = [
   { href: "/reviews", label: "Reviews" },
   { href: "/faq", label: "FAQ" },
-  { href: "/account", label: "My account" },
 ];
 
 // The Services menu is two groups behind one overview link. Detailing and
@@ -83,11 +84,15 @@ function BrandLogo({ footer = false }: { footer?: boolean }) {
 }
 
 export default async function PublicLayout({ children }: { children: ReactNode }) {
-  const [settings, hours, resultsPublished] = await Promise.all([
+  const [settings, hours, resultsPublished, accountSession] = await Promise.all([
     getPublicSettings(),
     db().select().from(schema.businessHours).orderBy(asc(schema.businessHours.weekday)),
     hasPublishedResults(),
+    // A failed session lookup must not take every public page down with it:
+    // the visitor simply sees "Sign in", and /account sorts out the rest.
+    getAccountSession().catch(() => null),
   ]);
+  const accountLabel = accountSession ? "My account" : "Sign in";
   const primaryNav = PRIMARY_NAV.filter((item) => item.href !== "/results" || resultsPublished);
   const digits = settings.phone.replace(/\D/g, "");
   const telephone = digits.length === 10 ? `+1${digits}` : settings.phone;
@@ -161,6 +166,12 @@ export default async function PublicLayout({ children }: { children: ReactNode }
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
+            <Link
+              href="/account"
+              className="hidden min-h-11 items-center rounded-lg px-3 py-2 text-[0.94rem] font-medium text-[#536477] transition-colors hover:bg-[#0B2A4A]/6 hover:text-[#0B2A4A] sm:inline-flex"
+            >
+              {accountLabel}
+            </Link>
             <ButtonLink href="/book" className="hidden sm:inline-flex">Book Now</ButtonLink>
 
             <details className="group relative lg:hidden">
@@ -196,7 +207,11 @@ export default async function PublicLayout({ children }: { children: ReactNode }
                       ))}
                     </div>
                   </details>
-                  {[...primaryNav.filter((item) => item.href !== "/services"), ...SECONDARY_NAV].map((item) => (
+                  {[
+                    ...primaryNav.filter((item) => item.href !== "/services"),
+                    ...SECONDARY_NAV,
+                    { href: "/account", label: accountLabel },
+                  ].map((item) => (
                     <Link
                       key={item.href}
                       href={item.href}
