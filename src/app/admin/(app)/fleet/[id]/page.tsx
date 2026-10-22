@@ -1,17 +1,20 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import { StatusBadge } from "@/components/admin";
 import { db, schema } from "@/db";
 import { roleHas } from "@/lib/auth/permissions";
 import { getStaff } from "@/lib/auth/session";
 import { formatCents } from "@/lib/money";
+import { summarizePayments } from "@/lib/invoices";
+import { UNPAID_STATUSES } from "@/lib/invoice-list";
 import { getSettings } from "@/lib/settings";
 import { appointmentWhenLabel } from "@/lib/appointment-time";
 import { formatInZone } from "@/lib/tz";
 import { CustomerActionPanels } from "../../customers/[id]/customer-actions";
 import { VehicleList } from "../../customers/[id]/vehicle-list";
 import { ConsolidatedInvoiceBuilder } from "../consolidated-invoice-builder";
+import { FleetPaymentPanel, type OpenFleetInvoice } from "../fleet-payment-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +32,39 @@ export default async function FleetDetailPage({ params }: { params: Promise<{ id
     db().select().from(schema.invoices).where(eq(schema.invoices.customerId, id)).orderBy(desc(schema.invoices.createdAt)).limit(100),
     db().select().from(schema.appointments).where(eq(schema.appointments.customerId, id)).orderBy(desc(schema.appointments.startsAt)).limit(20),
   ]);
+  const canRecordPayments = roleHas(staff.role, "record_payments");
+  // Queried on their own rather than filtered from the list below, which stops
+  // at the 100 most recent — an old unpaid bill is exactly the one to catch.
+  const unpaidInvoices = canRecordPayments
+    ? await db().select().from(schema.invoices).where(and(eq(schema.invoices.customerId, id), inArray(schema.invoices.status, UNPAID_STATUSES)))
+    : [];
+  const unpaidPayments = canRecordPayments && unpaidInvoices.length > 0
+    ? await db().select().from(schema.payments).where(inArray(schema.payments.invoiceId, unpaidInvoices.map((invoice) => invoice.id)))
+    : [];
+  // Same balance rules as the invoice screen's payment form: both figures go to
+  // the client so the total follows the method picked (cash strips the tax).
+  const openInvoices: OpenFleetInvoice[] = unpaidInvoices
+    .map((invoice) => {
+      const payments = unpaidPayments.filter((payment) => payment.invoiceId === invoice.id);
+      const summary = summarizePayments(invoice.totalCents, invoice.depositAppliedCents, payments);
+      const taxSettled = invoice.quotedPaymentMethod !== null || invoice.taxExempt || payments.some((p) => p.status === "succeeded");
+      const untaxed = taxSettled ? summary : summarizePayments(invoice.totalCents - invoice.taxCents, invoice.depositAppliedCents, payments);
+      return {
+        id: invoice.id,
+        number: invoice.number,
+        status: invoice.status,
+        dueLabel: invoice.dueAt ? formatInZone(invoice.dueAt, settings.timezone, { month: "short", day: "numeric", year: "numeric" }) : null,
+        dueAt: invoice.dueAt?.getTime() ?? Number.MAX_SAFE_INTEGER,
+        balanceCents: summary.balanceCents,
+        untaxedBalanceCents: untaxed.balanceCents,
+        taxSettled,
+        settledTaxable: invoice.quotedPaymentMethod ? invoice.taxTreatment === "added" : null,
+      };
+    })
+    .filter((invoice) => invoice.balanceCents > 0)
+    // Oldest due first — the order a fleet's remittance usually lists them in.
+    .sort((a, b) => a.dueAt - b.dueAt || a.number - b.number)
+    .map(({ dueAt: _dueAt, ...invoice }) => invoice);
   const vehiclesById = new Map(vehicles.map((vehicle) => [vehicle.id, vehicle]));
   const eligibleJobs = jobs.filter((job) => !job.invoiceId && ["ready_for_pickup", "completed"].includes(job.status)).map((job) => {
     const vehicle = vehiclesById.get(job.vehicleId);
@@ -72,6 +108,10 @@ export default async function FleetDetailPage({ params }: { params: Promise<{ id
       <VehicleList customerId={customer.id} vehicles={vehicles} title="Fleet vehicles" emptyText="No fleet vehicles yet." columns="sm:grid-cols-2 lg:grid-cols-3" />
 
       {roleHas(staff.role, "manage_invoices") && <ConsolidatedInvoiceBuilder customerId={customer.id} jobs={eligibleJobs} />}
+
+      {canRecordPayments && (
+        <FleetPaymentPanel customerId={customer.id} invoices={openInvoices} currency={settings.currency} taxLabel={settings.taxLabel} />
+      )}
 
       <section className="mt-8">
         <h2 className="text-lg font-semibold text-white">Invoices ({invoices.length})</h2>

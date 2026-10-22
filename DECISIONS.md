@@ -1649,3 +1649,28 @@ the browser.
 - **Sign in sits in the header**, beside Book Now from the `sm` width up, and in
   the mobile menu below that. It reads "My account" for a signed-in member. It
   links to `/account`, which is the sign-in page when there is no session.
+
+## 46. A fleet's cheque pays many invoices at once, one payment row per invoice
+
+Fleets settle a month of bills with one cheque or transfer. The fleet account
+page now has "Record a payment for several invoices": tick the unpaid invoices
+(sent, part-paid, overdue), choose the method, optionally enter the cheque
+number, and each one is paid in full.
+
+- **One payment row per invoice, not one row split across them.** Receipts,
+  refunds, the tax report and the invoice's own status are all per invoice, and
+  `recordPaymentAction`'s rules (the tax decided by the first payment — see #18)
+  run unchanged on each through the shared `applyManualPayment`. Cash or
+  e-transfer therefore strips HST from every invoice it pays; the panel shows how
+  much tax comes off before anything is saved.
+- **All or nothing.** If any invoice cannot take the method (part-paid the other
+  way, paid meanwhile, another customer's), nothing is written and the error
+  names the invoice. A half-applied cheque would leave staff reconciling by hand,
+  which is the job this replaces.
+- **The cheque number lives in `payments.provider_ref`.** That column was
+  card-only until now; the invoice page shows it only for hand-recorded methods.
+  No migration, so the release is safe on the shared staging/production DB.
+- **Receipts are off by default.** Ten receipt emails for one cheque is noise;
+  the box is there when the fleet wants them.
+- No partial amounts: a cheque that does not cover every ticked invoice in full
+  is still recorded one invoice at a time.

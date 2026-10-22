@@ -25,7 +25,13 @@ import {
 } from "@/lib/invoices";
 import { zonedToUtc } from "@/lib/tz";
 import { resolveCatalogPrices } from "@/lib/pricing";
-import { MANUAL_PAYMENT_METHODS, MAX_TIP_BP, VEHICLE_CATEGORIES, type VehicleCategory } from "@/lib/types";
+import {
+  MANUAL_PAYMENT_METHODS,
+  MAX_TIP_BP,
+  VEHICLE_CATEGORIES,
+  type ManualPaymentMethod,
+  type VehicleCategory,
+} from "@/lib/types";
 import { getAppBaseUrl } from "@/lib/urls";
 import {
   closeCheckout,
@@ -684,6 +690,114 @@ const idempotencyKeySchema = z
   .max(200)
   .regex(/^[A-Za-z0-9:_-]+$/);
 
+/** One row of `invoices`, as read inside a payment transaction. */
+type InvoiceRow = typeof schema.invoices.$inferSelect;
+
+/**
+ * Records one manual payment against an invoice the caller has already locked
+ * FOR UPDATE and checked is payable. Shared by the single-invoice form and the
+ * fleet bulk payment, so the tax rule and the balance check cannot drift apart.
+ *
+ * `amountCents: "balance"` pays whatever is owing once this method has settled
+ * the tax — cash on a $197.75 invoice records $175.00 — which is what "mark
+ * these paid" means when a fleet sends one cheque for a stack of bills.
+ */
+async function applyManualPayment(
+  tx: Tx,
+  input: {
+    invoice: InvoiceRow;
+    method: ManualPaymentMethod;
+    amountCents: number | "balance";
+    idempotencyKey: string;
+    staffId: string;
+    taxLabel: string;
+    currency: string;
+    /** Cheque number or transfer reference, kept on the payment row. */
+    reference?: string | null;
+    /** Extra context for the payment audit entry (e.g. the bulk batch). */
+    auditContext?: Record<string, unknown>;
+  },
+): Promise<{ ok: false; error: string } | { ok: true; amountCents: number; status: string }> {
+  const { invoice } = input;
+  const payments = await tx.select().from(schema.payments).where(eq(schema.payments.invoiceId, invoice.id));
+
+  // How the customer pays is what decides whether this sale is taxed, and
+  // the shop only finds out here. The first payment settles it: cash or
+  // e-transfer strips the tax and re-prices the document, anything else
+  // leaves it as issued. Checked AFTER the idempotency lookup so a retry of
+  // an accepted payment still returns cleanly without re-pricing anything.
+  const tax = resolvePaymentTax({
+    invoice,
+    method: input.method,
+    taxLabel: input.taxLabel,
+    alreadyPaidAgainst: payments.some((p) => p.status === "succeeded"),
+  });
+  if (!tax.ok) return { ok: false, error: tax.conflict };
+
+  // Deliberately against the RE-PRICED total, and before anything is
+  // written: an invoice sent at $197.75 owes $175.00 once cash strips the
+  // tax, so tendering the taxed figure is refused rather than re-pricing
+  // the document and then rejecting the payment that caused it.
+  const summary = summarizePayments(tax.totalCents, invoice.depositAppliedCents, payments);
+  const amountCents = input.amountCents === "balance" ? summary.balanceCents : input.amountCents;
+  if (amountCents <= 0) return { ok: false, error: "Nothing is owing on this invoice" };
+  if (amountCents > summary.balanceCents) {
+    return { ok: false, error: `Amount exceeds the balance due (${formatCents(summary.balanceCents, input.currency)})` };
+  }
+
+  if (tax.changes) {
+    await tx
+      .update(schema.invoices)
+      .set({ ...tax.changes, updatedAt: new Date() })
+      .where(eq(schema.invoices.id, invoice.id));
+    if (tax.changes.taxTreatment === "none") {
+      await audit(tx, {
+        actorType: "staff",
+        actorId: input.staffId,
+        action: "invoice.tax_removed_by_payment_method",
+        entityType: "invoice",
+        entityId: invoice.id,
+        before: { taxCents: invoice.taxCents, totalCents: invoice.totalCents, taxRateBp: invoice.taxRateBp },
+        after: { taxCents: 0, totalCents: tax.totalCents, method: input.method },
+        reason: tax.changes.taxExemptReason ?? undefined,
+      });
+    }
+  }
+
+  await tx.insert(schema.payments).values({
+    id: newId("pay"),
+    invoiceId: invoice.id,
+    customerId: invoice.customerId,
+    provider: input.method,
+    providerRef: input.reference || null,
+    idempotencyKey: input.idempotencyKey,
+    kind: "payment",
+    amountCents,
+    status: "succeeded",
+    receivedAt: new Date(),
+    recordedByStaffId: input.staffId,
+  });
+
+  const { status } = await recalculateInvoiceStatus(tx, invoice.id);
+
+  await audit(tx, {
+    actorType: "staff",
+    actorId: input.staffId,
+    action: "invoice.payment_recorded",
+    entityType: "invoice",
+    entityId: invoice.id,
+    after: {
+      method: input.method,
+      amountCents,
+      status,
+      taxTreatment: tax.changes?.taxTreatment ?? invoice.taxTreatment,
+      ...(input.reference ? { reference: input.reference } : {}),
+      ...input.auditContext,
+    },
+  });
+  return { ok: true, amountCents, status };
+}
+
 export async function recordPaymentAction(raw: unknown): Promise<ActionResult> {
   try {
     const staff = await requireStaff("record_payments");
@@ -728,77 +842,16 @@ export async function recordPaymentAction(raw: unknown): Promise<ActionResult> {
         return { ok: false, error: `A ${invoice.status.replaceAll("_", " ")} invoice cannot take a payment` };
       }
 
-      const payments = await tx.select().from(schema.payments).where(eq(schema.payments.invoiceId, input.invoiceId));
-
-      // How the customer pays is what decides whether this sale is taxed, and
-      // the shop only finds out here. The first payment settles it: cash or
-      // e-transfer strips the tax and re-prices the document, anything else
-      // leaves it as issued. Checked AFTER the idempotency lookup so a retry of
-      // an accepted payment still returns cleanly without re-pricing anything.
-      const tax = resolvePaymentTax({
+      const applied = await applyManualPayment(tx, {
         invoice,
         method: input.method,
-        taxLabel: settings.taxLabel,
-        alreadyPaidAgainst: payments.some((p) => p.status === "succeeded"),
-      });
-      if (!tax.ok) return { ok: false, error: tax.conflict };
-
-      // Deliberately against the RE-PRICED total, and before anything is
-      // written: an invoice sent at $197.75 owes $175.00 once cash strips the
-      // tax, so tendering the taxed figure is refused rather than re-pricing
-      // the document and then rejecting the payment that caused it.
-      const summary = summarizePayments(tax.totalCents, invoice.depositAppliedCents, payments);
-      if (input.amountCents > summary.balanceCents) {
-        return { ok: false, error: `Amount exceeds the balance due (${formatCents(summary.balanceCents, settings.currency)})` };
-      }
-
-      if (tax.changes) {
-        await tx
-          .update(schema.invoices)
-          .set({ ...tax.changes, updatedAt: new Date() })
-          .where(eq(schema.invoices.id, invoice.id));
-        if (tax.changes.taxTreatment === "none") {
-          await audit(tx, {
-            actorType: "staff",
-            actorId: staff.id,
-            action: "invoice.tax_removed_by_payment_method",
-            entityType: "invoice",
-            entityId: invoice.id,
-            before: { taxCents: invoice.taxCents, totalCents: invoice.totalCents, taxRateBp: invoice.taxRateBp },
-            after: { taxCents: 0, totalCents: tax.totalCents, method: input.method },
-            reason: tax.changes.taxExemptReason ?? undefined,
-          });
-        }
-      }
-
-      await tx.insert(schema.payments).values({
-        id: newId("pay"),
-        invoiceId: input.invoiceId,
-        customerId: invoice.customerId,
-        provider: input.method,
-        idempotencyKey: input.idempotencyKey,
-        kind: "payment",
         amountCents: input.amountCents,
-        status: "succeeded",
-        receivedAt: new Date(),
-        recordedByStaffId: staff.id,
+        idempotencyKey: input.idempotencyKey,
+        staffId: staff.id,
+        taxLabel: settings.taxLabel,
+        currency: settings.currency,
       });
-
-      const { status } = await recalculateInvoiceStatus(tx, input.invoiceId);
-
-      await audit(tx, {
-        actorType: "staff",
-        actorId: staff.id,
-        action: "invoice.payment_recorded",
-        entityType: "invoice",
-        entityId: input.invoiceId,
-        after: {
-          method: input.method,
-          amountCents: input.amountCents,
-          status,
-          taxTreatment: tax.changes?.taxTreatment ?? invoice.taxTreatment,
-        },
-      });
+      if (!applied.ok) return applied;
       return { ok: true, newlyRecorded: true };
     });
     if (!result.ok) return result;
@@ -823,6 +876,155 @@ export async function recordPaymentAction(raw: unknown): Promise<ActionResult> {
     return { ok: false, error: "Something went wrong" };
   }
 }
+
+/* ------------------------------------------------------------------ */
+/* Fleet bulk payment — one cheque, many invoices                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Pays a fleet account's selected invoices in full, by one method, in one go.
+ *
+ * Fleets settle a month of bills with one cheque or transfer; before this, staff
+ * opened each invoice and recorded its share by hand. Each invoice still gets
+ * its own payment row (reports, receipts and refunds are all per invoice), for
+ * exactly the balance owing once the method has settled the tax — so cash or
+ * e-transfer strips HST from every invoice it pays, the same as one at a time.
+ *
+ * All or nothing: if any invoice cannot take this method (already part-paid the
+ * other way, cancelled, paid meanwhile, another customer's), nothing is written
+ * and the error names the invoice, so staff never have to work out which half
+ * of a cheque landed.
+ */
+export async function recordFleetPaymentAction(
+  raw: unknown,
+): Promise<ActionResult<{ invoiceCount: number; totalCents: number }>> {
+  try {
+    const staff = await requireStaff("record_payments");
+    const parsed = z
+      .object({
+        customerId: z.string().min(1),
+        invoiceIds: z.array(z.string().min(1)).min(1).max(100),
+        method: z.enum(MANUAL_PAYMENT_METHODS),
+        reference: z.string().trim().max(100).optional(),
+        sendReceipts: z.boolean().default(false),
+        idempotencyKey: idempotencyKeySchema,
+      })
+      .safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Choose at least one invoice and a payment method" };
+    const input = parsed.data;
+    const invoiceIds = [...new Set(input.invoiceIds)].sort();
+    const reference = input.reference || null;
+    const settings = await getSettings();
+    const keyFor = (invoiceId: string) => `${input.idempotencyKey}:${invoiceId}`;
+
+    const result = await db().transaction(async (tx): Promise<
+      ActionResult<{ newlyRecorded: boolean; paid: { invoiceId: string; amountCents: number }[] }>
+    > => {
+      // Locked in id order so two overlapping batches cannot deadlock.
+      const invoices = await tx
+        .select()
+        .from(schema.invoices)
+        .where(inArray(schema.invoices.id, invoiceIds))
+        .orderBy(schema.invoices.id)
+        .for("update");
+      if (invoices.length !== invoiceIds.length || invoices.some((invoice) => invoice.customerId !== input.customerId)) {
+        return { ok: false, error: "One of those invoices was not found on this account — refresh and try again" };
+      }
+
+      // A double-click or retry of a batch that already landed is a no-op.
+      const existing = await tx
+        .select()
+        .from(schema.payments)
+        .where(inArray(schema.payments.idempotencyKey, invoiceIds.map(keyFor)));
+      if (existing.length > 0) {
+        const sameBatch =
+          existing.length === invoiceIds.length &&
+          existing.every(
+            (payment) =>
+              payment.invoiceId !== null &&
+              payment.idempotencyKey === keyFor(payment.invoiceId) &&
+              payment.provider === input.method &&
+              payment.kind === "payment" &&
+              payment.status === "succeeded",
+          );
+        return sameBatch
+          ? { ok: true, newlyRecorded: false, paid: existing.map((p) => ({ invoiceId: p.invoiceId!, amountCents: p.amountCents })) }
+          : { ok: false, error: "That idempotency key was already used for a different payment" };
+      }
+
+      // Checked for the whole batch before anything is written: returning
+      // part-way through the loop below would commit the invoices before it.
+      const unpayable = invoices.find((invoice) => NOT_PAYABLE_STATUSES.has(invoice.status) || invoice.status === "paid");
+      if (unpayable) {
+        return { ok: false, error: `INV-${unpayable.number} is ${unpayable.status.replaceAll("_", " ")} and cannot take a payment` };
+      }
+
+      const paid: { invoiceId: string; amountCents: number }[] = [];
+      for (const invoice of invoices) {
+        const applied = await applyManualPayment(tx, {
+          invoice,
+          method: input.method,
+          amountCents: "balance",
+          idempotencyKey: keyFor(invoice.id),
+          staffId: staff.id,
+          taxLabel: settings.taxLabel,
+          currency: settings.currency,
+          reference,
+          auditContext: { bulkPayment: input.idempotencyKey },
+        });
+        // Throwing (not returning) rolls back the invoices already paid in
+        // this batch; the message is caught below and shown as-is.
+        if (!applied.ok) throw new BulkPaymentRefused(`INV-${invoice.number}: ${applied.error}`);
+        paid.push({ invoiceId: invoice.id, amountCents: applied.amountCents });
+      }
+
+      await audit(tx, {
+        actorType: "staff",
+        actorId: staff.id,
+        action: "customer.bulk_payment_recorded",
+        entityType: "customer",
+        entityId: input.customerId,
+        after: {
+          method: input.method,
+          reference,
+          batch: input.idempotencyKey,
+          invoices: paid,
+          totalCents: paid.reduce((sum, row) => sum + row.amountCents, 0),
+        },
+      });
+      return { ok: true, newlyRecorded: true, paid };
+    });
+    if (!result.ok) return result;
+
+    if (result.newlyRecorded && input.sendReceipts) {
+      for (const row of result.paid) {
+        try {
+          await sendInvoiceReceipt(row.invoiceId, row.amountCents);
+        } catch (err) {
+          // Committed already; a failed receipt must not read as a failed payment.
+          console.error("bulk payment recorded but receipt delivery failed", err);
+        }
+      }
+    }
+
+    for (const row of result.paid) revalidatePath(`/admin/invoices/${row.invoiceId}`);
+    revalidatePath("/admin/invoices");
+    revalidatePath(`/admin/fleet/${input.customerId}`);
+    return {
+      ok: true,
+      invoiceCount: result.paid.length,
+      totalCents: result.paid.reduce((sum, row) => sum + row.amountCents, 0),
+    };
+  } catch (err) {
+    if (err instanceof BulkPaymentRefused) return { ok: false, error: err.message };
+    if (err instanceof AuthError) return { ok: false, error: err.message };
+    console.error("recordFleetPaymentAction failed", err);
+    return { ok: false, error: "Something went wrong" };
+  }
+}
+
+/** Aborts a bulk payment's transaction with a message staff should see. */
+class BulkPaymentRefused extends Error {}
 
 /* ------------------------------------------------------------------ */
 /* Refunds                                                             */

@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { asc, desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { formatCents } from "@/lib/money";
-import { QUOTED_PAYMENT_METHOD_LABELS, type QuotedPaymentMethod } from "@/lib/types";
+import { MANUAL_PAYMENT_METHODS, QUOTED_PAYMENT_METHOD_LABELS, type QuotedPaymentMethod } from "@/lib/types";
 import { PAYMENT_PROVIDER_LABELS } from "@/lib/payment-labels";
 import { formatInZone } from "@/lib/tz";
 import { getSettings } from "@/lib/settings";
@@ -244,7 +244,14 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                   <td className="px-4 py-3 text-ink-400">
                     {(p.receivedAt ?? p.createdAt).toLocaleString("en-CA")}
                   </td>
-                  <td className="px-4 py-3 text-ink-200">{PROVIDER_LABELS[p.provider] ?? p.provider}</td>
+                  <td className="px-4 py-3 text-ink-200">
+                    {PROVIDER_LABELS[p.provider] ?? p.provider}
+                    {/* Card rows keep a Helcim transaction id here; only a hand-recorded
+                        payment's reference (cheque number, transfer ref) is for people. */}
+                    {p.providerRef && (MANUAL_PAYMENT_METHODS as readonly string[]).includes(p.provider) && (
+                      <span className="block text-xs text-ink-500">Ref. {p.providerRef}</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 capitalize text-ink-300">{p.kind}</td>
                   <td className="px-4 py-3"><StatusBadge status={p.status} /></td>
                   <td className="px-4 py-3 text-ink-200">
