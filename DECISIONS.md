@@ -1692,3 +1692,16 @@ year, make, model, trim, size category, colour, plate and condition notes.
   the car's details, never whose car it is.
 - The audit entry `customer.vehicle_updated` records only the fields that
   changed, before and after. No migration.
+
+## 48. Invoices fall due 30 days after they are sent
+
+`INVOICE_DUE_DAYS` in `src/lib/invoices.ts` (was a literal 14 in
+`sendInvoiceAction`). The date is set the first time an invoice is sent and a
+re-send does not move it.
+
+- **Invoices already sent keep their date.** Only invoices sent from now on get
+  30 days; changing existing due dates would need a data migration and the owner
+  did not ask for one. An invoice that is already overdue stays overdue.
+- **Fleet statements:** the fleet payment panel (#46) lists oldest-due first,
+  so a mixed account shows the 14-day invoices ahead of the 30-day ones.
+- No migration.

@@ -16,6 +16,7 @@ import {
   buildConsolidatedInvoiceLines,
   computeInvoiceTotals,
   createInvoiceAccessToken,
+  invoiceDueDate,
   nextInvoiceNumber,
   recalculateInvoiceStatus,
   resolvePaymentTax,
@@ -620,7 +621,7 @@ export async function sendInvoiceAction(
         .set({
           status: invoice.status === "draft" ? "sent" : invoice.status,
           sentAt: invoice.sentAt ?? new Date(),
-          dueAt: invoice.dueAt ?? new Date(Date.now() + 14 * 86_400_000),
+          dueAt: invoice.dueAt ?? invoiceDueDate(new Date()),
           // Replaces, never appends: this is who the current send copies, and
           // it is what the receipt will go to when the invoice is paid.
           ccEmails: cc,

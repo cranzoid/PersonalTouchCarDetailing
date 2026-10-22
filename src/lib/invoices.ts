@@ -71,6 +71,20 @@ export function buildConsolidatedInvoiceLines(
   ]);
 }
 
+/**
+ * Days from sending an invoice until it falls due. Set when the invoice is
+ * first sent and never moved by a re-send; `syncOverdueInvoices` flips it to
+ * overdue once the date passes. Owner-set to 30 on 2026-10-22 (was 14) — fleets
+ * pay in monthly batches, so a two-week term had their bills going overdue
+ * before they had even been looked at. Invoices already sent keep their date.
+ */
+export const INVOICE_DUE_DAYS = 30;
+
+/** The due date for an invoice sent at `sentAt`. */
+export function invoiceDueDate(sentAt: Date): Date {
+  return new Date(sentAt.getTime() + INVOICE_DUE_DAYS * 86_400_000);
+}
+
 /* ------------------------------------------------------------------ */
 /* Payment-method tax treatment (spec §2)                              */
 /* ------------------------------------------------------------------ */
