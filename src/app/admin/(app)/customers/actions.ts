@@ -248,6 +248,73 @@ export async function addCustomerVehicleAction(
   }
 }
 
+/** An editable optional field: an emptied box clears the stored value. */
+const clearableText = (max: number) => z.string().trim().max(max).nullish().transform((value) => value || null);
+
+/**
+ * Corrects a vehicle's details — a misread plate, the wrong trim, a car filed
+ * as a sedan that is really a large SUV. Works the same for a personal
+ * customer's car and a fleet vehicle.
+ *
+ * Nothing already priced moves: booked services, invoices, memberships and
+ * Winter Passes all stored their price when they were made, so a new category
+ * only changes what the NEXT booking or invoice for this car costs. Labels are
+ * read live, so the corrected name shows everywhere the car appears, past
+ * records included — which is the point of fixing a typo.
+ */
+export async function updateCustomerVehicleAction(raw: unknown): Promise<CustomerActionResult> {
+  try {
+    const staff = await requireStaff("manage_customers");
+    const parsed = z.object({
+      customerId: z.string().min(1),
+      vehicleId: z.string().min(1),
+      year: z.number().int().min(1900).max(new Date().getFullYear() + 2).nullish().transform((value) => value ?? null),
+      make: z.string().trim().min(1).max(60),
+      model: z.string().trim().min(1).max(60),
+      trim: clearableText(60),
+      category: z.enum(VEHICLE_CATEGORIES),
+      colour: clearableText(60),
+      licencePlate: clearableText(30),
+      conditionNotes: clearableText(1000),
+    }).safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Please check the vehicle details — make and model are required" };
+    const { customerId, vehicleId, ...fields } = parsed.data;
+
+    const result = await db().transaction(async (tx): Promise<CustomerActionResult> => {
+      const [vehicle] = await tx
+        .select()
+        .from(schema.vehicles)
+        .where(and(eq(schema.vehicles.id, vehicleId), eq(schema.vehicles.customerId, customerId)))
+        .for("update");
+      if (!vehicle) return { ok: false, error: "Vehicle not found on this account" };
+
+      const changed = (Object.keys(fields) as (keyof typeof fields)[]).filter((key) => vehicle[key] !== fields[key]);
+      if (changed.length === 0) return { ok: true };
+
+      await tx.update(schema.vehicles).set({ ...fields, updatedAt: new Date() }).where(eq(schema.vehicles.id, vehicle.id));
+      await audit(tx, {
+        actorType: "staff",
+        actorId: staff.id,
+        action: "customer.vehicle_updated",
+        entityType: "vehicle",
+        entityId: vehicle.id,
+        before: Object.fromEntries(changed.map((key) => [key, vehicle[key]])),
+        after: { customerId, ...Object.fromEntries(changed.map((key) => [key, fields[key]])) },
+      });
+      return { ok: true };
+    });
+    if (result.ok) {
+      revalidatePath(`/admin/customers/${customerId}`);
+      revalidatePath(`/admin/fleet/${customerId}`);
+    }
+    return result;
+  } catch (error) {
+    if (error instanceof AuthError) return { ok: false, error: error.message };
+    console.error("updateCustomerVehicleAction failed", error);
+    return { ok: false, error: "Something went wrong" };
+  }
+}
+
 /**
  * Removes a vehicle that was added by mistake. Once any operational record or
  * file points at it, the vehicle becomes part of the business history and is

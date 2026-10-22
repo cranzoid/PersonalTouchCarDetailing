@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { removeCustomerVehicleAction } from "../actions";
+import { VEHICLE_CATEGORIES, VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
+import { removeCustomerVehicleAction, updateCustomerVehicleAction } from "../actions";
 import { sellWinterPassAction } from "../../memberships/actions";
 
 export type VehicleListItem = {
@@ -16,6 +17,8 @@ export type VehicleListItem = {
   licencePlate: string | null;
   conditionNotes: string | null;
 };
+
+const inputClass = "rounded-lg border border-ink-700 bg-ink-900 px-3 py-2 text-sm text-white placeholder:text-ink-600";
 
 export function VehicleList({
   customerId,
@@ -35,6 +38,7 @@ export function VehicleList({
 }) {
   const router = useRouter();
   const [confirmId, setConfirmId] = useState<string | null>(null);
+  const [editId, setEditId] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [hiddenIds, setHiddenIds] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +51,30 @@ export function VehicleList({
     setBusyId(null);
     if (!result.ok) return setError(result.error);
     if ("invoiceId" in result && result.invoiceId) router.push(`/admin/invoices/${result.invoiceId}`);
+  }
+
+  async function save(vehicle: VehicleListItem, event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusyId(vehicle.id);
+    setError(null);
+    const form = new FormData(event.currentTarget);
+    const year = String(form.get("year") ?? "").trim();
+    const result = await updateCustomerVehicleAction({
+      customerId,
+      vehicleId: vehicle.id,
+      year: year ? Number(year) : null,
+      make: form.get("make"),
+      model: form.get("model"),
+      trim: form.get("trim"),
+      category: form.get("category"),
+      colour: form.get("colour"),
+      licencePlate: form.get("licencePlate"),
+      conditionNotes: form.get("conditionNotes"),
+    });
+    setBusyId(null);
+    if (!result.ok) return setError(result.error);
+    setEditId(null);
+    router.refresh();
   }
 
   async function remove(vehicle: VehicleListItem) {
@@ -73,26 +101,71 @@ export function VehicleList({
       <div className={`mt-3 grid gap-3 ${columns}`}>
         {visible.map((vehicle) => {
           const confirming = confirmId === vehicle.id;
+          const editing = editId === vehicle.id;
           const label = [vehicle.year, vehicle.make, vehicle.model, vehicle.trim].filter(Boolean).join(" ");
           return (
-            <article key={vehicle.id} className="rounded-xl border border-ink-800 p-4 text-sm">
+            <article key={vehicle.id} className={`rounded-xl border border-ink-800 p-4 text-sm ${editing ? "col-span-full" : ""}`}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="font-medium text-white">{label}</p>
-                  <p className="mt-1 capitalize text-ink-400">
-                    {vehicle.category.replaceAll("_", " ")}
+                  <p className="mt-1 text-ink-400">
+                    {VEHICLE_CATEGORY_LABELS[vehicle.category as VehicleCategory] ?? vehicle.category.replaceAll("_", " ")}
                     {vehicle.colour ? ` · ${vehicle.colour}` : ""}
                   </p>
                   {vehicle.licencePlate && <p className="mt-1 font-mono text-xs text-ink-500">{vehicle.licencePlate}</p>}
                   {vehicle.conditionNotes && <p className="mt-2 text-xs text-ink-500">{vehicle.conditionNotes}</p>}
                 </div>
-                {!confirming && (
-                  <button type="button" onClick={() => { setConfirmId(vehicle.id); setError(null); }} className="shrink-0 rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50">
-                    Remove
-                  </button>
+                {!confirming && !editing && (
+                  <div className="flex shrink-0 gap-2">
+                    <button type="button" onClick={() => { setEditId(vehicle.id); setConfirmId(null); setError(null); }} className="rounded-lg border border-ink-600 px-3 py-1.5 text-xs font-semibold text-ink-200 hover:bg-ink-800">
+                      Edit
+                    </button>
+                    <button type="button" onClick={() => { setConfirmId(vehicle.id); setEditId(null); setError(null); }} className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50">
+                      Remove
+                    </button>
+                  </div>
                 )}
               </div>
-              {canSellPass && !confirming && (
+              {editing && (
+                <form onSubmit={(event) => void save(vehicle, event)} className="mt-4 grid gap-2 border-t border-ink-800 pt-4 sm:grid-cols-2">
+                  <label className="text-xs text-ink-400">Year
+                    <input name="year" type="number" min="1900" max={new Date().getFullYear() + 2} defaultValue={vehicle.year ?? ""} className={`${inputClass} mt-1 w-full`} />
+                  </label>
+                  <label className="text-xs text-ink-400">Size category
+                    <select name="category" defaultValue={vehicle.category} className={`${inputClass} mt-1 w-full`}>
+                      {VEHICLE_CATEGORIES.map((category) => <option key={category} value={category}>{VEHICLE_CATEGORY_LABELS[category]}</option>)}
+                    </select>
+                  </label>
+                  <label className="text-xs text-ink-400">Make
+                    <input name="make" required maxLength={60} defaultValue={vehicle.make} className={`${inputClass} mt-1 w-full`} />
+                  </label>
+                  <label className="text-xs text-ink-400">Model
+                    <input name="model" required maxLength={60} defaultValue={vehicle.model} className={`${inputClass} mt-1 w-full`} />
+                  </label>
+                  <label className="text-xs text-ink-400">Trim
+                    <input name="trim" maxLength={60} defaultValue={vehicle.trim ?? ""} className={`${inputClass} mt-1 w-full`} />
+                  </label>
+                  <label className="text-xs text-ink-400">Colour
+                    <input name="colour" maxLength={60} defaultValue={vehicle.colour ?? ""} className={`${inputClass} mt-1 w-full`} />
+                  </label>
+                  <label className="text-xs text-ink-400 sm:col-span-2">Licence plate
+                    <input name="licencePlate" maxLength={30} defaultValue={vehicle.licencePlate ?? ""} className={`${inputClass} mt-1 w-full`} />
+                  </label>
+                  <label className="text-xs text-ink-400 sm:col-span-2">Condition notes
+                    <textarea name="conditionNotes" rows={2} maxLength={1000} defaultValue={vehicle.conditionNotes ?? ""} className={`${inputClass} mt-1 w-full`} />
+                  </label>
+                  <p className="text-xs text-ink-500 sm:col-span-2">
+                    Changing the size category changes prices for future bookings and invoices only. Anything already booked, invoiced or on a membership keeps its price.
+                  </p>
+                  <div className="flex flex-wrap gap-2 sm:col-span-2">
+                    <button type="submit" disabled={busyId === vehicle.id} className="rounded-lg bg-accent-400 px-3 py-1.5 text-xs font-semibold text-ink-950 disabled:opacity-50">
+                      {busyId === vehicle.id ? "Saving…" : "Save vehicle"}
+                    </button>
+                    <button type="button" onClick={() => setEditId(null)} disabled={busyId === vehicle.id} className="rounded-lg border border-ink-600 px-3 py-1.5 text-xs font-medium text-ink-200 disabled:opacity-50">Cancel</button>
+                  </div>
+                </form>
+              )}
+              {canSellPass && !confirming && !editing && (
                 <button
                   type="button"
                   onClick={() => void sellPass(vehicle)}

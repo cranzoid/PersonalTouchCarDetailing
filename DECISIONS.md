@@ -1674,3 +1674,21 @@ number, and each one is paid in full.
   the box is there when the fleet wants them.
 - No partial amounts: a cheque that does not cover every ticked invoice in full
   is still recorded one invoice at a time.
+
+## 47. Vehicles can be edited in place, and an edit never re-prices anything
+
+Every vehicle card, on a customer's page and a fleet's page alike, has **Edit**:
+year, make, model, trim, size category, colour, plate and condition notes.
+
+- **A new size category changes future prices only.** Booked services,
+  invoices, memberships and Winter Passes all stored their price when they were
+  made, so nothing already agreed moves. The form says so beside the button.
+- **Labels are read live, so a corrected name shows on past records too** —
+  the invoice page, PDF and portal. That is the intent (a typo is fixed
+  everywhere); the money on those records is untouched. Consolidated fleet
+  invoice lines are the exception: their descriptions were written as text when
+  the invoice was built and keep the old label.
+- **Moving a vehicle to another customer is not part of this.** Edit changes
+  the car's details, never whose car it is.
+- The audit entry `customer.vehicle_updated` records only the fields that
+  changed, before and after. No migration.
