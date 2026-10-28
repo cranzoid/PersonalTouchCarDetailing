@@ -1736,3 +1736,24 @@ alert, on top of the Staff alerts lists.
   suppression apply to it unchanged, and `notifyOnCustomerReply` switches it off
   with everything else. An address in both lists is emailed once.
 - No migration.
+
+## 50. The release audit gate accepts two named advisories, and nothing else
+
+On 2026-10-28 the stage job's `npm audit --omit=dev --audit-level=high` began
+failing on two advisories with no compatible fix, blocking every release
+including ones that touched no dependency. The owner chose to accept those two
+rather than hold the release for the upgrades.
+
+- **`scripts/audit-gate.mjs` replaces the bare audit command** in `ci.yml` and
+  `azure-release.yml`. The level is unchanged: any other high or critical
+  advisory still fails, and so does an audit that cannot be run or read.
+- **Accepted: `GHSA-mrhx-c7xc-m3w5` (zod <4.6.6)** — memory exhaustion on
+  oversized constrained collections. The only fix is zod 4, a major upgrade
+  across ~31 files. **Exit:** upgrade zod, then delete the entry.
+- **Accepted: `GHSA-xcx6-jx8p-x3h5` (@azure/msal-node <=7.0.2, via
+  @azure/identity)** — authorization-code-flow parameter disclosure. The app
+  uses `DefaultAzureCredential` only for managed-identity storage
+  (`src/lib/storage.ts`), never that flow. **Exit:** delete the entry once
+  `@azure/identity` moves to a fixed msal-node.
+- The script prints each accepted advisory on every run, and says when an entry
+  stops matching so it gets removed rather than left to rot.

@@ -66,7 +66,7 @@ jobs:
             echo 'Forbidden development or Azure hostname found in rendered SEO output.'
             exit 1
           fi
-      - run: npm audit --omit=dev --audit-level=high
+      - run: node scripts/audit-gate.mjs
 
   terraform:
     runs-on: ubuntu-latest

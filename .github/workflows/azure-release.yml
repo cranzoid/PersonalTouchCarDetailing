@@ -61,7 +61,7 @@ jobs:
       - run: npm test
       - run: ./node_modules/.bin/tsc --noEmit
       - run: npm run build
-      - run: npm audit --omit=dev --audit-level=high
+      - run: node scripts/audit-gate.mjs
       - name: Package the standalone Linux release
         run: |
           mkdir release
