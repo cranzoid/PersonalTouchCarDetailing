@@ -62,6 +62,7 @@ export function SettingsForm({
     // Comma-separated in the UI, split into arrays on save.
     staffNotifyPhones: initial.staffNotifyPhones.join(", "),
     staffNotifyEmails: initial.staffNotifyEmails.join(", "),
+    replyCopyEmails: initial.replyCopyEmails.join(", "),
     // Percent in the UI, basis points on save — same convention as the tax rate.
     promoPercent: (initial.promotion.percentOffBp / 100).toFixed(2),
     promoCode: initial.promotion.code,
@@ -131,6 +132,7 @@ export function SettingsForm({
       notifyOnCustomerReply,
       staffNotifyPhones: splitList(form.staffNotifyPhones),
       staffNotifyEmails: splitList(form.staffNotifyEmails),
+      replyCopyEmails: splitList(form.replyCopyEmails),
       promotion: {
         enabled: promoEnabled,
         code: form.promoCode.trim().toUpperCase(),
@@ -472,9 +474,16 @@ export function SettingsForm({
             placeholder: "owner@example.com, manager@example.com",
           })}
         </div>
+        <div className="mt-3">
+          {field("replyCopyEmails", "Also email every customer reply to (comma separated)", {
+            placeholder: "owner@example.com",
+          })}
+        </div>
         <p className="mt-2 text-xs text-ink-500">
           Add one entry per person — the manager account is often shared, so each phone listed here
           gets its own text. Delivery needs SMS or email credentials set up under Integrations.
+          The reply-copy addresses get the customer&apos;s name, number and message by email, for
+          replies only — not for new bookings.
         </p>
       </section>
       <section>

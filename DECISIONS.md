@@ -1705,3 +1705,34 @@ re-send does not move it.
 - **Fleet statements:** the fleet payment panel (#46) lists oldest-due first,
   so a mixed account shows the 14-day invoices ahead of the 30-day ones.
 - No migration.
+
+## 49. Tips are on the dashboard and reports; every customer reply is also emailed to a copy address
+
+**Tips.** Tips were already stored (#39) and in the CSV exports, but no screen
+showed them, so the owners could not see what they had been given. They now
+appear as a **Tips** tile on the dashboard's month strip, in the Business
+overview P&L strip for the chosen month/quarter/year, and in the rolling-window
+Tax section — each with the number of invoices that carried one.
+
+- **Still outside net sales, HST and net profit.** The tile is a separate line,
+  not a component of any other figure; the tests assert a tip moves none of them.
+- **Counted when the invoice is issued, like every P&L and tax figure.** A tip
+  added later to an invoice from a past month therefore changes that month's
+  total, and a tip on an unpaid (sent) invoice is counted although the money has
+  not arrived. The label says "Tips", not "received", for that reason.
+
+**Reply copies.** `replyCopyEmails` is a new business setting (default
+`visheshvaibhav10@gmail.com`) that gets an **email** copy of every customer-reply
+alert, on top of the Staff alerts lists.
+
+- **A setting, not a hard-coded address**, because a customer's name, number and
+  message go to it. It sits under Settings -> Staff alerts where the owners can
+  see and remove it. The default lives in code and is merged at read time, so it
+  is live on deploy with no migration and no one having to save Settings.
+- **Replies only.** Booking alerts keep using the staff lists alone.
+- **It counts as a recipient.** With no staff phone or email listed, the copy
+  still gets the alert. The existing throttle (one alert per contact per ten
+  minutes), the opt-out suppression and the "staff texting the shop number"
+  suppression apply to it unchanged, and `notifyOnCustomerReply` switches it off
+  with everything else. An address in both lists is emailed once.
+- No migration.

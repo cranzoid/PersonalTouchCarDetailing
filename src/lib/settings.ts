@@ -65,6 +65,15 @@ export type BusinessSettings = {
   notifyOnCustomerReply: boolean;
   staffNotifyPhones: string[];
   staffNotifyEmails: string[];
+  /**
+   * Addresses that get an EMAIL copy of every customer-reply alert, on top of
+   * the staff lists above, and for replies only (not booking alerts). Kept
+   * apart from `staffNotifyEmails` so a copy can be pointed at someone who
+   * should hear about replies without also being told about every booking.
+   * Visible and editable in Admin -> Settings, because it is a customer's
+   * message leaving the shop's own phones.
+   */
+  replyCopyEmails: string[];
   /** Ad-driven promotion. See src/lib/promotions.ts for how it is resolved. */
   promotion: Promotion;
   /**
@@ -147,6 +156,9 @@ export const SETTINGS_DEFAULTS: BusinessSettings = {
   notifyOnCustomerReply: true,
   staffNotifyPhones: [],
   staffNotifyEmails: [],
+  // Merged in at read time, so it takes effect on deploy for an installation
+  // that has never saved the key — no migration, and no settings save needed.
+  replyCopyEmails: ["visheshvaibhav10@gmail.com"],
   // Ships disabled with nothing eligible: merging this never changes a price
   // until staff switch it on and tick the packages it covers.
   promotion: {

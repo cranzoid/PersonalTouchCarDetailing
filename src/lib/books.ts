@@ -212,6 +212,8 @@ export type ProfitAndLoss = {
    * this report should quietly pick.
    */
   tipsCents: number;
+  /** Issued invoices that carried a tip — so the total can be read as an average. */
+  tippedInvoiceCount: number;
   invoiceCount: number;
   expenses: ExpenseSummary;
   netProfitCents: number;
@@ -245,6 +247,7 @@ export function computeProfitAndLoss(
     netSalesCents,
     discountsGivenCents,
     tipsCents,
+    tippedInvoiceCount: issued.filter((invoice) => (invoice.tipCents ?? 0) > 0).length,
     invoiceCount: issued.length,
     expenses,
     netProfitCents,

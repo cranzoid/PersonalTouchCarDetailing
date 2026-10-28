@@ -45,6 +45,9 @@ const settingsInput = z.object({
   notifyOnCustomerReply: z.boolean(),
   staffNotifyPhones: z.array(z.string().trim().min(1).max(30)).max(10),
   staffNotifyEmails: z.array(z.string().trim().email().max(200)).max(10),
+  // Optional so a form page loaded before this field existed cannot save an
+  // empty list over the stored copy addresses.
+  replyCopyEmails: z.array(z.string().trim().email().max(200)).max(10).optional(),
   promotion: z
     .object({
       enabled: z.boolean(),

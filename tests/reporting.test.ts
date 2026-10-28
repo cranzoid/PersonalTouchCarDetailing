@@ -258,7 +258,7 @@ describe("getReportWindow", () => {
 
 const invoice = (over: Partial<{
   status: string; subtotalCents: number; discountCents: number; taxCents: number;
-  taxExempt: boolean; taxExemptReason: string | null;
+  taxExempt: boolean; taxExemptReason: string | null; tipCents: number;
 }> = {}) => ({
   status: "paid",
   subtotalCents: 20000,
@@ -319,6 +319,21 @@ describe("summarizeTax", () => {
     ]);
     expect(summary.invoiceCount).toBe(1);
     expect(summary.taxCollectedCents).toBe(2600);
+  });
+
+  it("totals tips and counts the invoices that carried one, outside both tax bases", () => {
+    const summary = summarizeTax([
+      invoice({ tipCents: 2000 }),
+      invoice({ tipCents: 500, taxCents: 0, taxExempt: true, taxExemptReason: "Cash sale" }),
+      invoice(),
+      // A tip on an invoice that was never issued is not income yet.
+      invoice({ status: "draft", tipCents: 9999 }),
+    ]);
+    expect(summary.tipsCents).toBe(2500);
+    expect(summary.tippedInvoiceCount).toBe(2);
+    // The tip must not leak into the base the HST return is built from.
+    expect(summary.taxableBaseCents).toBe(40000);
+    expect(summary.exemptBaseCents).toBe(20000);
   });
 
   it("groups exemption reasons by value, labelling unrecorded ones", () => {

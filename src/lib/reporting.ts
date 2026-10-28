@@ -91,6 +91,8 @@ export type TaxSummary = {
    * unexplained gap between money received and sales recorded.
    */
   tipsCents: number;
+  /** Issued invoices in the window that carried a tip. */
+  tippedInvoiceCount: number;
 };
 
 export type PaymentMethodTotal = {
@@ -170,6 +172,7 @@ export function summarizeTax(rows: readonly TaxInvoiceLike[]): TaxSummary {
     exemptBaseCents: 0,
     exemptReasons: [],
     tipsCents: issued.reduce((sum, row) => sum + (row.tipCents ?? 0), 0),
+    tippedInvoiceCount: issued.filter((row) => (row.tipCents ?? 0) > 0).length,
   };
   const reasons = new Map<string, { count: number; baseCents: number }>();
 

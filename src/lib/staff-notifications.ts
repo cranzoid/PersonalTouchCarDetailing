@@ -26,10 +26,16 @@ export type StaffAlertOutcome = { attempted: number; sent: number };
 
 type Recipient = { channel: "sms" | "email"; to: string };
 
-function recipients(settings: BusinessSettings): Recipient[] {
+function recipients(settings: BusinessSettings, extraEmails: readonly string[] = []): Recipient[] {
+  // An address listed in both places is one person: one email, not two.
+  const emails = new Map<string, string>();
+  for (const email of [...settings.staffNotifyEmails, ...extraEmails]) {
+    const key = email.trim().toLowerCase();
+    if (key && !emails.has(key)) emails.set(key, email.trim());
+  }
   return [
     ...settings.staffNotifyPhones.map((to) => ({ channel: "sms" as const, to })),
-    ...settings.staffNotifyEmails.map((to) => ({ channel: "email" as const, to })),
+    ...[...emails.values()].map((to) => ({ channel: "email" as const, to })),
   ];
 }
 
@@ -44,8 +50,9 @@ async function fanOut(
   body: string,
   related: { type: string; id: string },
   customerId?: string,
+  extraEmails: readonly string[] = [],
 ): Promise<StaffAlertOutcome> {
-  const targets = recipients(settings);
+  const targets = recipients(settings, extraEmails);
   if (targets.length === 0) return { attempted: 0, sent: 0 };
 
   const results = await Promise.allSettled(
@@ -204,7 +211,9 @@ export async function notifyStaffOfCustomerReply(input: {
 }): Promise<StaffAlertOutcome> {
   const settings = await getSettings();
   if (!settings.notifyOnCustomerReply) return NOTHING;
-  if (recipients(settings).length === 0) return NOTHING;
+  // The reply copy counts as a recipient: with no staff phone or email listed,
+  // a copy address still has to hear about the reply.
+  if (recipients(settings, settings.replyCopyEmails).length === 0) return NOTHING;
 
   const normalized = normalizePhone(input.from);
 
@@ -252,6 +261,7 @@ export async function notifyStaffOfCustomerReply(input: {
     body,
     { type: REPLY_ALERT_ENTITY, id: threadKey },
     input.customerId ?? undefined,
+    settings.replyCopyEmails,
   );
 }
 

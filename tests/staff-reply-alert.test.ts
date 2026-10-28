@@ -2,8 +2,8 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { and, eq, sql } from "drizzle-orm";
 import { db, getPool, schema } from "../src/db";
 import { newId } from "../src/lib/id";
-import { setSetting } from "../src/lib/settings";
-import { notifyStaffOfCustomerReply } from "../src/lib/staff-notifications";
+import { SETTINGS_DEFAULTS, setSetting } from "../src/lib/settings";
+import { notifyStaff, notifyStaffOfCustomerReply } from "../src/lib/staff-notifications";
 
 /**
  * The alert that sends staff to the replies inbox. Sends are log-only outside
@@ -20,6 +20,9 @@ async function resetDb() {
   );
   await setSetting("staffNotifyPhones", [STAFF_PHONE]);
   await setSetting("staffNotifyEmails", [STAFF_EMAIL]);
+  // The shipped default copies replies to a further address; the tests below
+  // count recipients, so they start from none and opt in where it matters.
+  await setSetting("replyCopyEmails", []);
 }
 
 async function addCustomer() {
@@ -170,6 +173,81 @@ describe("notifyStaffOfCustomerReply", () => {
 
     expect(outcome).toEqual({ attempted: 0, sent: 0 });
     expect(await alerts()).toHaveLength(0);
+  });
+
+  describe("reply copy emails", () => {
+    const COPY_EMAIL = "copy@example.com";
+    const reply = () =>
+      notifyStaffOfCustomerReply({
+        from: "+19055551234",
+        body: "Can I move Friday to Saturday?",
+        customerId: null,
+        leadId: null,
+        needsAttention: false,
+      });
+
+    it("emails the copy address the same alert, and nothing else changes", async () => {
+      await setSetting("replyCopyEmails", [COPY_EMAIL]);
+      const outcome = await reply();
+
+      expect(outcome).toEqual({ attempted: 3, sent: 3 });
+      const rows = await alerts();
+      const copy = rows.find((r) => r.contactAddress === COPY_EMAIL);
+      expect(copy?.channel).toBe("email");
+      expect(copy?.subject).toBe("Reply from Unknown number");
+      expect(copy?.body).toContain("Can I move Friday to Saturday?");
+      // Staff still get theirs — the copy is added to the fan-out, not swapped in.
+      expect(rows.map((r) => r.contactAddress).sort()).toEqual([COPY_EMAIL, STAFF_EMAIL, STAFF_PHONE].sort());
+    });
+
+    it("sends one email, not two, to an address that is also a staff alert email", async () => {
+      await setSetting("replyCopyEmails", [STAFF_EMAIL.toUpperCase()]);
+      const outcome = await reply();
+
+      expect(outcome).toEqual({ attempted: 2, sent: 2 });
+      expect((await alerts()).filter((r) => r.channel === "email")).toHaveLength(1);
+    });
+
+    it("still alerts the copy address when no staff phone or email is listed", async () => {
+      await setSetting("staffNotifyPhones", []);
+      await setSetting("staffNotifyEmails", []);
+      await setSetting("replyCopyEmails", [COPY_EMAIL]);
+      const outcome = await reply();
+
+      expect(outcome).toEqual({ attempted: 1, sent: 1 });
+      const [row] = await alerts();
+      expect(row.contactAddress).toBe(COPY_EMAIL);
+    });
+
+    it("is switched off with the rest of the reply alerts", async () => {
+      await setSetting("replyCopyEmails", [COPY_EMAIL]);
+      await setSetting("notifyOnCustomerReply", false);
+
+      expect(await reply()).toEqual({ attempted: 0, sent: 0 });
+      expect(await alerts()).toHaveLength(0);
+    });
+
+    it("ships with a default copy address, in force before anyone saves the setting", async () => {
+      await db().execute(sql`TRUNCATE business_settings`);
+      await setSetting("staffNotifyPhones", []);
+      await setSetting("staffNotifyEmails", []);
+      const outcome = await reply();
+
+      expect(SETTINGS_DEFAULTS.replyCopyEmails.length).toBeGreaterThan(0);
+      expect(outcome).toEqual({ attempted: SETTINGS_DEFAULTS.replyCopyEmails.length, sent: SETTINGS_DEFAULTS.replyCopyEmails.length });
+      expect((await alerts()).map((r) => r.contactAddress)).toEqual(SETTINGS_DEFAULTS.replyCopyEmails);
+    });
+
+    it("does not copy a booking alert, which has its own list", async () => {
+      await setSetting("replyCopyEmails", [COPY_EMAIL]);
+      await notifyStaff({ subject: "Booking", body: "A booking", relatedType: "appointment", relatedId: "apt_1" });
+
+      const rows = await db()
+        .select()
+        .from(schema.communications)
+        .where(eq(schema.communications.kind, "staff_alert"));
+      expect(rows.map((r) => r.contactAddress)).not.toContain(COPY_EMAIL);
+    });
   });
 
   it("sends nothing when no recipients are configured", async () => {

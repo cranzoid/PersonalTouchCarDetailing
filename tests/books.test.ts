@@ -154,6 +154,26 @@ describe("computeProfitAndLoss", () => {
     expect(pnl.netSalesCents).toBe(10_000);
   });
 
+  it("reports tips on their own line, outside net sales and net profit", () => {
+    const pnl = computeProfitAndLoss(
+      [
+        { status: "paid", subtotalCents: 10_000, discountCents: 0, taxCents: 1_300, tipCents: 1_500 },
+        { status: "paid", subtotalCents: 20_000, discountCents: 0, taxCents: 2_600, tipCents: 0 },
+        { status: "partially_paid", subtotalCents: 5_000, discountCents: 0, taxCents: 0, tipCents: 700 },
+        // Never issued, so never income.
+        { status: "draft", subtotalCents: 5_000, discountCents: 0, taxCents: 650, tipCents: 4_000 },
+      ],
+      expenses,
+    );
+
+    expect(pnl.tipsCents).toBe(2_200);
+    expect(pnl.tippedInvoiceCount).toBe(2);
+    // A tip is not a sale: it must not lift net sales, HST, or profit.
+    expect(pnl.netSalesCents).toBe(35_000);
+    expect(pnl.taxCollectedCents).toBe(3_900);
+    expect(pnl.netProfitCents).toBe(35_000 - 250_000);
+  });
+
   it("reports no margin rather than 0% when nothing was sold", () => {
     const pnl = computeProfitAndLoss([], expenses);
     expect(pnl.netSalesCents).toBe(0);

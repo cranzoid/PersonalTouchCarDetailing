@@ -179,7 +179,7 @@ export default async function AdminDashboard() {
               Full report →
             </Link>
           </div>
-          <div className="mt-3 grid gap-4 sm:grid-cols-3">
+          <div className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-2xl border border-ink-700 bg-ink-900/50 p-5">
               <p className="text-sm text-ink-400">Net sales</p>
               <p className="mt-1 text-3xl font-bold text-white">
@@ -209,6 +209,17 @@ export default async function AdminDashboard() {
                 {books.pnl.profitMargin === null
                   ? "No sales yet this month"
                   : `${(books.pnl.profitMargin * 100).toFixed(1)}% margin`}
+              </p>
+            </div>
+            <div className="rounded-2xl border border-ink-700 bg-ink-900/50 p-5">
+              <p className="text-sm text-ink-400">Tips</p>
+              <p className="mt-1 text-3xl font-bold text-white">
+                {formatCents(books.pnl.tipsCents, books.currency)}
+              </p>
+              <p className="mt-2 text-xs text-ink-400">
+                {books.pnl.tippedInvoiceCount === 0
+                  ? "None yet this month"
+                  : `On ${books.pnl.tippedInvoiceCount} ${books.pnl.tippedInvoiceCount === 1 ? "invoice" : "invoices"} · not counted as sales`}
               </p>
             </div>
           </div>

@@ -237,7 +237,7 @@ export default async function ReportsPage({
           </p>
         </div>
 
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <Kpi
             label="Net sales"
             value={formatCents(books.pnl.netSalesCents, books.currency)}
@@ -255,6 +255,15 @@ export default async function ReportsPage({
               books.pnl.profitMargin === null
                 ? "No sales in this period"
                 : `${(books.pnl.profitMargin * 100).toFixed(1)}% margin`
+            }
+          />
+          <Kpi
+            label="Tips"
+            value={formatCents(books.pnl.tipsCents, books.currency)}
+            note={
+              books.pnl.tippedInvoiceCount === 0
+                ? "No tips on invoices this period"
+                : `On ${books.pnl.tippedInvoiceCount} ${books.pnl.tippedInvoiceCount === 1 ? "invoice" : "invoices"} · not sales, no ${settings.taxLabel}, not in profit`
             }
           />
           <Kpi
@@ -455,7 +464,7 @@ export default async function ReportsPage({
             Accrual basis: invoices issued in this period, drafts and cancellations excluded.
           </p>
         </div>
-        <div className="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mt-3 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <Kpi
             label={`${report.currency === "CAD" ? "HST" : "Tax"} collected`}
             value={formatCents(report.tax.taxCollectedCents, report.currency)}
@@ -483,6 +492,15 @@ export default async function ReportsPage({
               report.discounts.discountRate !== null
                 ? `${(report.discounts.discountRate * 100).toFixed(1)}% of sales, across ${report.discounts.invoiceCount} invoice${report.discounts.invoiceCount === 1 ? "" : "s"}`
                 : "No invoices issued in this window"
+            }
+          />
+          <Kpi
+            label="Tips"
+            value={formatCents(report.tax.tipsCents, report.currency)}
+            note={
+              report.tax.tippedInvoiceCount === 0
+                ? "No tips on invoices in this window"
+                : `On ${report.tax.tippedInvoiceCount} of ${report.tax.invoiceCount} invoices · not a taxable supply`
             }
           />
         </div>
