@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getStaff } from "@/lib/auth/session";
 import { roleHas } from "@/lib/auth/permissions";
-import { getReportingSnapshot, parseReportDays } from "@/lib/reporting";
+import { getReportingSnapshot, parseReportRange } from "@/lib/reporting";
 import {
   BOOKS_EXPORT_KINDS,
   buildReportCsv,
@@ -29,14 +29,20 @@ export async function GET(request: Request) {
     return new NextResponse("Unknown export", { status: 400 });
   }
   const kind = kindParam as ExportKind;
-  const days = parseReportDays(url.searchParams.get("range") ?? undefined);
-
-  const snapshot = await getReportingSnapshot(days);
+  const snapshot = await getReportingSnapshot(
+    parseReportRange({
+      range: url.searchParams.get("range"),
+      from: url.searchParams.get("from"),
+      to: url.searchParams.get("to"),
+    }),
+  );
 
   // The books exports run on a calendar period rather than a rolling window, so
   // they carry their own parameters and their own filename suffix.
   let books;
-  let suffix = `${days}d`;
+  let suffix = snapshot.window.custom
+    ? `${snapshot.window.from}_to_${snapshot.window.to}`
+    : `${snapshot.window.days}d`;
   if (BOOKS_EXPORT_KINDS.includes(kind)) {
     const [thisYear, thisMonth] = localDateISO(snapshot.timezone).split("-").map(Number);
     const periodKind = parsePeriodKind(url.searchParams.get("kindPeriod"));
@@ -52,7 +58,7 @@ export async function GET(request: Request) {
     suffix = `${books.period.year}-${periodKind}${periodKind === "year" ? "" : books.period.index}`;
   }
 
-  const csv = await buildReportCsv(kind, days, snapshot, new Date(), books);
+  const csv = await buildReportCsv(kind, snapshot, books);
   const stamp = new Intl.DateTimeFormat("en-CA", {
     timeZone: snapshot.timezone,
     year: "numeric",

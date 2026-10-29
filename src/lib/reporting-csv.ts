@@ -4,7 +4,7 @@ import { and, asc, eq, gte, isNotNull, isNull, lt, or } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { PAYMENT_PROVIDER_LABELS } from "@/lib/payment-labels";
 import { getSettings } from "@/lib/settings";
-import { getReportWindow, type ReportDays, type ReportingSnapshot } from "@/lib/reporting";
+import type { ReportWindow, ReportingSnapshot } from "@/lib/reporting";
 import {
   getPeriodWindow,
   listExpenses,
@@ -64,7 +64,12 @@ const percent = (rate: number | null) => (rate === null ? "" : (rate * 100).toFi
 /** Headline numbers, one block per report section. */
 function summaryCsv(snapshot: ReportingSnapshot): string {
   const rows: (string | number | null)[][] = [
-    ["Report", `Last ${snapshot.window.days} days`],
+    [
+      "Report",
+      snapshot.window.custom
+        ? `${snapshot.window.from} to ${snapshot.window.to}`
+        : `Last ${snapshot.window.days} days`,
+    ],
     ["Timezone", snapshot.timezone],
     ["Currency", snapshot.currency],
     [],
@@ -120,9 +125,8 @@ function summaryCsv(snapshot: ReportingSnapshot): string {
 }
 
 /** One row per invoice issued in the window — the HST working paper. */
-async function invoicesCsv(days: ReportDays, now: Date): Promise<string> {
+async function invoicesCsv(window: ReportWindow): Promise<string> {
   const settings = await getSettings();
-  const window = getReportWindow(days, settings.timezone, now);
   const issuedInWindow = or(
     and(
       isNotNull(schema.invoices.invoiceDate),
@@ -194,9 +198,8 @@ async function invoicesCsv(days: ReportDays, now: Date): Promise<string> {
 }
 
 /** One row per payment received in the window — the cash reconciliation. */
-async function paymentsCsv(days: ReportDays, now: Date): Promise<string> {
+async function paymentsCsv(window: ReportWindow): Promise<string> {
   const settings = await getSettings();
-  const window = getReportWindow(days, settings.timezone, now);
   const receivedInWindow = or(
     and(
       isNotNull(schema.payments.receivedAt),
@@ -318,14 +321,12 @@ async function expensesCsv(books: BooksSnapshot, taxLabel: string): Promise<stri
 
 export async function buildReportCsv(
   kind: ExportKind,
-  days: ReportDays,
   snapshot: ReportingSnapshot,
-  now = new Date(),
   books?: BooksSnapshot,
 ): Promise<string> {
   if (kind === "summary") return summaryCsv(snapshot);
-  if (kind === "invoices") return invoicesCsv(days, now);
-  if (kind === "payments") return paymentsCsv(days, now);
+  if (kind === "invoices") return invoicesCsv(snapshot.window);
+  if (kind === "payments") return paymentsCsv(snapshot.window);
 
   if (!books) throw new Error(`The ${kind} export needs a books snapshot`);
   const settings = await getSettings();

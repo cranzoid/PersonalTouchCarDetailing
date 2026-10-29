@@ -13,8 +13,9 @@ import { formatCents } from "@/lib/money";
 import { PAYMENT_PROVIDER_LABELS } from "@/lib/payment-labels";
 import {
   getReportingSnapshot,
-  parseReportDays,
+  parseReportRange,
   REPORT_DAY_OPTIONS,
+  reportRangeParams,
   type FunnelStage,
 } from "@/lib/reporting";
 import { formatInZone, localDateISO } from "@/lib/tz";
@@ -58,17 +59,24 @@ function FunnelRow({ stage }: { stage: FunnelStage }) {
 export default async function ReportsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ range?: string; kind?: string; y?: string; i?: string }>;
+  searchParams: Promise<{
+    range?: string;
+    from?: string;
+    to?: string;
+    kind?: string;
+    y?: string;
+    i?: string;
+  }>;
 }) {
   await requirePageStaff("view_financial_reports");
   const params = await searchParams;
-  const days = parseReportDays(params.range);
+  const range = parseReportRange(params);
   const settings = await getSettings();
   const [thisYear, thisMonth] = localDateISO(settings.timezone).split("-").map(Number);
 
   // The P&L runs on whole calendar periods — a month, quarter or year is what a
   // tax return and a bank statement are built from — while the sections below
-  // keep the rolling 7/30/90-day windows they have always used.
+  // use a rolling preset window or any two dates the owner picks.
   const kinds: PeriodKind[] = ["month", "quarter", "year"];
   const kind = kinds.includes(params.kind as PeriodKind) ? (params.kind as PeriodKind) : "month";
   const year = Number(params.y) || thisYear;
@@ -89,7 +97,10 @@ export default async function ReportsPage({
     getPeriodWindow(books.period.kind, books.period.year, books.period.index, books.timezone),
   );
 
-  const report = await getReportingSnapshot(days);
+  const report = await getReportingSnapshot(range);
+  const days = report.window.custom ? null : report.window.days;
+  const rangeQuery = new URLSearchParams(reportRangeParams(report.window)).toString();
+  const presetLabel = (option: number) => (option === 365 ? "1 year" : `${option} days`);
   const lastMoment = new Date(report.window.end.getTime() - 1);
   const periodLabel = `${formatInZone(report.window.start, report.timezone, {
     month: "short",
@@ -131,7 +142,7 @@ export default async function ReportsPage({
                 label: books.period.label,
               }}
               basePath="/admin/reports"
-              extraParams={{ range: String(days) }}
+              extraParams={reportRangeParams(report.window)}
             />
             <a
               href={`/api/reports/export?kind=pnl&kindPeriod=${books.period.kind}&y=${books.period.year}&i=${books.period.index}`}
@@ -150,7 +161,7 @@ export default async function ReportsPage({
             <div>
               <h2 className="text-sm font-bold text-[#0B2A4A]">Recent performance</h2>
               <p className="mt-1 text-xs leading-5 text-[#697B8D]">
-                Revenue, leads, tax detail and utilization use a rolling window: {periodLabel}.
+                Revenue, leads, tax detail and utilization use {report.window.custom ? "the dates you picked" : "a rolling window"}: {periodLabel}.
               </p>
             </div>
           </div>
@@ -170,10 +181,52 @@ export default async function ReportsPage({
                       : "text-[#5F7285] hover:bg-white hover:text-[#0B2A4A]"
                   }`}
                 >
-                  {option} days
+                  {presetLabel(option)}
                 </Link>
               ))}
             </nav>
+            <form
+              method="get"
+              action="/admin/reports"
+              aria-label="Custom date range"
+              className="flex flex-wrap items-center gap-2"
+            >
+              <input type="hidden" name="kind" value={books.period.kind} />
+              <input type="hidden" name="y" value={books.period.year} />
+              <input type="hidden" name="i" value={books.period.index} />
+              <label className="flex items-center gap-1 text-xs font-semibold text-[#5F7285]">
+                From
+                <input
+                  type="date"
+                  name="from"
+                  required
+                  min="2000-01-01"
+                  defaultValue={report.window.from}
+                  className="rounded-lg border border-[#D4DEE7] bg-white px-2 py-1.5 text-xs text-[#0B2A4A]"
+                />
+              </label>
+              <label className="flex items-center gap-1 text-xs font-semibold text-[#5F7285]">
+                To
+                <input
+                  type="date"
+                  name="to"
+                  required
+                  min="2000-01-01"
+                  defaultValue={report.window.to}
+                  className="rounded-lg border border-[#D4DEE7] bg-white px-2 py-1.5 text-xs text-[#0B2A4A]"
+                />
+              </label>
+              <button
+                type="submit"
+                className={`rounded-lg px-3 py-2 text-xs font-semibold transition ${
+                  report.window.custom
+                    ? "bg-[#0B2A4A] text-[#FFFFFF] shadow-sm"
+                    : "border border-[#D4DEE7] bg-[#F5F7FA] text-[#5F7285] hover:bg-white hover:text-[#0B2A4A]"
+                }`}
+              >
+                Apply dates
+              </button>
+            </form>
             <details className="relative">
               <summary className={`${financeButton} cursor-pointer list-none`}>Export data</summary>
               <div className="absolute right-0 top-12 z-20 w-48 rounded-xl border border-[#D8E1EA] bg-white p-2 shadow-[0_14px_36px_rgba(11,42,74,0.16)]">
@@ -184,7 +237,7 @@ export default async function ReportsPage({
                 ].map((option) => (
                   <a
                     key={option.kind}
-                    href={`/api/reports/export?kind=${option.kind}&range=${days}`}
+                    href={`/api/reports/export?kind=${option.kind}&${rangeQuery}`}
                     className="block rounded-lg px-3 py-2 text-xs font-semibold text-[#425A70] hover:bg-[#F4F6FA] hover:text-[#0B2A4A]"
                   >
                     {option.label}
@@ -433,13 +486,13 @@ export default async function ReportsPage({
 
       <div className="mt-8 overflow-hidden rounded-[1.75rem] bg-[#0B2A4A] px-5 py-6 text-[#FFFFFF] shadow-[0_12px_32px_rgba(11,42,74,0.14)] sm:px-7">
         <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-[#E5BE67]">
-          Recent performance · {days} days
+          {days === null ? "Custom range" : `Recent performance · ${presetLabel(days)}`}
         </p>
         <div className="mt-2 flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="text-xl font-bold tracking-[-0.02em]">Sales and operations</h2>
             <p className="mt-1 max-w-3xl text-xs leading-5 text-white/65">
-              {periodLabel} · {report.timezone}. The sections below use this rolling window, not
+              {periodLabel} · {report.timezone}. The sections below use this window, not
               the calendar period used for profit and loss above.
             </p>
           </div>

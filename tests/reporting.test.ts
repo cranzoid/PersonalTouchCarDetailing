@@ -3,7 +3,10 @@ import {
   computeLeadFunnel,
   computeResourceUtilization,
   getReportWindow,
+  getReportWindowForDates,
   groupRevenueBySource,
+  parseReportRange,
+  reportRangeParams,
   resolvePaymentSource,
   summarizeRevenue,
   summarizeDiscounts,
@@ -253,6 +256,47 @@ describe("getReportWindow", () => {
     );
     expect(window.start.toISOString()).toBe("2026-07-17T04:00:00.000Z");
     expect(window.end.toISOString()).toBe("2026-07-24T04:00:00.000Z");
+    expect(window.from).toBe("2026-07-17");
+    expect(window.to).toBe("2026-07-23");
+    expect(window.custom).toBe(false);
+  });
+});
+
+describe("custom report ranges", () => {
+  it("covers both picked days in full, however far back they go", () => {
+    const window = getReportWindowForDates("2023-01-01", "2026-07-23", "America/Toronto");
+    expect(window.start.toISOString()).toBe("2023-01-01T05:00:00.000Z");
+    expect(window.end.toISOString()).toBe("2026-07-24T04:00:00.000Z");
+    expect(window.days).toBe(1300);
+    expect(window.custom).toBe(true);
+  });
+
+  it("treats a single picked day as one whole day", () => {
+    const window = getReportWindowForDates("2025-03-09", "2025-03-09", "America/Toronto");
+    expect(window.days).toBe(1);
+    // DST starts that day, so it is 23 hours long.
+    expect(window.end.getTime() - window.start.getTime()).toBe(23 * 3_600_000);
+  });
+
+  it("prefers two valid dates over a preset and swaps them when reversed", () => {
+    expect(parseReportRange({ range: "7", from: "2026-06-30", to: "2024-01-01" })).toEqual({
+      from: "2024-01-01",
+      to: "2026-06-30",
+    });
+  });
+
+  it("falls back to a preset, then to 30 days, when the dates are unusable", () => {
+    expect(parseReportRange({ range: "365", from: "2026-02-30", to: "2026-03-01" })).toEqual({ days: 365 });
+    expect(parseReportRange({ from: "2026-01-01" })).toEqual({ days: 30 });
+    expect(parseReportRange({ range: "45" })).toEqual({ days: 30 });
+    expect(parseReportRange({ from: "1999-12-31", to: "2026-01-01" })).toEqual({ days: 30 });
+  });
+
+  it("round-trips a window through its query parameters", () => {
+    const custom = getReportWindowForDates("2024-01-01", "2024-12-31", "America/Toronto");
+    expect(reportRangeParams(custom)).toEqual({ from: "2024-01-01", to: "2024-12-31" });
+    const preset = getReportWindow(90, "America/Toronto", new Date("2026-07-23T15:00:00.000Z"));
+    expect(reportRangeParams(preset)).toEqual({ range: "90" });
   });
 });
 

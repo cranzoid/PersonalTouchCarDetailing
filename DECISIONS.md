@@ -1757,3 +1757,20 @@ rather than hold the release for the upgrades.
   `@azure/identity` moves to a fixed msal-node.
 - The script prints each accepted advisory on every run, and says when an entry
   stops matching so it gets removed rather than left to rot.
+
+## 51. Reports cover any date range, not just the last 7/30/90 days
+
+The "Recent performance" half of the Reports screen (revenue, tax and payments,
+leads, capacity, and the three CSV exports) only offered rolling 7, 30 and 90
+day windows, so the owners could not look at anything older than three months.
+
+- **Any two dates.** A From/To picker sits beside the presets. Both days are
+  included in full, in business-local time, the same as a preset. Reversed
+  dates are swapped. Anything earlier than 2000 or unreadable falls back to the
+  30-day default instead of erroring — the same span the books accept.
+- **Presets stay and gain "1 year"** (365 days).
+- **The range travels.** The URL carries `from`/`to` (or `range` for a preset),
+  the P&L period navigation keeps it, and the exports use the same window.
+  Their filenames say `<from>_to_<to>` and the summary CSV header names the
+  dates.
+- The calendar P&L above was never limited and is unchanged. No migration.

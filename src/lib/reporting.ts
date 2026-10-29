@@ -14,13 +14,20 @@ import type { Attribution } from "@/db/schema";
 import { getSettings } from "@/lib/settings";
 import { zonedToUtc } from "@/lib/tz";
 
-export const REPORT_DAY_OPTIONS = [7, 30, 90] as const;
-export type ReportDays = (typeof REPORT_DAY_OPTIONS)[number];
+export const REPORT_DAY_OPTIONS = [7, 30, 90, 365] as const;
+
+/** A preset rolling window ending today, or any two picked calendar days. */
+export type ReportRange = { days: number } | { from: string; to: string };
 
 export type ReportWindow = {
   days: number;
   start: Date;
   end: Date;
+  /** First and last business-local day covered, inclusive (YYYY-MM-DD). */
+  from: string;
+  to: string;
+  /** True when the dates were picked rather than taken from a preset. */
+  custom: boolean;
 };
 
 type PaymentLike = {
@@ -236,13 +243,19 @@ function localDateParts(date: Date, timeZone: string): { year: number; month: nu
   return { year: value("year"), month: value("month"), day: value("day") };
 }
 
-/** A range of whole business-local calendar days, ending after today. */
-export function getReportWindow(days: number, timeZone: string, now = new Date()): ReportWindow {
-  if (!Number.isInteger(days) || days < 1) throw new Error("Report days must be a positive integer");
-  const today = localDateParts(now, timeZone);
-  const todayKey = Date.UTC(today.year, today.month - 1, today.day);
-  const startCalendar = new Date(todayKey - (days - 1) * DAY_MS);
-  const endCalendar = new Date(todayKey + DAY_MS);
+function calendarKeyISO(key: number): string {
+  return new Date(key).toISOString().slice(0, 10);
+}
+
+/** Whole business-local days from startKey through endKey (UTC-midnight calendar keys). */
+function windowFromCalendarKeys(
+  startKey: number,
+  endKey: number,
+  timeZone: string,
+  custom: boolean,
+): ReportWindow {
+  const startCalendar = new Date(startKey);
+  const endCalendar = new Date(endKey + DAY_MS);
   const start = zonedToUtc(
     timeZone,
     startCalendar.getUTCFullYear(),
@@ -259,12 +272,72 @@ export function getReportWindow(days: number, timeZone: string, now = new Date()
     0,
     0,
   );
-  return { days, start, end };
+  return {
+    days: Math.round((endKey - startKey) / DAY_MS) + 1,
+    start,
+    end,
+    from: calendarKeyISO(startKey),
+    to: calendarKeyISO(endKey),
+    custom,
+  };
 }
 
-export function parseReportDays(value: string | undefined): ReportDays {
-  const parsed = Number(value);
-  return REPORT_DAY_OPTIONS.includes(parsed as ReportDays) ? (parsed as ReportDays) : 30;
+/** A range of whole business-local calendar days, ending after today. */
+export function getReportWindow(days: number, timeZone: string, now = new Date()): ReportWindow {
+  if (!Number.isInteger(days) || days < 1) throw new Error("Report days must be a positive integer");
+  const today = localDateParts(now, timeZone);
+  const todayKey = Date.UTC(today.year, today.month - 1, today.day);
+  return windowFromCalendarKeys(todayKey - (days - 1) * DAY_MS, todayKey, timeZone, false);
+}
+
+/** Calendar key for a real YYYY-MM-DD date in the same span the books accept, else null. */
+function parseCalendarDate(value: string | null | undefined): number | null {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  const [year, month, day] = value.split("-").map(Number);
+  if (year < 2000 || year > 2200) return null;
+  const key = Date.UTC(year, month - 1, day);
+  return calendarKeyISO(key) === value ? key : null;
+}
+
+/** From and to are both inclusive business-local days, in either order. */
+export function getReportWindowForDates(from: string, to: string, timeZone: string): ReportWindow {
+  const fromKey = parseCalendarDate(from);
+  const toKey = parseCalendarDate(to);
+  if (fromKey === null || toKey === null) throw new Error("Report dates must be YYYY-MM-DD");
+  return windowFromCalendarKeys(Math.min(fromKey, toKey), Math.max(fromKey, toKey), timeZone, true);
+}
+
+export function resolveReportWindow(range: ReportRange, timeZone: string, now = new Date()): ReportWindow {
+  return "days" in range
+    ? getReportWindow(range.days, timeZone, now)
+    : getReportWindowForDates(range.from, range.to, timeZone);
+}
+
+/**
+ * Reads the window from a query string. Two valid dates win over a preset, so
+ * owners can look at any stretch of history; anything unreadable falls back to
+ * the 30-day default rather than erroring.
+ */
+export function parseReportRange(params: {
+  range?: string | null;
+  from?: string | null;
+  to?: string | null;
+}): ReportRange {
+  const fromKey = parseCalendarDate(params.from);
+  const toKey = parseCalendarDate(params.to);
+  if (fromKey !== null && toKey !== null) {
+    return {
+      from: calendarKeyISO(Math.min(fromKey, toKey)),
+      to: calendarKeyISO(Math.max(fromKey, toKey)),
+    };
+  }
+  const days = Number(params.range);
+  return (REPORT_DAY_OPTIONS as readonly number[]).includes(days) ? { days } : { days: 30 };
+}
+
+/** The query-string form of a window, for links and exports that must keep it. */
+export function reportRangeParams(window: ReportWindow): Record<string, string> {
+  return window.custom ? { from: window.from, to: window.to } : { range: String(window.days) };
 }
 
 /** Cash-basis revenue: succeeded incoming payments/deposits less succeeded refunds. */
@@ -469,7 +542,7 @@ export function computeLeadFunnel(input: FunnelInput): LeadFunnel {
 type Interval = { start: Date; end: Date };
 
 type UtilizationInput = {
-  window: ReportWindow;
+  window: Pick<ReportWindow, "start" | "end">;
   timeZone: string;
   resources: readonly { id: string; name: string; type: string; active: boolean }[];
   businessHours: readonly {
@@ -654,9 +727,9 @@ function unique<T>(values: readonly (T | null | undefined)[]): T[] {
 }
 
 /** Loads one complete reporting snapshot. All calculations remain in the pure helpers above. */
-export async function getReportingSnapshot(days: ReportDays, now = new Date()): Promise<ReportingSnapshot> {
+export async function getReportingSnapshot(range: ReportRange, now = new Date()): Promise<ReportingSnapshot> {
   const settings = await getSettings();
-  const window = getReportWindow(days, settings.timezone, now);
+  const window = resolveReportWindow(range, settings.timezone, now);
   const paymentOccurredInWindow = or(
     and(
       isNotNull(schema.payments.receivedAt),

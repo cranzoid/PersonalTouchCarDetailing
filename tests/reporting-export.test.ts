@@ -44,7 +44,7 @@ afterAll(async () => { await getPool().end(); });
 
 describe("reporting export", () => {
   it("reports tax accrual and payment methods from live data", async () => {
-    const snapshot = await getReportingSnapshot(30);
+    const snapshot = await getReportingSnapshot({ days: 30 });
     expect(snapshot.tax.invoiceCount).toBe(2); // draft excluded
     expect(snapshot.tax.taxCollectedCents).toBe(2600);
     expect(snapshot.tax.exemptInvoiceCount).toBe(1);
@@ -53,8 +53,8 @@ describe("reporting export", () => {
   });
 
   it("builds a summary CSV with a BOM, CRLF rows and the tax block", async () => {
-    const snapshot = await getReportingSnapshot(30);
-    const csv = await buildReportCsv("summary", 30, snapshot);
+    const snapshot = await getReportingSnapshot({ days: 30 });
+    const csv = await buildReportCsv("summary", snapshot);
     expect(csv.startsWith("﻿")).toBe(true);
     expect(csv).toContain("\r\n");
     expect(csv).toContain("Tax collected,26.00");
@@ -62,8 +62,8 @@ describe("reporting export", () => {
   });
 
   it("builds an invoice CSV with one row per issued invoice", async () => {
-    const snapshot = await getReportingSnapshot(30);
-    const csv = await buildReportCsv("invoices", 30, snapshot);
+    const snapshot = await getReportingSnapshot({ days: 30 });
+    const csv = await buildReportCsv("invoices", snapshot);
     const lines = csv.replace("﻿", "").trim().split("\r\n");
     expect(lines[0]).toContain("Invoice,Date,Status,Customer");
     // Header + 3 invoices; drafts still belong in the working paper.
@@ -73,8 +73,8 @@ describe("reporting export", () => {
   });
 
   it("signs refunds in the payments CSV so a column sum is the net", async () => {
-    const snapshot = await getReportingSnapshot(30);
-    const csv = await buildReportCsv("payments", 30, snapshot);
+    const snapshot = await getReportingSnapshot({ days: 30 });
+    const csv = await buildReportCsv("payments", snapshot);
     expect(csv).toContain("Cheque");
     expect(csv).toContain("50.00");
   });
@@ -92,8 +92,8 @@ describe("reporting export", () => {
       status: "succeeded",
       receivedAt: new Date(),
     });
-    const snapshot = await getReportingSnapshot(30);
-    const csv = await buildReportCsv("payments", 30, snapshot);
+    const snapshot = await getReportingSnapshot({ days: 30 });
+    const csv = await buildReportCsv("payments", snapshot);
     expect(csv).toContain("-30.00");
     expect(csv).not.toContain("'-30.00");
   });
@@ -103,8 +103,8 @@ describe("reporting export", () => {
       id: newId("cus"), firstName: "=cmd|calc", lastName: "Exploit",
       phone: "905-555-0000", preferredContact: "phone",
     });
-    const snapshot = await getReportingSnapshot(30);
-    const csv = await buildReportCsv("invoices", 30, snapshot);
+    const snapshot = await getReportingSnapshot({ days: 30 });
+    const csv = await buildReportCsv("invoices", snapshot);
     expect(csv).not.toMatch(/(^|,)=cmd/);
   });
 
@@ -113,8 +113,8 @@ describe("reporting export", () => {
       id: newId("cus"), firstName: "-2+3+cmd", lastName: "Exploit",
       phone: "905-555-0001", preferredContact: "phone",
     });
-    const snapshot = await getReportingSnapshot(30);
-    const csv = await buildReportCsv("invoices", 30, snapshot);
+    const snapshot = await getReportingSnapshot({ days: 30 });
+    const csv = await buildReportCsv("invoices", snapshot);
     expect(csv).not.toMatch(/(^|,)-2\+3/);
   });
 });
