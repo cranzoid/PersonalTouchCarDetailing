@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { eq } from "drizzle-orm";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
@@ -70,6 +71,33 @@ describe("reporting export", () => {
     expect(lines).toHaveLength(4);
     expect(csv).toContain("INV-2002");
     expect(csv).toContain("Yes,Cash sale");
+  });
+
+  it("shows what was paid and what is still owed on a part-paid invoice", async () => {
+    const snapshot = await getReportingSnapshot({ days: 30 });
+    const csv = await buildReportCsv("invoices", snapshot);
+    const lines = csv.replace("\uFEFF", "").trim().split("\r\n");
+    expect(lines[0].endsWith(",Total,Paid,Balance")).toBe(true);
+    // $226.00 invoice with a $50.00 payment: $176.00 still owed, not $226.00.
+    expect(lines.find((l) => l.startsWith("INV-2001"))).toMatch(/,226\.00,50\.00,176\.00$/);
+    // The draft has no payments, so its whole total is the balance.
+    expect(lines.find((l) => l.startsWith("INV-2003"))).toMatch(/,226\.00,0\.00,226\.00$/);
+  });
+
+  it("counts refunds and an applied deposit, and owes nothing on a cancelled invoice", async () => {
+    const [inv2002] = await db().select().from(schema.invoices).where(eq(schema.invoices.number, 2002));
+    await db().update(schema.invoices).set({ depositAppliedCents: 2500 }).where(eq(schema.invoices.id, inv2002.id));
+    await db().insert(schema.payments).values({
+      id: newId("pay"), invoiceId: inv2002.id, provider: "cash", idempotencyKey: newId("pay"),
+      amountCents: 1000, kind: "refund", status: "succeeded", receivedAt: new Date(),
+    });
+    await db().update(schema.invoices).set({ status: "cancelled" }).where(eq(schema.invoices.number, 2001));
+    const snapshot = await getReportingSnapshot({ days: 30 });
+    const csv = await buildReportCsv("invoices", snapshot);
+    const lines = csv.replace("\uFEFF", "").trim().split("\r\n");
+    // $200.00: $50 paid - $10 refunded + $25 deposit = $65 paid, $135 owed.
+    expect(lines.find((l) => l.startsWith("INV-2002"))).toMatch(/,200\.00,65\.00,135\.00$/);
+    expect(lines.find((l) => l.startsWith("INV-2001"))).toMatch(/,226\.00,50\.00,0\.00$/);
   });
 
   it("signs refunds in the payments CSV so a column sum is the net", async () => {

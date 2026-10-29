@@ -1,9 +1,10 @@
 import "server-only";
 
-import { and, asc, eq, gte, isNotNull, isNull, lt, or } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, isNotNull, isNull, lt, or } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { PAYMENT_PROVIDER_LABELS } from "@/lib/payment-labels";
 import { getSettings } from "@/lib/settings";
+import { summarizePayments } from "@/lib/invoices";
 import type { ReportWindow, ReportingSnapshot } from "@/lib/reporting";
 import {
   getPeriodWindow,
@@ -142,6 +143,7 @@ async function invoicesCsv(window: ReportWindow): Promise<string> {
 
   const rows = await db()
     .select({
+      id: schema.invoices.id,
       number: schema.invoices.number,
       status: schema.invoices.status,
       invoiceDate: schema.invoices.invoiceDate,
@@ -154,6 +156,7 @@ async function invoicesCsv(window: ReportWindow): Promise<string> {
       taxExemptReason: schema.invoices.taxExemptReason,
       tipCents: schema.invoices.tipCents,
       totalCents: schema.invoices.totalCents,
+      depositAppliedCents: schema.invoices.depositAppliedCents,
       customerFirstName: schema.customers.firstName,
       customerLastName: schema.customers.lastName,
       companyName: schema.customers.companyName,
@@ -162,6 +165,29 @@ async function invoicesCsv(window: ReportWindow): Promise<string> {
     .leftJoin(schema.customers, eq(schema.invoices.customerId, schema.customers.id))
     .where(issuedInWindow)
     .orderBy(asc(schema.invoices.number));
+
+  // Paid and Balance are as of the export, from every payment ever made against
+  // the invoice — not just those in the window — and use the same rule as the
+  // invoice page and PDF, so a part-paid invoice shows what is actually owed.
+  const payments = rows.length
+    ? await db()
+        .select({
+          invoiceId: schema.payments.invoiceId,
+          kind: schema.payments.kind,
+          status: schema.payments.status,
+          amountCents: schema.payments.amountCents,
+        })
+        .from(schema.payments)
+        .where(inArray(schema.payments.invoiceId, rows.map((r) => r.id)))
+    : [];
+  const paymentsByInvoice = new Map<string, typeof payments>();
+  for (const payment of payments) {
+    if (!payment.invoiceId) continue;
+    paymentsByInvoice.set(payment.invoiceId, [
+      ...(paymentsByInvoice.get(payment.invoiceId) ?? []),
+      payment,
+    ]);
+  }
 
   return csvRows([
     [
@@ -178,22 +204,34 @@ async function invoicesCsv(window: ReportWindow): Promise<string> {
       "Exemption reason",
       "Tip",
       "Total",
+      "Paid",
+      "Balance",
     ],
-    ...rows.map((r) => [
-      `INV-${r.number}`,
-      localDate(r.invoiceDate ?? r.createdAt, settings.timezone),
-      r.status.replaceAll("_", " "),
-      r.companyName || `${r.customerFirstName ?? ""} ${r.customerLastName ?? ""}`.trim(),
-      money(r.subtotalCents),
-      money(r.discountCents),
-      money(r.subtotalCents - r.discountCents),
-      (r.taxRateBp / 100).toFixed(2),
-      money(r.taxCents),
-      r.taxExempt ? "Yes" : "No",
-      r.taxExemptReason ?? "",
-      money(r.tipCents),
-      money(r.totalCents),
-    ]),
+    ...rows.map((r) => {
+      const paid = summarizePayments(
+        r.totalCents,
+        r.depositAppliedCents,
+        paymentsByInvoice.get(r.id) ?? [],
+      );
+      return [
+        `INV-${r.number}`,
+        localDate(r.invoiceDate ?? r.createdAt, settings.timezone),
+        r.status.replaceAll("_", " "),
+        r.companyName || `${r.customerFirstName ?? ""} ${r.customerLastName ?? ""}`.trim(),
+        money(r.subtotalCents),
+        money(r.discountCents),
+        money(r.subtotalCents - r.discountCents),
+        (r.taxRateBp / 100).toFixed(2),
+        money(r.taxCents),
+        r.taxExempt ? "Yes" : "No",
+        r.taxExemptReason ?? "",
+        money(r.tipCents),
+        money(r.totalCents),
+        money(paid.netPaidCents),
+        // A cancelled invoice is owed nothing, whatever was or wasn't paid.
+        money(r.status === "cancelled" ? 0 : paid.balanceCents),
+      ];
+    }),
   ]);
 }
 

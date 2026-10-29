@@ -1774,3 +1774,16 @@ day windows, so the owners could not look at anything older than three months.
   Their filenames say `<from>_to_<to>` and the summary CSV header names the
   dates.
 - The calendar P&L above was never limited and is unchanged. No migration.
+
+## 52. The invoices export shows Paid and Balance
+
+The Invoices + tax CSV had only a Total column, so a part-paid invoice looked
+as if its whole total were still owed.
+
+- **Two columns at the end: Paid and Balance.** Both use `summarizePayments`,
+  the same rule as the invoice page and PDF: succeeded payments and deposits,
+  less refunds, plus any deposit applied. A cancelled invoice owes 0.
+- **As of the export, not the window.** Every payment against the invoice
+  counts, even one outside the picked dates, because the question is what is
+  owed now. The existing columns are unchanged, so the HST figures are too.
+- No migration.
