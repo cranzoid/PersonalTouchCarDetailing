@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { asc, desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { formatCents } from "@/lib/money";
-import { MANUAL_PAYMENT_METHODS, QUOTED_PAYMENT_METHOD_LABELS, type QuotedPaymentMethod } from "@/lib/types";
+import { MANUAL_PAYMENT_METHODS, PAYMENT_METHOD_TAXABLE, QUOTED_PAYMENT_METHOD_LABELS, type QuotedPaymentMethod } from "@/lib/types";
 import { PAYMENT_PROVIDER_LABELS } from "@/lib/payment-labels";
 import { formatInZone } from "@/lib/tz";
 import { getSettings } from "@/lib/settings";
@@ -177,7 +177,9 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
                   }${
                     invoice.taxTreatment === "none"
                       ? `, so no ${invoice.taxLabel} was charged. The balance cannot now be settled by card or cheque.`
-                      : `, so ${invoice.taxLabel} stands. The balance cannot now be settled by cash or e-transfer.`
+                      : PAYMENT_METHOD_TAXABLE[invoice.quotedPaymentMethod as QuotedPaymentMethod] === false
+                        ? `, with ${invoice.taxLabel} kept on at the customer's request.`
+                        : `, so ${invoice.taxLabel} stands. The balance cannot now be settled by cash or e-transfer.`
                   }`}
                 </td></tr>
             )}

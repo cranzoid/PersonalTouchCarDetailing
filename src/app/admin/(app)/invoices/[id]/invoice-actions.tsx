@@ -99,7 +99,13 @@ export function InvoiceActions({
   // Cash and e-transfer strip the tax when the payment is recorded, so the
   // amount actually owing depends on the method picked right here. Getting this
   // wrong is how staff end up tendering the taxed figure and being refused.
-  const stripsTax = !taxSettled && !PAYMENT_METHOD_TAXABLE[method];
+  //
+  // "Customer is paying HST" overrides that for one payment: some cash
+  // customers want HST on their receipt (to be reimbursed by an employer) and
+  // pay it. The box only exists while the treatment is still open.
+  const [keepTax, setKeepTax] = useState(false);
+  const canKeepTax = !taxSettled && !PAYMENT_METHOD_TAXABLE[method] && untaxedBalanceCents !== balanceCents;
+  const stripsTax = !taxSettled && !PAYMENT_METHOD_TAXABLE[method] && !(canKeepTax && keepTax);
   const dueCents = stripsTax ? untaxedBalanceCents : balanceCents;
   const [amount, setAmount] = useState("");
   const [paymentIdempotencyKey, setPaymentIdempotencyKey] = useState(() => newIdempotencyKey("payment"));
@@ -187,10 +193,12 @@ export function InvoiceActions({
       method,
       amountCents: cents,
       idempotencyKey: paymentIdempotencyKey,
+      keepTax: canKeepTax && keepTax,
     });
     setBusy(false);
     if (res.ok) {
       setAmount("");
+      setKeepTax(false);
       setPaymentIdempotencyKey(newIdempotencyKey("payment"));
       router.refresh();
     } else setError(res.error);
@@ -410,8 +418,27 @@ export function InvoiceActions({
             <p className={`mt-2 text-xs ${stripsTax ? "text-amber-300" : "text-ink-500"}`}>
               {stripsTax
                 ? `No ${taxLabel} on cash or e-transfer — recording this drops the balance to ${formatCents(untaxedBalanceCents, currency)}.`
-                : `${taxLabel} stands on card or cheque: ${formatCents(balanceCents, currency)} due. Cash or e-transfer would be ${formatCents(untaxedBalanceCents, currency)}.`}
+                : canKeepTax
+                  ? `The customer is paying ${taxLabel}: ${formatCents(balanceCents, currency)} due, and the receipt shows ${taxLabel} collected.`
+                  : `${taxLabel} stands on card or cheque: ${formatCents(balanceCents, currency)} due. Cash or e-transfer would be ${formatCents(untaxedBalanceCents, currency)}.`}
             </p>
+          )}
+          {canKeepTax && (
+            <label className="mt-2 flex items-start gap-2 text-xs text-ink-300">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={keepTax}
+                onChange={(e) => {
+                  setKeepTax(e.target.checked);
+                  setAmount("");
+                }}
+              />
+              <span>
+                Customer is paying {taxLabel} — keep it on the invoice. Only tick this when they hand over the
+                {" "}{formatCents(balanceCents, currency)} including {taxLabel}; it is reported as {taxLabel} collected.
+              </span>
+            </label>
           )}
           <div className="mt-3 flex flex-wrap items-end gap-2">
             <label className="block text-xs text-ink-400">

@@ -163,6 +163,32 @@ describe("resolvePaymentTax", () => {
   });
 });
 
+describe("cash with the customer paying HST (keepTax)", () => {
+  it("keeps the tax on and records it as added, not stripped", () => {
+    for (const method of ["cash", "etransfer"] as const) {
+      const o = resolvePaymentTax({ invoice: issued, method, taxLabel: "HST", alreadyPaidAgainst: false, keepTax: true });
+      if (!o.ok) return expect.fail("keeping tax must not be blocked");
+      expect(o.totalCents).toBe(30002);
+      // 'added' keeps it out of the restatement query and in HST collected.
+      expect(o.changes).toEqual({ taxTreatment: "added", quotedPaymentMethod: method });
+    }
+  });
+
+  it("changes nothing once the treatment is settled — a stripped invoice stays stripped", () => {
+    const settledCash = { ...issued, taxTreatment: "none", taxCents: 0, totalCents: 26550, quotedPaymentMethod: "cash" };
+    const o = resolvePaymentTax({ invoice: settledCash, method: "cash", taxLabel: "HST", alreadyPaidAgainst: true, keepTax: true });
+    expect(o.ok && o.totalCents).toBe(26550);
+    expect(o.ok && o.changes).toBeNull();
+  });
+
+  it("lets the balance be paid by any method afterwards", () => {
+    const kept = { taxTreatment: "added", quotedPaymentMethod: "cash" };
+    for (const method of QUOTED_PAYMENT_METHODS) {
+      expect(paymentMethodConflict(kept, method, "HST")).toBeNull();
+    }
+  });
+});
+
 describe("paymentMethodConflict", () => {
   it("says nothing about an invoice nobody has paid yet — the method is still free", () => {
     expect(paymentMethodConflict({ taxTreatment: "added", quotedPaymentMethod: null }, "cash", "HST")).toBeNull();

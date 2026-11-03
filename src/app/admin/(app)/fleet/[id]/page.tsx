@@ -6,7 +6,7 @@ import { db, schema } from "@/db";
 import { roleHas } from "@/lib/auth/permissions";
 import { getStaff } from "@/lib/auth/session";
 import { formatCents } from "@/lib/money";
-import { summarizePayments } from "@/lib/invoices";
+import { isPaymentMethodTaxable, summarizePayments } from "@/lib/invoices";
 import { UNPAID_STATUSES } from "@/lib/invoice-list";
 import { getSettings } from "@/lib/settings";
 import { appointmentWhenLabel } from "@/lib/appointment-time";
@@ -58,7 +58,12 @@ export default async function FleetDetailPage({ params }: { params: Promise<{ id
         balanceCents: summary.balanceCents,
         untaxedBalanceCents: untaxed.balanceCents,
         taxSettled,
-        settledTaxable: invoice.quotedPaymentMethod ? invoice.taxTreatment === "added" : null,
+        // Cash with HST kept on (customer chose to pay it) accepts every
+        // method, so it binds nothing — the same as paymentMethodConflict.
+        settledTaxable:
+          invoice.quotedPaymentMethod && !(invoice.taxTreatment === "added" && !isPaymentMethodTaxable(invoice.quotedPaymentMethod))
+            ? invoice.taxTreatment === "added"
+            : null,
       };
     })
     .filter((invoice) => invoice.balanceCents > 0)

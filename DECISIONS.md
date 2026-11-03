@@ -1787,3 +1787,25 @@ as if its whole total were still owed.
   counts, even one outside the picked dates, because the question is what is
   owed now. The existing columns are unchanged, so the HST figures are too.
 - No migration.
+
+## 53. Cash or e-transfer can keep HST on when the customer pays it
+
+A cash customer wanted HST on their invoice, and paid it, so their employer
+would reimburse them. Recording cash always stripped the tax and refused the
+taxed amount, so there was no honest way to record it.
+
+- **A checkbox on the manual payment form:** "Customer is paying HST — keep it
+  on the invoice". Shown only for cash or e-transfer while the tax is still
+  open (first payment). Ticked, the payment is taken against the taxed total
+  and the invoice is stamped `tax_treatment = 'added'` with the cash method.
+- **It counts as HST collected.** The receipt shows HST under the shop's
+  registration number, so that HST must be remitted. `'added'` keeps it in
+  the tax report and out of the §18 restatement query.
+- **No "No HST charged" line.** That line follows `tax_exempt`, which stays
+  false. The admin page says HST was kept on at the customer's request.
+- **Any method may finish the balance afterwards** (`paymentMethodConflict`);
+  the fleet panel mirrors that.
+- **Not built, on purpose:** an invoice showing HST the customer did not pay.
+  That is a receipt for tax never collected, used to claim money from a third
+  party. It was asked for and declined.
+- No migration.

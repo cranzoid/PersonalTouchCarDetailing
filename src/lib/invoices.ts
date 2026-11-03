@@ -130,6 +130,10 @@ export function paymentMethodConflict(
 ): string | null {
   if (!invoice.quotedPaymentMethod) return null;
   const invoiceTaxed = invoice.taxTreatment === "added";
+  // Settled in cash or e-transfer WITH the tax kept on (the customer asked to
+  // pay HST). Every method agrees with a taxed total from here: card and
+  // cheque are taxed anyway, and more cash just keeps paying the same figure.
+  if (invoiceTaxed && !isPaymentMethodTaxable(invoice.quotedPaymentMethod)) return null;
   if (invoiceTaxed === isPaymentMethodTaxable(method)) return null;
   const settledLabel =
     QUOTED_PAYMENT_METHOD_LABELS[invoice.quotedPaymentMethod as QuotedPaymentMethod] ??
@@ -201,6 +205,12 @@ export function resolvePaymentTax(input: {
   taxLabel: string;
   /** True when any succeeded payment already sits against this invoice. */
   alreadyPaidAgainst: boolean;
+  /**
+   * Staff ticked "customer is paying HST" on a cash or e-transfer payment: the
+   * tax stays on the document and is paid, exactly as it would be by card.
+   * Ignored for taxable methods (nothing to keep) and on a settled invoice.
+   */
+  keepTax?: boolean;
 }): PaymentTaxOutcome {
   const { invoice } = input;
 
@@ -213,7 +223,11 @@ export function resolvePaymentTax(input: {
   // A staff exemption outranks the payment-method rule and binds nobody.
   if (invoice.taxExempt) return { ok: true, totalCents: invoice.totalCents, changes: null };
 
-  if (isPaymentMethodTaxable(input.method)) {
+  // Kept tax is recorded as tax ADDED, with the cash method beside it. That
+  // pair is outside the restatement query (`tax_treatment = 'none'`) and counts
+  // as HST collected in the tax report, which it must: the customer is handed
+  // a receipt showing HST under the shop's registration number.
+  if (isPaymentMethodTaxable(input.method) || input.keepTax) {
     // Nothing to re-price. The invoice already charges whatever rate it was
     // issued at, and that rate is not ours to substitute here.
     return {

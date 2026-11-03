@@ -17,6 +17,7 @@ import {
   computeInvoiceTotals,
   createInvoiceAccessToken,
   invoiceDueDate,
+  isPaymentMethodTaxable,
   nextInvoiceNumber,
   recalculateInvoiceStatus,
   resolvePaymentTax,
@@ -717,6 +718,8 @@ async function applyManualPayment(
     reference?: string | null;
     /** Extra context for the payment audit entry (e.g. the bulk batch). */
     auditContext?: Record<string, unknown>;
+    /** Cash or e-transfer, but the customer is paying the HST too. */
+    keepTax?: boolean;
   },
 ): Promise<{ ok: false; error: string } | { ok: true; amountCents: number; status: string }> {
   const { invoice } = input;
@@ -732,6 +735,7 @@ async function applyManualPayment(
     method: input.method,
     taxLabel: input.taxLabel,
     alreadyPaidAgainst: payments.some((p) => p.status === "succeeded"),
+    keepTax: input.keepTax,
   });
   if (!tax.ok) return { ok: false, error: tax.conflict };
 
@@ -751,6 +755,17 @@ async function applyManualPayment(
       .update(schema.invoices)
       .set({ ...tax.changes, updatedAt: new Date() })
       .where(eq(schema.invoices.id, invoice.id));
+    if (tax.changes.taxTreatment === "added" && !isPaymentMethodTaxable(input.method)) {
+      await audit(tx, {
+        actorType: "staff",
+        actorId: input.staffId,
+        action: "invoice.tax_kept_on_untaxed_method",
+        entityType: "invoice",
+        entityId: invoice.id,
+        after: { taxCents: invoice.taxCents, totalCents: tax.totalCents, method: input.method },
+        reason: "Customer chose to pay HST",
+      });
+    }
     if (tax.changes.taxTreatment === "none") {
       await audit(tx, {
         actorType: "staff",
@@ -808,6 +823,7 @@ export async function recordPaymentAction(raw: unknown): Promise<ActionResult> {
         method: z.enum(MANUAL_PAYMENT_METHODS),
         amountCents: z.number().int().min(1).max(10_000_000),
         idempotencyKey: idempotencyKeySchema,
+        keepTax: z.boolean().default(false),
       })
       .safeParse(raw);
     if (!parsed.success) return { ok: false, error: "Please check the payment fields" };
@@ -851,6 +867,7 @@ export async function recordPaymentAction(raw: unknown): Promise<ActionResult> {
         staffId: staff.id,
         taxLabel: settings.taxLabel,
         currency: settings.currency,
+        keepTax: input.keepTax,
       });
       if (!applied.ok) return applied;
       return { ok: true, newlyRecorded: true };
