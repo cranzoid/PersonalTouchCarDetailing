@@ -141,17 +141,36 @@ describe("computeProfitAndLoss", () => {
     expect(pnl.profitMargin).toBeCloseTo(-2.3333, 4);
   });
 
-  it("ignores draft and cancelled invoices", () => {
+  it("counts a draft as a sale and leaves out a cancelled invoice", () => {
     const pnl = computeProfitAndLoss(
       [
-        { status: "draft", subtotalCents: 99_999, discountCents: 0, taxCents: 9_999, tipCents: 0 },
+        { status: "draft", subtotalCents: 20_000, discountCents: 2_000, taxCents: 2_340, tipCents: 0 },
+        { status: "sent", subtotalCents: 5_000, discountCents: 0, taxCents: 650, tipCents: 0 },
         { status: "cancelled", subtotalCents: 88_888, discountCents: 0, taxCents: 8_888, tipCents: 0 },
         { status: "paid", subtotalCents: 10_000, discountCents: 0, taxCents: 1_300, tipCents: 0 },
       ],
       expenses,
     );
-    expect(pnl.invoiceCount).toBe(1);
-    expect(pnl.netSalesCents).toBe(10_000);
+    expect(pnl.invoiceCount).toBe(3);
+    expect(pnl.netSalesCents).toBe(33_000);
+    expect(pnl.draftSalesCents).toBe(18_000);
+    expect(pnl.draftInvoiceCount).toBe(1);
+    expect(pnl.discountsGivenCents).toBe(2_000);
+    // Profit follows the sales figure, so the three dashboard tiles add up.
+    expect(pnl.netProfitCents).toBe(33_000 - 250_000);
+  });
+
+  it("keeps a draft's tax out of everything the shop remits", () => {
+    const pnl = computeProfitAndLoss(
+      [
+        { status: "draft", subtotalCents: 20_000, discountCents: 0, taxCents: 2_600, tipCents: 0 },
+        { status: "paid", subtotalCents: 10_000, discountCents: 0, taxCents: 1_300, tipCents: 0 },
+      ],
+      summarizeExpenses([], CATEGORIES),
+    );
+    expect(pnl.taxCollectedCents).toBe(1_300);
+    expect(pnl.grossSalesCents).toBe(11_300);
+    expect(computeTaxPosition(pnl).netOwingCents).toBe(1_300);
   });
 
   it("reports tips on their own line, outside net sales and net profit", () => {
@@ -160,18 +179,18 @@ describe("computeProfitAndLoss", () => {
         { status: "paid", subtotalCents: 10_000, discountCents: 0, taxCents: 1_300, tipCents: 1_500 },
         { status: "paid", subtotalCents: 20_000, discountCents: 0, taxCents: 2_600, tipCents: 0 },
         { status: "partially_paid", subtotalCents: 5_000, discountCents: 0, taxCents: 0, tipCents: 700 },
-        // Never issued, so never income.
         { status: "draft", subtotalCents: 5_000, discountCents: 0, taxCents: 650, tipCents: 4_000 },
+        { status: "cancelled", subtotalCents: 5_000, discountCents: 0, taxCents: 650, tipCents: 9_000 },
       ],
       expenses,
     );
 
-    expect(pnl.tipsCents).toBe(2_200);
-    expect(pnl.tippedInvoiceCount).toBe(2);
+    expect(pnl.tipsCents).toBe(6_200);
+    expect(pnl.tippedInvoiceCount).toBe(3);
     // A tip is not a sale: it must not lift net sales, HST, or profit.
-    expect(pnl.netSalesCents).toBe(35_000);
+    expect(pnl.netSalesCents).toBe(40_000);
     expect(pnl.taxCollectedCents).toBe(3_900);
-    expect(pnl.netProfitCents).toBe(35_000 - 250_000);
+    expect(pnl.netProfitCents).toBe(40_000 - 250_000);
   });
 
   it("reports no margin rather than 0% when nothing was sold", () => {

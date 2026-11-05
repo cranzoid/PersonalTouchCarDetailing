@@ -1809,3 +1809,32 @@ taxed amount, so there was no honest way to record it.
   That is a receipt for tax never collected, used to claim money from a third
   party. It was asked for and declined.
 - No migration.
+
+## 54. Net sales counts drafts; HST does not; reports show paid and unpaid
+
+The owners read Net sales as the work the shop has done, but a finished job
+added nothing until someone pressed Send, so the dashboard looked low. Reports
+also had no plain view of which invoices were paid.
+
+- **Net sales is every invoice raised in the period, drafts included.** Only a
+  cancelled invoice is left out. `invoiceCount`, discounts and tips in the P&L
+  follow the same set, and so do net profit and margin, so the dashboard tiles
+  still add up. Each sales tile says how much of the figure is draft.
+- **HST is unchanged and stays on issued invoices.** The P&L and the tax report
+  used to cover the same invoices. Now the sales lines can be higher than the
+  tax base by exactly the draft amount, which the P&L export shows on its own
+  line. `taxCollectedCents`, `grossSalesCents`, HST to remit,
+  `summarizeTax` and `summarizeDiscounts` all still ignore drafts. Tax on a draft
+  is provisional, because cash or e-transfer strips it at payment (#18).
+- **Past months change on deploy.** Any draft dated in a past month now counts
+  in that month's sales and profit, and in year-over-year comparisons. Filed HST
+  figures do not move. A draft that will never be billed should be cancelled.
+- **Reports has a Paid & unpaid section** on the calendar period, with every
+  invoice behind the sales figure, what is owed first. Its totals are full
+  invoice totals with tax and tips, because that is what a customer owes, so
+  Invoiced is higher than Net sales. Paid + unpaid + refunded equals invoiced.
+- **The invoices export gains a Payment column**, last so nothing moves. A
+  refunded invoice now shows a Balance of 0 rather than its full total, so the
+  column sums to the Unpaid figure.
+- **Cash-basis Revenue on Reports is unchanged.** It is money received.
+- No migration.

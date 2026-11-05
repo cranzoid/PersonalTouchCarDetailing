@@ -4,7 +4,11 @@ import { and, asc, eq, gte, inArray, isNotNull, isNull, lt, or } from "drizzle-o
 import { db, schema } from "@/db";
 import { PAYMENT_PROVIDER_LABELS } from "@/lib/payment-labels";
 import { getSettings } from "@/lib/settings";
-import { summarizePayments } from "@/lib/invoices";
+import {
+  groupPaymentsByInvoice,
+  INVOICE_PAYMENT_LABELS,
+  invoiceSettlement,
+} from "@/lib/sales-report";
 import type { ReportWindow, ReportingSnapshot } from "@/lib/reporting";
 import {
   getPeriodWindow,
@@ -125,7 +129,7 @@ function summaryCsv(snapshot: ReportingSnapshot): string {
   return csvRows(rows);
 }
 
-/** One row per invoice issued in the window — the HST working paper. */
+/** One row per invoice dated in the window, cancelled and drafts too — the HST working paper. */
 async function invoicesCsv(window: ReportWindow): Promise<string> {
   const settings = await getSettings();
   const issuedInWindow = or(
@@ -180,14 +184,7 @@ async function invoicesCsv(window: ReportWindow): Promise<string> {
         .from(schema.payments)
         .where(inArray(schema.payments.invoiceId, rows.map((r) => r.id)))
     : [];
-  const paymentsByInvoice = new Map<string, typeof payments>();
-  for (const payment of payments) {
-    if (!payment.invoiceId) continue;
-    paymentsByInvoice.set(payment.invoiceId, [
-      ...(paymentsByInvoice.get(payment.invoiceId) ?? []),
-      payment,
-    ]);
-  }
+  const paymentsByInvoice = groupPaymentsByInvoice(payments);
 
   return csvRows([
     [
@@ -206,13 +203,10 @@ async function invoicesCsv(window: ReportWindow): Promise<string> {
       "Total",
       "Paid",
       "Balance",
+      "Payment",
     ],
     ...rows.map((r) => {
-      const paid = summarizePayments(
-        r.totalCents,
-        r.depositAppliedCents,
-        paymentsByInvoice.get(r.id) ?? [],
-      );
+      const settlement = invoiceSettlement(r, paymentsByInvoice.get(r.id) ?? []);
       return [
         `INV-${r.number}`,
         localDate(r.invoiceDate ?? r.createdAt, settings.timezone),
@@ -227,9 +221,9 @@ async function invoicesCsv(window: ReportWindow): Promise<string> {
         r.taxExemptReason ?? "",
         money(r.tipCents),
         money(r.totalCents),
-        money(paid.netPaidCents),
-        // A cancelled invoice is owed nothing, whatever was or wasn't paid.
-        money(r.status === "cancelled" ? 0 : paid.balanceCents),
+        money(settlement.paidCents),
+        money(settlement.balanceCents),
+        INVOICE_PAYMENT_LABELS[settlement.paymentState],
       ];
     }),
   ]);
@@ -290,16 +284,19 @@ function pnlCsv(books: BooksSnapshot, taxLabel: string): string {
     ["Profit & loss", books.period.label],
     ["Timezone", books.timezone],
     ["Currency", books.currency],
-    ["Basis", "Sales: invoices issued. Expenses: date paid."],
+    ["Basis", `Sales: all invoices including drafts. ${taxLabel}: issued invoices only. Expenses: date paid.`],
     [],
     ["Sales", ""],
-    ["Net sales (before tax)", money(books.pnl.netSalesCents)],
-    [`${taxLabel} collected`, money(books.pnl.taxCollectedCents)],
-    ["Gross invoiced", money(books.pnl.grossSalesCents)],
+    ["Net sales including drafts (before tax)", money(books.pnl.netSalesCents)],
+    ["Of which drafts not sent yet", money(books.pnl.draftSalesCents)],
+    ["Net sales on issued invoices", money(books.pnl.netSalesCents - books.pnl.draftSalesCents)],
+    [`${taxLabel} collected on issued invoices`, money(books.pnl.taxCollectedCents)],
+    ["Gross invoiced on issued invoices", money(books.pnl.grossSalesCents)],
     ["Discounts given", money(books.pnl.discountsGivenCents)],
     // Its own line, outside net sales and net profit — see ProfitAndLoss.tipsCents.
     ["Tips collected (not sales)", money(books.pnl.tipsCents)],
-    ["Invoices issued", books.pnl.invoiceCount],
+    ["Invoices including drafts", books.pnl.invoiceCount],
+    ["Draft invoices", books.pnl.draftInvoiceCount],
     [],
     ["Expenses by category", "Payments", `${taxLabel} paid`, "Amount"],
     ...books.pnl.expenses.byCategory.map((entry) => [

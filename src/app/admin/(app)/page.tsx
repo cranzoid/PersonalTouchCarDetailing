@@ -185,7 +185,11 @@ export default async function AdminDashboard() {
               <p className="mt-1 text-3xl font-bold text-white">
                 {formatCents(books.pnl.netSalesCents, books.currency)}
               </p>
-              <p className="mt-2 text-xs text-ink-400">Invoiced, before {settings.taxLabel}</p>
+              <p className="mt-2 text-xs text-ink-400">
+                {books.pnl.draftInvoiceCount === 0
+                  ? `All invoices, before ${settings.taxLabel}`
+                  : `Includes ${formatCents(books.pnl.draftSalesCents, books.currency)} in ${books.pnl.draftInvoiceCount} ${books.pnl.draftInvoiceCount === 1 ? "draft" : "drafts"}, before ${settings.taxLabel}`}
+              </p>
             </div>
             <div className="rounded-2xl border border-ink-700 bg-ink-900/50 p-5">
               <p className="text-sm text-ink-400">Expenses</p>
