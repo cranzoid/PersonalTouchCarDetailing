@@ -14,11 +14,14 @@ import { zonedToUtc } from "@/lib/tz";
  * tests/books.test.ts, with the database work confined to the loaders at the
  * bottom.
  *
- * ACCOUNTING BASIS (stated on the report screen, because the two halves differ):
- * sales are ACCRUAL — invoices issued in the period, the same set summarizeTax
- * builds an HST return from, so the P&L and the tax report can never disagree.
- * Expenses count on the date they were paid. This mirrors how the shop's
- * spreadsheet already worked and how a small business actually files.
+ * ACCOUNTING BASIS (stated on the report screen, because the three differ):
+ * sales are every invoice raised in the period, INCLUDING drafts — the owners
+ * read this figure as "the work we have done", and a finished job should count
+ * the moment it is invoiced rather than when someone presses Send. Only a
+ * cancelled invoice is left out. HST is narrower on purpose: it counts issued
+ * invoices only, the same set summarizeTax builds a return from, because the tax
+ * on a draft is provisional (a cash payment strips it) and must never reach what
+ * the shop remits. Expenses count on the date they were paid.
  */
 
 /* ------------------------------------------------------------------ */
@@ -188,6 +191,9 @@ export function summarizeExpenses(
 /** Statuses that mean an invoice was actually issued — mirrors reporting.ts. */
 const ISSUED_INVOICE_STATUSES = new Set(["sent", "partially_paid", "paid", "overdue", "refunded"]);
 
+/** Statuses that count as sales: everything raised, sent or not. Not cancelled. */
+export const SALES_INVOICE_STATUSES = new Set(["draft", ...ISSUED_INVOICE_STATUSES]);
+
 export type PnlInvoiceLike = {
   status: string;
   subtotalCents: number;
@@ -197,11 +203,15 @@ export type PnlInvoiceLike = {
 };
 
 export type ProfitAndLoss = {
-  /** Invoiced including tax. */
+  /** Issued invoices including tax. Excludes drafts, so it ties to the tax figures. */
   grossSalesCents: number;
+  /** Tax on ISSUED invoices only. A draft's tax is provisional and is never here. */
   taxCollectedCents: number;
-  /** What the business actually earned: gross less the tax it is holding for the CRA. */
+  /** Every invoice raised, drafts included, before tax. */
   netSalesCents: number;
+  /** The part of netSalesCents still in draft, so the figure can be read either way. */
+  draftSalesCents: number;
+  draftInvoiceCount: number;
   discountsGivenCents: number;
   /**
    * Gratuities invoiced in the period. Its OWN line, deliberately outside
@@ -212,8 +222,9 @@ export type ProfitAndLoss = {
    * this report should quietly pick.
    */
   tipsCents: number;
-  /** Issued invoices that carried a tip — so the total can be read as an average. */
+  /** Invoices that carried a tip — so the total can be read as an average. */
   tippedInvoiceCount: number;
+  /** Every invoice counted in sales, drafts included. */
   invoiceCount: number;
   expenses: ExpenseSummary;
   netProfitCents: number;
@@ -232,23 +243,27 @@ export function computeProfitAndLoss(
   invoices: readonly PnlInvoiceLike[],
   expenses: ExpenseSummary,
 ): ProfitAndLoss {
-  const issued = invoices.filter((invoice) => ISSUED_INVOICE_STATUSES.has(invoice.status));
+  const sales = invoices.filter((invoice) => SALES_INVOICE_STATUSES.has(invoice.status));
+  const issued = sales.filter((invoice) => ISSUED_INVOICE_STATUSES.has(invoice.status));
+  const drafts = sales.filter((invoice) => invoice.status === "draft");
+  const netOf = (rows: readonly PnlInvoiceLike[]) =>
+    rows.reduce((sum, invoice) => sum + invoice.subtotalCents - invoice.discountCents, 0);
+
   const taxCollectedCents = issued.reduce((sum, invoice) => sum + invoice.taxCents, 0);
-  const discountsGivenCents = issued.reduce((sum, invoice) => sum + invoice.discountCents, 0);
-  const netSalesCents = issued.reduce(
-    (sum, invoice) => sum + invoice.subtotalCents - invoice.discountCents,
-    0,
-  );
-  const tipsCents = issued.reduce((sum, invoice) => sum + (invoice.tipCents ?? 0), 0);
+  const discountsGivenCents = sales.reduce((sum, invoice) => sum + invoice.discountCents, 0);
+  const netSalesCents = netOf(sales);
+  const tipsCents = sales.reduce((sum, invoice) => sum + (invoice.tipCents ?? 0), 0);
   const netProfitCents = netSalesCents - expenses.totalCents;
   return {
-    grossSalesCents: netSalesCents + taxCollectedCents,
+    grossSalesCents: netOf(issued) + taxCollectedCents,
     taxCollectedCents,
     netSalesCents,
+    draftSalesCents: netOf(drafts),
+    draftInvoiceCount: drafts.length,
     discountsGivenCents,
     tipsCents,
-    tippedInvoiceCount: issued.filter((invoice) => (invoice.tipCents ?? 0) > 0).length,
-    invoiceCount: issued.length,
+    tippedInvoiceCount: sales.filter((invoice) => (invoice.tipCents ?? 0) > 0).length,
+    invoiceCount: sales.length,
     expenses,
     netProfitCents,
     profitMargin: netSalesCents === 0 ? null : netProfitCents / netSalesCents,
@@ -364,7 +379,7 @@ export type BooksSnapshot = {
 };
 
 /** Invoices are reported against invoice_date, falling back to created_at. */
-function invoiceIssuedInWindow(start: Date, end: Date) {
+export function invoiceIssuedInWindow(start: Date, end: Date) {
   return or(
     and(
       isNotNull(schema.invoices.invoiceDate),

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { StatusBadge } from "@/components/admin";
 import {
   FinanceMetric,
   FinanceWorkspaceHeader,
@@ -18,6 +19,11 @@ import {
   reportRangeParams,
   type FunnelStage,
 } from "@/lib/reporting";
+import {
+  getPaidUnpaid,
+  INVOICE_PAYMENT_LABELS,
+  type InvoicePaymentState,
+} from "@/lib/sales-report";
 import { formatInZone, localDateISO } from "@/lib/tz";
 
 export const dynamic = "force-dynamic";
@@ -38,6 +44,17 @@ function sourceLabel(source: string): string {
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
 }
+
+/** A full year can be thousands of rows; the export always has all of them. */
+const PAID_UNPAID_ROW_LIMIT = 200;
+
+const PAYMENT_STATE_TONES: Record<InvoicePaymentState, string> = {
+  paid: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  part_paid: "border-amber-200 bg-amber-50 text-amber-700",
+  unpaid: "border-red-200 bg-red-50 text-red-700",
+  refunded: "border-slate-200 bg-slate-100 text-slate-700",
+  cancelled: "border-slate-200 bg-slate-100 text-slate-600",
+};
 
 function Kpi({ label, value, note }: { label: string; value: string; note: string }) {
   return <FinanceMetric label={label} value={value} detail={note} />;
@@ -97,10 +114,16 @@ export default async function ReportsPage({
     getPeriodWindow(books.period.kind, books.period.year, books.period.index, books.timezone),
   );
 
+  const paidUnpaid = await getPaidUnpaid(books.period.start, books.period.end);
   const report = await getReportingSnapshot(range);
   const days = report.window.custom ? null : report.window.days;
   const rangeQuery = new URLSearchParams(reportRangeParams(report.window)).toString();
   const presetLabel = (option: number) => (option === 365 ? "1 year" : `${option} days`);
+  const periodExportQuery = new URLSearchParams({
+    kind: "invoices",
+    from: localDateISO(books.timezone, 0, books.period.start.getTime()),
+    to: localDateISO(books.timezone, 0, books.period.end.getTime() - 1),
+  }).toString();
   const lastMoment = new Date(report.window.end.getTime() - 1);
   const periodLabel = `${formatInZone(report.window.start, report.timezone, {
     month: "short",
@@ -255,6 +278,7 @@ export default async function ReportsPage({
       >
         {[
           ["financial-summary", "Profit & loss"],
+          ["paid-unpaid-heading", "Paid & unpaid"],
           ["tax-heading", "Tax & payments"],
           ["revenue-heading", "Revenue"],
           ["funnel-heading", "Leads"],
@@ -281,8 +305,10 @@ export default async function ReportsPage({
               Profit &amp; loss
             </h2>
             <p className="mt-1 text-xs text-ink-400">
-              Sales are invoices issued in {books.period.label} — the same basis as the tax figures
-              below, so the two always agree. Expenses count on the day they were paid.
+              Sales are every invoice raised in {books.period.label}, including drafts not sent
+              yet; only cancelled invoices are left out. {settings.taxLabel} counts sent invoices
+              only, so a draft never reaches what you remit. Expenses count on the day they were
+              paid.
             </p>
           </div>
           <p className="rounded-full bg-[#E9EEF3] px-3 py-1.5 text-xs font-semibold text-[#526A80]">
@@ -294,7 +320,11 @@ export default async function ReportsPage({
           <Kpi
             label="Net sales"
             value={formatCents(books.pnl.netSalesCents, books.currency)}
-            note={`${books.pnl.invoiceCount} ${books.pnl.invoiceCount === 1 ? "invoice" : "invoices"}, before ${settings.taxLabel}`}
+            note={`${books.pnl.invoiceCount} ${books.pnl.invoiceCount === 1 ? "invoice" : "invoices"}, before ${settings.taxLabel}${
+              books.pnl.draftInvoiceCount === 0
+                ? ""
+                : ` · includes ${formatCents(books.pnl.draftSalesCents, books.currency)} in ${books.pnl.draftInvoiceCount} ${books.pnl.draftInvoiceCount === 1 ? "draft" : "drafts"}`
+            }`}
           />
           <Kpi
             label="Expenses"
@@ -482,6 +512,108 @@ export default async function ReportsPage({
             </div>
           </dl>
         </div>
+      </section>
+
+      <section
+        aria-labelledby="paid-unpaid-heading"
+        className="mt-6 rounded-[1.75rem] border border-[#DCE4EC] bg-white p-5 shadow-[0_8px_24px_rgba(11,42,74,0.04)] sm:p-6"
+      >
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <h2 id="paid-unpaid-heading" className="text-lg font-semibold text-white">
+              Paid &amp; unpaid
+            </h2>
+            <p className="mt-1 max-w-3xl text-xs text-ink-400">
+              The invoices behind {books.period.label} sales, with what is still owed first. These
+              are full invoice totals with {settings.taxLabel} and tips, so Invoiced is higher than
+              Net sales. {settings.taxLabel} on an unpaid invoice comes off if it is paid by cash or
+              e-transfer.
+            </p>
+          </div>
+          <a href={`/api/reports/export?${periodExportQuery}`} className={financeButton}>
+            Export invoices
+          </a>
+        </div>
+        <div className="mt-4 grid gap-4 sm:grid-cols-3">
+          <Kpi
+            label="Invoiced"
+            value={formatCents(paidUnpaid.invoicedCents, books.currency)}
+            note={`${paidUnpaid.rows.length} ${paidUnpaid.rows.length === 1 ? "invoice" : "invoices"}${
+              paidUnpaid.refundedCents > 0
+                ? ` · ${formatCents(paidUnpaid.refundedCents, books.currency)} refunded`
+                : ""
+            }`}
+          />
+          <Kpi
+            label="Paid"
+            value={formatCents(paidUnpaid.paidCents, books.currency)}
+            note={`${paidUnpaid.paidInvoiceCount} paid in full`}
+          />
+          <Kpi
+            label="Unpaid"
+            value={formatCents(paidUnpaid.unpaidCents, books.currency)}
+            note={`${paidUnpaid.unpaidInvoiceCount} ${paidUnpaid.unpaidInvoiceCount === 1 ? "invoice" : "invoices"} with money owing`}
+          />
+        </div>
+        {paidUnpaid.rows.length === 0 ? (
+          <p className="mt-4 text-sm text-ink-400">No invoices in {books.period.label}.</p>
+        ) : (
+          <div className="mt-4 overflow-x-auto rounded-xl border border-ink-800">
+            <table className="w-full text-sm">
+              <caption className="sr-only">Invoices for {books.period.label}, paid and unpaid</caption>
+              <thead className="bg-ink-900 text-left text-ink-400">
+                <tr>
+                  <th scope="col" className="px-4 py-3">Invoice</th>
+                  <th scope="col" className="px-4 py-3">Date</th>
+                  <th scope="col" className="px-4 py-3">Customer</th>
+                  <th scope="col" className="px-4 py-3">Status</th>
+                  <th scope="col" className="px-4 py-3 text-right">Total</th>
+                  <th scope="col" className="px-4 py-3 text-right">Paid</th>
+                  <th scope="col" className="px-4 py-3 text-right">Balance</th>
+                  <th scope="col" className="px-4 py-3">Paid / unpaid</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paidUnpaid.rows.slice(0, PAID_UNPAID_ROW_LIMIT).map((row) => (
+                  <tr key={row.id} className="border-t border-ink-800">
+                    <th scope="row" className="whitespace-nowrap px-4 py-3 text-left font-medium">
+                      <Link href={`/admin/invoices/${row.id}`} className="text-accent-300 hover:underline">
+                        INV-{row.number}
+                      </Link>
+                    </th>
+                    <td className="whitespace-nowrap px-4 py-3 text-ink-300">
+                      {formatInZone(row.date, books.timezone, { month: "short", day: "numeric", year: "numeric" })}
+                    </td>
+                    <td className="px-4 py-3 text-ink-200">{row.customerName || "—"}</td>
+                    <td className="px-4 py-3"><StatusBadge status={row.status} /></td>
+                    <td className="px-4 py-3 text-right text-ink-300">
+                      {formatCents(row.totalCents, books.currency)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-ink-300">
+                      {formatCents(row.paidCents, books.currency)}
+                    </td>
+                    <td className="px-4 py-3 text-right text-white">
+                      {formatCents(row.balanceCents, books.currency)}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`inline-flex rounded-full border px-2 py-0.5 text-xs font-semibold ${PAYMENT_STATE_TONES[row.paymentState]}`}
+                      >
+                        {INVOICE_PAYMENT_LABELS[row.paymentState]}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {paidUnpaid.rows.length > PAID_UNPAID_ROW_LIMIT && (
+          <p className="mt-3 text-xs text-ink-400">
+            Showing the first {PAID_UNPAID_ROW_LIMIT} of {paidUnpaid.rows.length}. The totals above
+            cover all of them, and the export lists every invoice.
+          </p>
+        )}
       </section>
 
       <div className="mt-8 overflow-hidden rounded-[1.75rem] bg-[#0B2A4A] px-5 py-6 text-[#FFFFFF] shadow-[0_12px_32px_rgba(11,42,74,0.14)] sm:px-7">

@@ -7,6 +7,8 @@ import { db, getPool, schema } from "../src/db";
 import { newId } from "../src/lib/id";
 import { getReportingSnapshot } from "../src/lib/reporting";
 import { buildReportCsv } from "../src/lib/reporting-csv";
+import { getBooksSnapshot } from "../src/lib/books";
+import { getPaidUnpaid } from "../src/lib/sales-report";
 
 beforeEach(async () => {
   await db().execute(
@@ -17,7 +19,7 @@ beforeEach(async () => {
   await db().insert(schema.customers).values({
     id: customerId, firstName: "Marcus", lastName: "Bell", phone: "905-555-0143", preferredContact: "phone",
   });
-  // One taxed, one exempt, one draft that must not be counted.
+  // One taxed, one exempt, and one draft that counts as a sale but never as tax.
   const rows = [
     { number: 2001, status: "paid", taxCents: 2600, taxExempt: false, reason: null },
     { number: 2002, status: "sent", taxCents: 0, taxExempt: true, reason: "Cash sale" },
@@ -77,11 +79,11 @@ describe("reporting export", () => {
     const snapshot = await getReportingSnapshot({ days: 30 });
     const csv = await buildReportCsv("invoices", snapshot);
     const lines = csv.replace("\uFEFF", "").trim().split("\r\n");
-    expect(lines[0].endsWith(",Total,Paid,Balance")).toBe(true);
+    expect(lines[0].endsWith(",Total,Paid,Balance,Payment")).toBe(true);
     // $226.00 invoice with a $50.00 payment: $176.00 still owed, not $226.00.
-    expect(lines.find((l) => l.startsWith("INV-2001"))).toMatch(/,226\.00,50\.00,176\.00$/);
+    expect(lines.find((l) => l.startsWith("INV-2001"))).toMatch(/,226\.00,50\.00,176\.00,Part paid$/);
     // The draft has no payments, so its whole total is the balance.
-    expect(lines.find((l) => l.startsWith("INV-2003"))).toMatch(/,226\.00,0\.00,226\.00$/);
+    expect(lines.find((l) => l.startsWith("INV-2003"))).toMatch(/,226\.00,0\.00,226\.00,Unpaid$/);
   });
 
   it("counts refunds and an applied deposit, and owes nothing on a cancelled invoice", async () => {
@@ -96,8 +98,48 @@ describe("reporting export", () => {
     const csv = await buildReportCsv("invoices", snapshot);
     const lines = csv.replace("\uFEFF", "").trim().split("\r\n");
     // $200.00: $50 paid - $10 refunded + $25 deposit = $65 paid, $135 owed.
-    expect(lines.find((l) => l.startsWith("INV-2002"))).toMatch(/,200\.00,65\.00,135\.00$/);
-    expect(lines.find((l) => l.startsWith("INV-2001"))).toMatch(/,226\.00,50\.00,0\.00$/);
+    expect(lines.find((l) => l.startsWith("INV-2002"))).toMatch(/,200\.00,65\.00,135\.00,Part paid$/);
+    expect(lines.find((l) => l.startsWith("INV-2001"))).toMatch(/,226\.00,50\.00,0\.00,Cancelled$/);
+  });
+
+  it("counts the draft in sales but not in tax, and the CSV says which is which", async () => {
+    const now = new Date();
+    const local = new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Toronto", year: "numeric", month: "2-digit",
+    }).format(now).split("-").map(Number);
+    const books = await getBooksSnapshot("month", local[0], local[1]);
+    expect(books.pnl.netSalesCents).toBe(60_000);
+    expect(books.pnl.draftSalesCents).toBe(20_000);
+    expect(books.pnl.invoiceCount).toBe(3);
+    expect(books.pnl.taxCollectedCents).toBe(2_600);
+    expect(books.tax.netOwingCents).toBe(2_600);
+
+    const snapshot = await getReportingSnapshot({ days: 30 });
+    const csv = await buildReportCsv("pnl", snapshot, books);
+    expect(csv).toContain("Net sales including drafts (before tax),600.00");
+    expect(csv).toContain("Of which drafts not sent yet,200.00");
+    expect(csv).toContain("Net sales on issued invoices,400.00");
+    expect(csv).toContain("HST collected on issued invoices,26.00");
+  });
+
+  it("splits the same invoices into paid and unpaid, leaving out a cancelled one", async () => {
+    await db().update(schema.invoices).set({ status: "cancelled" }).where(eq(schema.invoices.number, 2002));
+    const [paidInFull] = await db().select().from(schema.invoices).where(eq(schema.invoices.number, 2001));
+    await db().insert(schema.payments).values({
+      id: newId("pay"), invoiceId: paidInFull.id, provider: "cheque", idempotencyKey: newId("pay"),
+      amountCents: 17_600, kind: "payment", status: "succeeded", receivedAt: new Date(),
+    });
+    const start = new Date(Date.now() - 86_400_000);
+    const summary = await getPaidUnpaid(start, new Date(Date.now() + 86_400_000));
+
+    expect(summary.rows.map((row) => [row.number, row.paymentState])).toEqual([
+      [2003, "unpaid"],
+      [2001, "paid"],
+    ]);
+    expect(summary.invoicedCents).toBe(45_200);
+    expect(summary.paidCents).toBe(22_600);
+    expect(summary.unpaidCents).toBe(22_600);
+    expect(summary.rows[0].customerName).toBe("Marcus Bell");
   });
 
   it("signs refunds in the payments CSV so a column sum is the net", async () => {
