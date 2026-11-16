@@ -16,6 +16,7 @@ import {
 } from "@/lib/quote-follow-up-message";
 import { getSettings, type BusinessSettings } from "@/lib/settings";
 import { getAppBaseUrl } from "@/lib/urls";
+import { leadTopic, topicServicesLabel, type LeadTopic } from "@/lib/lead-topics";
 
 /**
  * Following up on quote and callback requests.
@@ -118,15 +119,14 @@ export function followUpValuesFor(input: {
   requestedAt: Date;
   settings: Pick<BusinessSettings, "businessName" | "phone" | "timezone">;
   baseUrl: string;
-  /** Callback requests carry no service ids; the form names the product. */
-  callback?: boolean;
+  /**
+   * Callback and dash cam requests carry no service ids; the form names the
+   * product, so the topic decides what the wording says they asked about.
+   */
+  topic?: LeadTopic;
 }): FollowUpValues {
   const services =
-    input.serviceNames.length > 0
-      ? joinWithAnd(input.serviceNames)
-      : input.callback
-        ? "ceramic protection"
-        : "detailing";
+    input.serviceNames.length > 0 ? joinWithAnd(input.serviceNames) : topicServicesLabel(input.topic);
   return {
     firstName: input.leadName.trim().split(/\s+/)[0] || "there",
     vehicle: vehicleLabel(input.vehicleInfo) || "vehicle",
@@ -348,6 +348,7 @@ export async function loadQuoteForFollowUp(quoteRequestId: string) {
       : [];
   const settings = await getSettings();
   const callback = isCallbackRequest(lead?.attribution);
+  const topic = leadTopic({ kind: lead?.kind ?? "quote", attribution: lead?.attribution });
   const values = followUpValuesFor({
     leadName: lead?.name ?? "",
     vehicleInfo: quote.vehicleInfo,
@@ -355,7 +356,7 @@ export async function loadQuoteForFollowUp(quoteRequestId: string) {
     requestedAt: quote.createdAt,
     settings,
     baseUrl: getAppBaseUrl(),
-    callback,
+    topic,
   });
-  return { quote, lead: lead ?? null, services, settings, values, callback };
+  return { quote, lead: lead ?? null, services, settings, values, callback, topic };
 }

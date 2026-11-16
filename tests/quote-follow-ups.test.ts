@@ -32,7 +32,7 @@ import {
   setQuoteNextFollowUpAction,
 } from "../src/app/admin/(app)/leads/quotes/[id]/actions";
 import { DEFAULT_FOLLOW_UP_EMAIL_BODY, DEFAULT_FOLLOW_UP_EMAIL_SUBJECT, DEFAULT_FOLLOW_UP_SMS } from "../src/lib/quote-follow-up-message";
-import { followUpBlock, loadDueFollowUps, localDayToUtc } from "../src/lib/quote-follow-ups";
+import { followUpBlock, loadDueFollowUps, loadQuoteForFollowUp, localDayToUtc } from "../src/lib/quote-follow-ups";
 
 const TZ = "America/Toronto";
 
@@ -309,5 +309,33 @@ describe("due follow-ups", () => {
 
     const due = await loadDueFollowUps(new Date());
     expect(due.items).toEqual([expect.objectContaining({ id: quote.id, callback: true })]);
+  });
+
+  it("takes a dash cam request without an email, tags it, and words its follow-up about dash cams", async () => {
+    const fd = new FormData();
+    fd.set(
+      "payload",
+      JSON.stringify({
+        name: "Dash Caller",
+        phone: "905-555-0188",
+        email: "",
+        serviceIds: [],
+        vehicleCategory: "suv_small",
+        conditionDescription: "Dash cam installation request (from $99, installation included). Vehicle: Small SUV.",
+        marketingConsent: false,
+        attribution: { enquiryType: "dash_cam", enquiryPage: "/dash-cams" },
+      }),
+    );
+    const response = await submitQuoteAction(fd);
+    expect(response.ok).toBe(true);
+    if (!response.ok) return;
+
+    const context = await loadQuoteForFollowUp(response.reference);
+    expect(context?.topic).toBe("dash_cam");
+    expect(context?.callback).toBe(false);
+    expect(context?.lead?.email).toBeNull();
+    expect(context?.quote.vehicleInfo?.category).toBe("suv_small");
+    expect(context?.values.services).toBe("dash cam installation");
+    expect(context?.values.services).not.toMatch(/ceramic/);
   });
 });

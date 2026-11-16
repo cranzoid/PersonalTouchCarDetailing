@@ -1838,3 +1838,39 @@ also had no plain view of which invoices were paid.
   column sums to the Unpaid figure.
 - **Cash-basis Revenue on Reports is unchanged.** It is money received.
 - No migration.
+
+## 55. A dash cam landing page, and the Leads screen works as a call queue
+
+The owner is advertising dash cam installation and wanted the resulting
+requests to be easy to find and call.
+
+- **`/dash-cams` is a paid-traffic landing page** in the `(landing)` group, so
+  it has no site navigation and carries the Google and Meta tags. It is noindex
+  and not in the sitemap, like the festive page. The form asks for vehicle type,
+  name and phone, plus an optional email, and posts through the public
+  `submitQuoteAction`. Requests are ordinary quote requests tagged
+  `attribution.enquiryType = "dash_cam"`.
+- **Only the dash cam facts the owner already publishes on /winter are on the
+  page:** from $99, installation included, professionally installed, helps
+  record drives. No models or features are named because none were supplied.
+  The price and the three points live in `src/lib/dash-cam-offer.ts`, which the
+  Dash Cams card on /winter now also reads, so the two cannot disagree.
+- **A "while you're here" section** reads the Ultimate, Signature and Interior
+  Detail prices from the catalogue by slug, plus the Winter Pass from
+  Memberships settings.
+- **A topic is worked out, never stored** (`src/lib/lead-topics.ts`): from the
+  lead's `kind` and the `enquiryType` the form stamped. Ceramic callback, Dash
+  cam, Festive coating, First wash, General quote, Fleet, Contact. Old rows get
+  one too, and there is no migration.
+- **"Called" means a follow-up has been logged**, the same thing that moves a
+  lead from new to contacted. There is no separate "seen" marker. Opening a
+  request does not count.
+- **Leads → Quote requests** shows a topic badge, filter chips with live counts
+  (Needs a call, Follow-up due, Contacted, Closed) and a topic filter. Each
+  count is what you get on clicking it. Order is uncalled first, longest-waiting
+  on top, then due follow-ups, then the rest, closed last. The phone number on
+  every row is a `tel:` link, kept outside the card's own link.
+- **Follow-up wording follows the topic.** With no service attached, a dash cam
+  request is "dash cam installation", not "ceramic protection". Ceramic
+  callbacks keep "ceramic protection".
+- No migration.

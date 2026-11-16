@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { inArray } from "drizzle-orm";
 import { ButtonLink, Container } from "@/components/ui";
 import { db, schema } from "@/db";
+import { DASH_CAM_FROM_CENTS, DASH_CAM_PAGE_PATH, DASH_CAM_POINTS } from "@/lib/dash-cam-offer";
 import { membershipSettings } from "@/lib/memberships/config";
 import { passValidityWindow } from "@/lib/memberships/passes";
 import { listPlans } from "@/lib/memberships/service";
@@ -92,11 +93,11 @@ export default async function WinterPage() {
     },
     {
       title: "Dash Cams",
-      price: 9900,
+      price: DASH_CAM_FROM_CENTS,
       from: true,
-      points: ["Free installation included", "Professionally installed", "Helps record drives and unexpected road incidents"],
-      href: null,
-      cta: "Call to book",
+      points: [...DASH_CAM_POINTS],
+      href: DASH_CAM_PAGE_PATH,
+      cta: "Learn more",
     },
   ];
 

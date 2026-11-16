@@ -7,6 +7,7 @@ import { requirePageStaff } from "@/lib/auth/page";
 import { roleHas } from "@/lib/auth/permissions";
 import { withinSendWindow } from "@/lib/marketing/message";
 import { isSuppressed } from "@/lib/marketing/suppressions";
+import { LEAD_TOPIC_LABELS } from "@/lib/lead-topics";
 import { formatPhone } from "@/lib/phone";
 import { DEFAULT_FOLLOW_UP_GAP_DAYS, FOLLOW_UP_METHODS, type FollowUpMethod } from "@/lib/quote-follow-up-message";
 import {
@@ -50,7 +51,7 @@ export default async function QuoteRequestDetailPage({
   const { id } = await params;
   const context = await loadQuoteForFollowUp(id);
   if (!context) notFound();
-  const { quote, lead, services: requestedServices, settings, values, callback } = context;
+  const { quote, lead, services: requestedServices, settings, values, topic } = context;
   const tz = settings.timezone;
   const now = new Date();
 
@@ -137,7 +138,7 @@ export default async function QuoteRequestDetailPage({
     {
       id: "created",
       at: quote.createdAt,
-      title: callback ? "Callback requested" : "Quote requested",
+      title: topic === "general_quote" ? "Quote requested" : `${LEAD_TOPIC_LABELS[topic]} requested`,
       by: null,
       body: null,
       tone: "created" as const,
@@ -168,7 +169,7 @@ export default async function QuoteRequestDetailPage({
     : { sms: "There is no contact on this request.", email: "There is no contact on this request." };
 
   const v = quote.vehicleInfo;
-  const kindLabel = callback ? "Callback request" : "Quote request";
+  const kindLabel = topic === "general_quote" ? "Quote request" : `${LEAD_TOPIC_LABELS[topic]} request`;
   const dateLabel = (date: Date) => formatInZone(date, tz, { month: "short", day: "numeric", year: "numeric" });
 
   return (
