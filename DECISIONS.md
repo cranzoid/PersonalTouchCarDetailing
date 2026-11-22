@@ -1874,3 +1874,34 @@ requests to be easy to find and call.
   request is "dash cam installation", not "ceramic protection". Ceramic
   callbacks keep "ceramic protection".
 - No migration.
+
+## 56. One Leads list with one status; the quote request is the call log
+
+2026-11-22. Staff could not tell what "All leads" and "Quote & callback
+requests" were each for: the same people appeared in both, with two different
+sets of statuses (new / contacted / qualified / completed / lost against new /
+reviewing / estimated / closed) that never agreed.
+
+- **The lead's status is the only status.** `/admin/leads` is a single list of
+  leads, newest first, with chips by status (New — not called, Follow-up due,
+  Contacted, Qualified, Converted, Completed, Lost) and by topic. The status
+  dropdown on each row, on the lead's page and on the call log is the same
+  control writing the same column.
+- **`quote_requests.status` is now a mirror**, rewritten by
+  `mirrorLeadStatusOnRequests` whenever the lead moves (status change,
+  conversion, a logged follow-up): new → new; contacted / qualified / converted
+  → reviewing, or estimated once it has an estimate; completed / lost → closed.
+  The quote status dropdown and its action are gone. Rows left out of step by
+  the old separate status are not backfilled; they come back in line the next
+  time the lead's status changes or a follow-up is logged.
+- **The quote request page is the lead's call log**: log a call, send a
+  follow-up, see what happened last. It links back to Leads and to the lead's
+  details. Newest-first replaced the "longest waiting first" order from #55,
+  which put 60-day-old requests at the top.
+- **"Follow-up due"** counts only leads already contacted and not finished
+  with. A new lead is waiting for its first call, which the New chip shows.
+- **Dashboard**: the due follow-ups card and the separate "New quote requests"
+  tile are gone (both live on Leads). "Vehicles in shop" opens Jobs.
+- **New appointment** has "Customer not in the list? Add them now" (the same
+  round trip as invoices) and an "+ Add vehicle" dialog.
+- No migration.

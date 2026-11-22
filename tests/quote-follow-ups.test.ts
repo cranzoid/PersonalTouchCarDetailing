@@ -32,7 +32,8 @@ import {
   setQuoteNextFollowUpAction,
 } from "../src/app/admin/(app)/leads/quotes/[id]/actions";
 import { DEFAULT_FOLLOW_UP_EMAIL_BODY, DEFAULT_FOLLOW_UP_EMAIL_SUBJECT, DEFAULT_FOLLOW_UP_SMS } from "../src/lib/quote-follow-up-message";
-import { followUpBlock, loadDueFollowUps, loadQuoteForFollowUp, localDayToUtc } from "../src/lib/quote-follow-ups";
+import { followUpBlock, loadQuoteForFollowUp, localDayToUtc } from "../src/lib/quote-follow-ups";
+import { setLeadStatusAction } from "../src/app/admin/(app)/leads/actions";
 
 const TZ = "America/Toronto";
 
@@ -139,6 +140,8 @@ describe("sendQuoteFollowUpAction", () => {
     const [quote] = await db().select().from(schema.quoteRequests).where(eq(schema.quoteRequests.id, quoteId));
     expect(quote.lastFollowedUpAt).not.toBeNull();
     expect(quote.nextFollowUpAt?.toISOString()).toBe(localDayToUtc(TZ, "2026-10-14").toISOString());
+    // The request mirrors the lead, which is now contacted.
+    expect(quote.status).toBe("reviewing");
 
     const [lead] = await db().select().from(schema.leads).where(eq(schema.leads.id, leadId));
     expect(lead.status).toBe("contacted");
@@ -266,19 +269,34 @@ describe("logging, comments and scheduling", () => {
   });
 });
 
-describe("due follow-ups", () => {
-  it("lists requests whose day has come, oldest first, and never closed ones", async () => {
-    const now = new Date("2026-10-10T15:00:00Z");
-    const overdue = await seedRequest({ quote: { nextFollowUpAt: new Date("2026-10-05T04:00:00Z") } });
-    const today = await seedRequest({ quote: { nextFollowUpAt: new Date("2026-10-10T04:00:00Z") } });
-    await seedRequest({ quote: { nextFollowUpAt: new Date("2026-10-11T04:00:00Z") } });
-    await seedRequest({ quote: { nextFollowUpAt: new Date("2026-10-01T04:00:00Z"), status: "closed" } });
-    await seedRequest();
+describe("one status for a lead and its requests", () => {
+  it("mirrors every lead status change onto the lead's requests", async () => {
+    const { leadId, quoteId } = await seedRequest();
+    const second = `qr_${Math.random().toString(36).slice(2, 10)}`;
+    await db().insert(schema.quoteRequests).values({ id: second, leadId, estimateId: "est_already" });
+    const statuses = async () =>
+      new Map(
+        (await db().select().from(schema.quoteRequests).where(eq(schema.quoteRequests.leadId, leadId))).map((q) => [
+          q.id,
+          q.status,
+        ]),
+      );
 
-    const due = await loadDueFollowUps(now);
-    expect(due.total).toBe(2);
-    expect(due.items.map((item) => item.id)).toEqual([overdue.quoteId, today.quoteId]);
-    expect(due.items[0]).toMatchObject({ name: "Jordan Lee", vehicle: "2021 Honda Civic", callback: false });
+    expect(await setLeadStatusAction({ leadId, status: "qualified" })).toEqual({ ok: true });
+    expect(await statuses()).toEqual(new Map([[quoteId, "reviewing"], [second, "estimated"]]));
+
+    expect(await setLeadStatusAction({ leadId, status: "lost" })).toEqual({ ok: true });
+    expect(await statuses()).toEqual(new Map([[quoteId, "closed"], [second, "closed"]]));
+
+    expect(await setLeadStatusAction({ leadId, status: "new" })).toEqual({ ok: true });
+    expect(await statuses()).toEqual(new Map([[quoteId, "new"], [second, "new"]]));
+  });
+
+  it("brings a request left behind by the old separate status back in line on the next follow-up", async () => {
+    const { quoteId } = await seedRequest({ lead: { status: "qualified" }, quote: { status: "new" } });
+    await logQuoteFollowUpAction({ quoteRequestId: quoteId, method: "call", note: "", nextFollowUpOn: null });
+    const [quote] = await db().select().from(schema.quoteRequests).where(eq(schema.quoteRequests.id, quoteId));
+    expect(quote.status).toBe("reviewing");
   });
 
   it("makes a new public request due the day it arrives, and keeps the caller's phone matchable", async () => {
@@ -306,9 +324,6 @@ describe("due follow-ups", () => {
     expect(quote.nextFollowUpAt!.getTime()).toBeLessThanOrEqual(Date.now());
     const [lead] = await db().select().from(schema.leads).where(eq(schema.leads.id, quote.leadId!));
     expect(lead.phoneNormalized).toBe("9055550177");
-
-    const due = await loadDueFollowUps(new Date());
-    expect(due.items).toEqual([expect.objectContaining({ id: quote.id, callback: true })]);
   });
 
   it("takes a dash cam request without an email, tags it, and words its follow-up about dash cams", async () => {

@@ -2,10 +2,18 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { formatCents } from "@/lib/money";
 import { localDateISO } from "@/lib/tz";
 import { VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
 import { SearchSelect } from "@/components/search-select";
+import {
+  VehicleDialog,
+  vehicleLabel,
+  vehiclePayload,
+  type VehicleFormValues,
+} from "@/components/vehicle-dialog";
+import { addCustomerVehicleAction } from "../../customers/actions";
 import {
   createManualAppointmentAction,
   getManualAppointmentSlotsAction,
@@ -98,6 +106,8 @@ export function NewAppointmentBuilder({
   maxBookingWindowDays,
   timezone,
   currency,
+  initialCustomerId = "",
+  initialVehicleId = "",
 }: {
   customers: CustomerOption[];
   vehicles: VehicleOption[];
@@ -106,10 +116,19 @@ export function NewAppointmentBuilder({
   maxBookingWindowDays: number;
   timezone: string;
   currency: string;
+  /** Preselected when staff come back from adding the customer mid-booking. */
+  initialCustomerId?: string;
+  initialVehicleId?: string;
 }) {
   const router = useRouter();
-  const [customerId, setCustomerId] = useState("");
-  const [vehicleId, setVehicleId] = useState("");
+  const [customerId, setCustomerId] = useState(initialCustomerId);
+  const [vehicleId, setVehicleId] = useState(initialVehicleId);
+  // A vehicle added from the dialog is held here as well as saved, so it can be
+  // picked straight away without reloading the half-built booking.
+  const [addedVehicles, setAddedVehicles] = useState<VehicleOption[]>([]);
+  const [vehicleDialogOpen, setVehicleDialogOpen] = useState(false);
+  const [vehicleBusy, setVehicleBusy] = useState(false);
+  const [vehicleError, setVehicleError] = useState<string | null>(null);
   const [serviceIds, setServiceIds] = useState<string[]>([]);
   const [addonIds, setAddonIds] = useState<string[]>([]);
   const [customLines, setCustomLines] = useState<CustomLine[]>([]);
@@ -129,9 +148,10 @@ export function NewAppointmentBuilder({
   const quoteSeq = useRef(0);
 
   const money = (cents: number) => formatCents(cents, currency);
-  const customerVehicles = useMemo(() => vehicles.filter((vehicle) => vehicle.customerId === customerId), [vehicles, customerId]);
+  const knownVehicles = useMemo(() => [...vehicles, ...addedVehicles], [vehicles, addedVehicles]);
+  const customerVehicles = useMemo(() => knownVehicles.filter((vehicle) => vehicle.customerId === customerId), [knownVehicles, customerId]);
   const selectedCustomer = customers.find((customer) => customer.id === customerId);
-  const selectedVehicle = vehicles.find((vehicle) => vehicle.id === vehicleId);
+  const selectedVehicle = knownVehicles.find((vehicle) => vehicle.id === vehicleId);
   const vehicleCategory = selectedVehicle?.category ?? null;
   const categoryLabel = vehicleCategory
     ? VEHICLE_CATEGORY_LABELS[vehicleCategory as VehicleCategory] ?? vehicleCategory
@@ -292,6 +312,24 @@ export function NewAppointmentBuilder({
         ? clockAfter(overrideTime, 0)
         : undefined;
 
+  async function saveNewVehicle(values: VehicleFormValues) {
+    setVehicleBusy(true);
+    setVehicleError(null);
+    const payload = vehiclePayload(values);
+    const result = await addCustomerVehicleAction({ customerId, ...payload });
+    setVehicleBusy(false);
+    if (!result.ok) return setVehicleError(result.error);
+    setAddedVehicles((prev) => [
+      ...prev,
+      { id: result.vehicleId, customerId, category: payload.category, label: vehicleLabel(payload) },
+    ]);
+    // Selected straight away, so prices and open times follow this vehicle's size.
+    setVehicleId(result.vehicleId);
+    resetAvailability();
+    setVehicleDialogOpen(false);
+    router.refresh();
+  }
+
   return (
     <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_24rem]">
       <div className="space-y-6">
@@ -322,7 +360,39 @@ export function NewAppointmentBuilder({
               />
             </div>
           </div>
-          {customerId && customerVehicles.length === 0 && <p className="mt-3 text-sm text-amber-300">This customer has no vehicle. Add one from their customer record first.</p>}
+          <button
+            type="button"
+            onClick={() => {
+              setVehicleError(null);
+              setVehicleDialogOpen(true);
+            }}
+            disabled={!customerId}
+            className="mt-3 rounded-lg border border-ink-600 px-3 py-1.5 text-xs font-semibold text-ink-200 hover:border-ink-500 disabled:opacity-40"
+          >
+            + Add vehicle
+          </button>
+          {customerId && customerVehicles.length === 0 && <p className="mt-3 text-sm text-amber-300">This customer has no vehicle yet. Add one above to book them in.</p>}
+          <p className="mt-3 text-xs text-ink-500">
+            Customer not in the list?{" "}
+            <Link
+              href={`/admin/customers?new=1&next=${encodeURIComponent("/admin/appointments/new")}`}
+              className="text-accent-300 underline"
+            >
+              Add them now
+            </Link>
+            {" "}— you will come back here with them (and their vehicle) selected.
+          </p>
+          {vehicleDialogOpen && (
+            <VehicleDialog
+              title="Add a vehicle"
+              description="Added to this customer's record and selected for this appointment."
+              submitLabel="Add vehicle"
+              busy={vehicleBusy}
+              error={vehicleError}
+              onCancel={() => setVehicleDialogOpen(false)}
+              onSubmit={(values) => void saveNewVehicle(values)}
+            />
+          )}
           {categoryLabel && <p className="mt-3 text-sm text-ink-400">Priced as: <span className="text-white">{categoryLabel}</span> — every price below is for this size.</p>}
         </section>
 

@@ -6,7 +6,6 @@ import { requirePageStaff } from "@/lib/auth/page";
 import { roleHas } from "@/lib/auth/permissions";
 import { getAttentionQueue } from "@/lib/attention";
 import { getBooksSnapshot, listUnconfirmedBills } from "@/lib/books";
-import { dueFollowUpsOrNone, startOfLocalDay } from "@/lib/quote-follow-ups";
 import { unreadRepliesOrNone } from "@/lib/replies";
 import { getSettings } from "@/lib/settings";
 import { appointmentTimeLabel } from "@/lib/appointment-time";
@@ -15,7 +14,6 @@ import { formatInZone, zonedToUtc } from "@/lib/tz";
 import type { StaffRole } from "@/lib/types";
 import { AttentionCard } from "./attention-card";
 import { ConfirmBillsCard } from "./expenses/confirm-bills-card";
-import { FollowUpsCard } from "./follow-ups-card";
 import { RepliesCard } from "./replies-card";
 
 export const dynamic = "force-dynamic";
@@ -65,10 +63,6 @@ export default async function AdminDashboard() {
     .select({ n: count() })
     .from(schema.leads)
     .where(eq(schema.leads.status, "new"));
-  const [newQuotes] = await db()
-    .select({ n: count() })
-    .from(schema.quoteRequests)
-    .where(eq(schema.quoteRequests.status, "new"));
   const [pendingAppts] = await db()
     .select({ n: count() })
     .from(schema.appointments)
@@ -87,8 +81,6 @@ export default async function AdminDashboard() {
   // What a customer texted back is their words to the shop, not shop-floor
   // information — the same gate the customer records themselves are behind.
   const replies = roleHas(role, "manage_customers") ? await unreadRepliesOrNone() : null;
-  // Quote requests are behind the same gate as the screen that answers them.
-  const followUps = roleHas(role, "manage_estimates") ? await dueFollowUpsOrNone(now) : null;
   const canManageExpenses = roleHas(role, "manage_expenses");
   const canManageInvoices = roleHas(role, "manage_invoices");
   const books = canSeeMoney ? await getBooksSnapshot("month", y, m) : null;
@@ -104,10 +96,12 @@ export default async function AdminDashboard() {
     : null;
 
   const stats = [
-    { label: "New leads", value: newLeads.n, href: "/admin/leads" },
-    { label: "New quote requests", value: newQuotes.n, href: "/admin/leads?tab=quotes" },
+    // One lead per enquiry, quote and callback requests included — the Leads
+    // list and this count use the same status.
+    { label: "New leads", value: newLeads.n, href: "/admin/leads?filter=new" },
     { label: "Bookings needing action", value: pendingAppts.n, href: "/admin/appointments?status=pending" },
-    { label: "Vehicles in shop", value: activeJobs.n, href: "/admin/appointments" },
+    // The jobs board is where a checked-in vehicle lives until it is handed back.
+    { label: "Vehicles in shop", value: activeJobs.n, href: "/admin/jobs" },
   ];
 
   return (
@@ -117,7 +111,7 @@ export default async function AdminDashboard() {
         {formatInZone(now, tz, { weekday: "long", month: "long", day: "numeric" })}
       </p>
 
-      <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mt-8 grid gap-4 sm:grid-cols-3">
         {stats.map((s) => (
           <Link
             key={s.label}
@@ -146,28 +140,6 @@ export default async function AdminDashboard() {
             }),
             needsAttention: item.needsAttention,
           }))}
-        />
-      )}
-
-      {followUps && followUps.total > 0 && (
-        <FollowUpsCard
-          total={followUps.total}
-          items={followUps.items.map((item) => {
-            const overdue = item.nextFollowUpAt < startOfLocalDay(tz, now);
-            return {
-              id: item.id,
-              name: item.name,
-              callback: item.callback,
-              vehicle: item.vehicle,
-              overdue,
-              dueLabel: overdue
-                ? `Overdue since ${formatInZone(item.nextFollowUpAt, tz, { month: "short", day: "numeric" })}`
-                : "Due today",
-              lastLabel: item.lastFollowedUpAt
-                ? `Last followed up ${formatInZone(item.lastFollowedUpAt, tz, { month: "short", day: "numeric" })}`
-                : "Not followed up yet",
-            };
-          })}
         />
       )}
 

@@ -2,12 +2,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { QuoteStatusSelect } from "../../status-select";
+import { LeadStatusSelect } from "../../status-select";
 import { requirePageStaff } from "@/lib/auth/page";
 import { roleHas } from "@/lib/auth/permissions";
 import { withinSendWindow } from "@/lib/marketing/message";
 import { isSuppressed } from "@/lib/marketing/suppressions";
-import { LEAD_TOPIC_LABELS } from "@/lib/lead-topics";
+import { LEAD_TOPIC_LABELS, isLeadClosed } from "@/lib/lead-topics";
 import { formatPhone } from "@/lib/phone";
 import { DEFAULT_FOLLOW_UP_GAP_DAYS, FOLLOW_UP_METHODS, type FollowUpMethod } from "@/lib/quote-follow-up-message";
 import {
@@ -146,7 +146,8 @@ export default async function QuoteRequestDetailPage({
   ].sort((a, b) => b.at.getTime() - a.at.getTime());
 
   const followUpCount = activities.filter((a) => a.kind === "follow_up").length;
-  const due = isFollowUpDue(quote, now);
+  // The lead's status is the one that counts; a finished lead has nothing due.
+  const due = isFollowUpDue(quote, now) && !(lead && isLeadClosed(lead.status));
   const overdue = due && quote.nextFollowUpAt! < startOfLocalDay(tz, now);
 
   const blocked = lead
@@ -174,16 +175,40 @@ export default async function QuoteRequestDetailPage({
 
   return (
     <div className="max-w-3xl">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+      <Link href="/admin/leads" className="text-sm text-ink-400 hover:text-accent-300">
+        ← Leads
+      </Link>
+      <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="font-mono text-xs text-ink-500">{quote.id}</p>
-          <h1 className="text-2xl font-bold text-white">
-            {kindLabel} — {lead?.name ?? "Unknown"}
-          </h1>
-          <p className="mt-1 text-sm text-ink-400">Received {dateLabel(quote.createdAt)}</p>
+          <p className="text-xs font-semibold uppercase tracking-wider text-ink-500">Call log</p>
+          <h1 className="text-2xl font-bold text-white">{lead?.name ?? "Unknown"}</h1>
+          <p className="mt-1 text-sm text-ink-400">
+            {kindLabel} · received {dateLabel(quote.createdAt)}
+            {lead && (
+              <>
+                {" · "}
+                <Link href={`/admin/leads/${lead.id}`} className="text-accent-300 hover:underline">
+                  Lead details
+                </Link>
+              </>
+            )}
+          </p>
         </div>
-        <QuoteStatusSelect quoteRequestId={quote.id} status={quote.status} />
+        {lead && (
+          <label className="flex items-center gap-2 text-xs text-ink-400">
+            Lead status
+            <LeadStatusSelect
+              leadId={lead.id}
+              status={lead.status}
+              linkedToCustomer={Boolean(lead.convertedCustomerId)}
+            />
+          </label>
+        )}
       </div>
+      <p className="mt-3 text-sm text-ink-500">
+        Log each call or message here so anyone can see what happened last. The status is the lead&apos;s own — the
+        same one the Leads list shows.
+      </p>
 
       <div className="mt-6 grid gap-3 sm:grid-cols-3">
         <div className="rounded-xl border border-ink-800 p-4">

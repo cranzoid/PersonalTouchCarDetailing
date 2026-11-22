@@ -79,7 +79,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
       id: `quote-${quote.id}`,
       at: quote.createdAt,
       title: "Quote request created",
-      detail: `Status: ${quote.status.replaceAll("_", " ")}`,
+      detail: "Open the call log",
       href: `/admin/leads/quotes/${quote.id}`,
     })),
     ...communications.map((item) => ({
@@ -109,6 +109,7 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <Link href="/admin/leads" className="text-sm text-ink-400 hover:text-accent-300">← Leads</Link>
           <StatusBadge status={lead.status} />
           <LeadStatusSelect leadId={lead.id} status={lead.status} linkedToCustomer={Boolean(lead.convertedCustomerId)} />
         </div>
@@ -141,10 +142,11 @@ export default async function LeadDetailPage({ params }: { params: Promise<{ id:
           )}
           {quotes.length > 0 && (
             <div className="mt-4 border-t border-ink-800 pt-3 text-sm">
-              <p className="text-ink-500">Quote requests</p>
-              {quotes.map((quote) => (
+              <p className="text-ink-500">Calls and follow-ups are logged against their request.</p>
+              {quotes.map((quote, index) => (
                 <Link key={quote.id} href={`/admin/leads/quotes/${quote.id}`} className="mt-1 block text-accent-300 hover:underline">
-                  {quote.id} · {quote.status.replaceAll("_", " ")}
+                  {quotes.length === 1 ? "Open call log" : `Call log — request of ${quote.createdAt.toISOString().slice(0, 10)}`}
+                  {index === 0 && quotes.length > 1 ? " (latest)" : ""} →
                 </Link>
               ))}
             </div>

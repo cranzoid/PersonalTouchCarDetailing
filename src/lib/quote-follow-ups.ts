@@ -16,7 +16,7 @@ import {
 } from "@/lib/quote-follow-up-message";
 import { getSettings, type BusinessSettings } from "@/lib/settings";
 import { getAppBaseUrl } from "@/lib/urls";
-import { leadTopic, topicServicesLabel, type LeadTopic } from "@/lib/lead-topics";
+import { leadTopic, quoteStatusForLead, topicServicesLabel, type LeadTopic } from "@/lib/lead-topics";
 
 /**
  * Following up on quote and callback requests.
@@ -148,6 +148,37 @@ function joinWithAnd(items: readonly string[]): string {
 }
 
 /**
+ * Rewrites the status of every request a lead made to mirror the lead's own,
+ * so the Leads list and a request's call log always show the same thing. Call
+ * it in the same transaction as whatever moved the lead. The lead's change is
+ * what gets audited; this is bookkeeping that follows from it.
+ */
+export async function mirrorLeadStatusOnRequests(
+  tx: Tx,
+  leadId: string,
+  leadStatus: string,
+  now: Date = new Date(),
+): Promise<void> {
+  const requests = await tx
+    .select({
+      id: schema.quoteRequests.id,
+      status: schema.quoteRequests.status,
+      estimateId: schema.quoteRequests.estimateId,
+    })
+    .from(schema.quoteRequests)
+    .where(eq(schema.quoteRequests.leadId, leadId))
+    .for("update");
+  for (const request of requests) {
+    const status = quoteStatusForLead(leadStatus, Boolean(request.estimateId));
+    if (status === request.status) continue;
+    await tx
+      .update(schema.quoteRequests)
+      .set({ status, updatedAt: now })
+      .where(eq(schema.quoteRequests.id, request.id));
+  }
+}
+
+/**
  * Stamps a follow-up onto a request, inside the caller's transaction.
  *
  * Shared by "send" and "log" so the two can never disagree on what a follow-up
@@ -213,76 +244,13 @@ export async function recordFollowUp(
         reason: "Followed up on their quote request",
       });
     }
+    const [lead] = await tx
+      .select({ status: schema.leads.status })
+      .from(schema.leads)
+      .where(eq(schema.leads.id, input.leadId));
+    if (lead) await mirrorLeadStatusOnRequests(tx, input.leadId, lead.status, input.now);
   }
   return activityId;
-}
-
-/** isFollowUpDue, as a query condition. */
-export function followUpDueWhere(now: Date): SQL {
-  return and(
-    isNotNull(schema.quoteRequests.nextFollowUpAt),
-    lte(schema.quoteRequests.nextFollowUpAt, now),
-    ne(schema.quoteRequests.status, "closed"),
-  )!;
-}
-
-export type DueFollowUp = {
-  id: string;
-  name: string;
-  callback: boolean;
-  vehicle: string;
-  nextFollowUpAt: Date;
-  lastFollowedUpAt: Date | null;
-};
-
-/** Requests whose follow-up day has come, oldest-due first. */
-export async function loadDueFollowUps(
-  now: Date,
-  limit = 8,
-): Promise<{ total: number; items: DueFollowUp[] }> {
-  const due = followUpDueWhere(now);
-  const [{ n }] = await db().select({ n: count() }).from(schema.quoteRequests).where(due);
-  const rows = await db()
-    .select({
-      id: schema.quoteRequests.id,
-      vehicleInfo: schema.quoteRequests.vehicleInfo,
-      nextFollowUpAt: schema.quoteRequests.nextFollowUpAt,
-      lastFollowedUpAt: schema.quoteRequests.lastFollowedUpAt,
-      name: schema.leads.name,
-      attribution: schema.leads.attribution,
-    })
-    .from(schema.quoteRequests)
-    .leftJoin(schema.leads, eq(schema.leads.id, schema.quoteRequests.leadId))
-    .where(due)
-    .orderBy(asc(schema.quoteRequests.nextFollowUpAt))
-    .limit(limit);
-  return {
-    total: n,
-    items: rows.map((row) => ({
-      id: row.id,
-      name: row.name ?? "Unknown",
-      callback: isCallbackRequest(row.attribution),
-      vehicle: vehicleLabel(row.vehicleInfo),
-      nextFollowUpAt: row.nextFollowUpAt!,
-      lastFollowedUpAt: row.lastFollowedUpAt,
-    })),
-  };
-}
-
-/**
- * The dashboard's copy: a failure here (say, a migration that has not landed)
- * hides one card instead of breaking the whole dashboard.
- */
-export async function dueFollowUpsOrNone(
-  now: Date,
-  limit?: number,
-): Promise<{ total: number; items: DueFollowUp[] } | null> {
-  try {
-    return await loadDueFollowUps(now, limit);
-  } catch (error) {
-    console.error("[quote-follow-ups] due follow-ups unavailable", error instanceof Error ? error.message : "");
-    return null;
-  }
 }
 
 /** How many follow-ups each request has had, for the list. */

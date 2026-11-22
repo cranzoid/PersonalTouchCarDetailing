@@ -7,8 +7,14 @@ import { NewAppointmentBuilder } from "./builder";
 
 export const dynamic = "force-dynamic";
 
-export default async function NewAppointmentPage() {
+export default async function NewAppointmentPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ customerId?: string; vehicleId?: string }>;
+}) {
   await requirePageStaff("manage_bookings");
+  // Set when staff came back from adding the customer mid-booking.
+  const { customerId, vehicleId } = await searchParams;
   const settings = await getSettings();
   const [customers, vehicles, services, categories, addonLinks, addons, serviceAdjustments, addonAdjustments] = await Promise.all([
     db().select().from(schema.customers).where(isNull(schema.customers.anonymizedAt)).orderBy(asc(schema.customers.firstName), asc(schema.customers.lastName)),
@@ -64,7 +70,7 @@ export default async function NewAppointmentPage() {
   return (
     <div className="max-w-5xl">
       <h1 className="text-2xl font-bold text-white">New appointment</h1>
-      <p className="mt-1 text-sm text-ink-400">Create a staff-assisted booking for an existing CRM customer and vehicle.</p>
+      <p className="mt-1 text-sm text-ink-400">Book a customer in by hand. New customers and vehicles can be added from here.</p>
       <NewAppointmentBuilder
         customers={customerOptions}
         vehicles={orderedVehicles.map((vehicle) => ({
@@ -95,6 +101,8 @@ export default async function NewAppointmentPage() {
         maxBookingWindowDays={settings.maxBookingWindowDays}
         timezone={settings.timezone}
         currency={settings.currency}
+        initialCustomerId={customers.some((c) => c.id === customerId) ? customerId : ""}
+        initialVehicleId={vehicles.some((v) => v.id === vehicleId && v.customerId === customerId) ? vehicleId : ""}
       />
     </div>
   );

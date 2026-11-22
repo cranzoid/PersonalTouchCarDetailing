@@ -1,44 +1,40 @@
 import Link from "next/link";
-import { desc, eq } from "drizzle-orm";
+import { desc, inArray } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { StatusBadge } from "@/components/admin";
 import { LeadStatusSelect } from "./status-select";
 import { requirePageStaff } from "@/lib/auth/page";
 import {
+  LEAD_FILTERS,
+  LEAD_FILTER_LABELS,
   LEAD_TOPICS,
   LEAD_TOPIC_LABELS,
   LEAD_TOPIC_TONES,
-  REQUEST_FILTERS,
-  REQUEST_FILTER_LABELS,
   callStatusLabel,
+  isFollowUpDueFor,
   leadTopic,
-  matchesRequestFilter,
-  needsCall,
-  parseRequestFilter,
+  matchesLeadFilter,
+  parseLeadFilter,
   parseTopic,
-  sortForCalling,
   telHref,
-  waitingLabel,
+  type LeadFilter,
   type LeadTopic,
-  type RequestFilter,
 } from "@/lib/lead-topics";
 import { formatPhone } from "@/lib/phone";
-import { followUpCounts, isFollowUpDue, startOfLocalDay } from "@/lib/quote-follow-ups";
+import { followUpCounts, startOfLocalDay } from "@/lib/quote-follow-ups";
 import { getSettings } from "@/lib/settings";
 import { formatInZone } from "@/lib/tz";
 import { VEHICLE_CATEGORY_LABELS, type VehicleCategory } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-/** Newest rows read per tab. Filters and counts are worked out over these. */
+/** Newest leads read. Filters and counts are worked out over these. */
 const LOAD_LIMIT = 500;
 
-type View = { tab: "leads" | "quotes"; filter: RequestFilter; topic: LeadTopic | null };
+type View = { filter: LeadFilter; topic: LeadTopic | null };
 
 function viewHref(view: View): string {
   const params = new URLSearchParams();
-  if (view.tab === "quotes") params.set("tab", "quotes");
-  if (view.tab === "quotes" && view.filter !== "all") params.set("filter", view.filter);
+  if (view.filter !== "all") params.set("filter", view.filter);
   if (view.topic) params.set("topic", view.topic);
   const query = params.toString();
   return query ? `/admin/leads?${query}` : "/admin/leads";
@@ -49,16 +45,6 @@ function TopicBadge({ topic }: { topic: LeadTopic }) {
     <span className={`rounded border px-1.5 py-0.5 text-xs font-medium ${LEAD_TOPIC_TONES[topic]}`}>
       {LEAD_TOPIC_LABELS[topic]}
     </span>
-  );
-}
-
-function CallLink({ phone, className = "" }: { phone: string | null; className?: string }) {
-  const href = telHref(phone);
-  if (!href) return null;
-  return (
-    <a href={href} className={`font-medium text-accent-300 hover:underline ${className}`}>
-      {formatPhone(phone)}
-    </a>
   );
 }
 
@@ -76,232 +62,195 @@ function Chip({ href, active, tone = "default", children }: {
   );
 }
 
+function vehicleText(info: { year?: number; make?: string; model?: string; category?: string } | null): string | null {
+  const named = [info?.year, info?.make, info?.model].filter(Boolean).join(" ");
+  if (named) return named;
+  if (info?.category && info.category in VEHICLE_CATEGORY_LABELS) {
+    return VEHICLE_CATEGORY_LABELS[info.category as VehicleCategory];
+  }
+  return null;
+}
+
 export default async function LeadsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string; filter?: string; topic?: string }>;
+  searchParams: Promise<{ filter?: string; topic?: string }>;
 }) {
   await requirePageStaff("manage_customers");
   const params = await searchParams;
-  const view: View = {
-    tab: params.tab === "quotes" ? "quotes" : "leads",
-    filter: parseRequestFilter(params.filter),
-    topic: parseTopic(params.topic),
-  };
+  const view: View = { filter: parseLeadFilter(params.filter), topic: parseTopic(params.topic) };
   const now = new Date();
   const { timezone: tz } = await getSettings();
   const day = (date: Date) => formatInZone(date, tz, { month: "short", day: "numeric" });
+  const todayStart = startOfLocalDay(tz, now);
 
-  const allLeads = await db().select().from(schema.leads).orderBy(desc(schema.leads.createdAt)).limit(LOAD_LIMIT);
-  const requestRows = (
-    await db()
-      .select({ quote: schema.quoteRequests, lead: schema.leads })
-      .from(schema.quoteRequests)
-      .leftJoin(schema.leads, eq(schema.leads.id, schema.quoteRequests.leadId))
-      .orderBy(desc(schema.quoteRequests.createdAt))
-      .limit(LOAD_LIMIT)
-  ).map((row) => ({
-    ...row,
-    topic: leadTopic({ kind: row.lead?.kind ?? "quote", attribution: row.lead?.attribution }),
-  }));
-  const leadRows = allLeads.map((lead) => ({ lead, topic: leadTopic(lead) }));
+  // Newest first: the list reads like an inbox, with today's enquiries on top.
+  const leads = await db().select().from(schema.leads).orderBy(desc(schema.leads.createdAt)).limit(LOAD_LIMIT);
+  const requests = leads.length
+    ? await db()
+        .select()
+        .from(schema.quoteRequests)
+        .where(inArray(schema.quoteRequests.leadId, leads.map((lead) => lead.id)))
+        .orderBy(desc(schema.quoteRequests.createdAt))
+    : [];
+  // A lead's newest request is the one its call log opens on.
+  const latestRequest = new Map<string, (typeof requests)[number]>();
+  for (const request of requests) {
+    if (request.leadId && !latestRequest.has(request.leadId)) latestRequest.set(request.leadId, request);
+  }
+
+  const rows = leads.map((lead) => {
+    const request = latestRequest.get(lead.id) ?? null;
+    return {
+      lead,
+      request,
+      topic: leadTopic(lead),
+      queue: { status: lead.status, nextFollowUpAt: request?.nextFollowUpAt ?? null },
+    };
+  });
 
   // Each set of chips counts what is left once the OTHER chips are applied, so
   // a number is always what you get on clicking it.
   const topicOk = (topic: LeadTopic) => view.topic === null || view.topic === topic;
-  const requestsForFilterCounts = requestRows.filter((r) => topicOk(r.topic));
-  const requestsForTopicCounts = requestRows.filter((r) => matchesRequestFilter(r.quote, view.filter, now));
-  const waitingCount = requestRows.filter((r) => needsCall(r.quote)).length;
+  const rowsForFilterCounts = rows.filter((row) => topicOk(row.topic));
+  const rowsForTopicCounts = rows.filter((row) => matchesLeadFilter(row.queue, view.filter, now));
+  const visible = rowsForFilterCounts.filter((row) => matchesLeadFilter(row.queue, view.filter, now));
+  const followUps = await followUpCounts(visible.flatMap((row) => (row.request ? [row.request.id] : [])));
 
-  const visibleRequests = sortForCalling(
-    requestsForFilterCounts.filter((r) => matchesRequestFilter(r.quote, view.filter, now)).map((r) => ({ ...r, ...r.quote })),
-    now,
-  );
-  const visibleLeads = leadRows.filter((r) => topicOk(r.topic));
-  const followUps = await followUpCounts(visibleRequests.slice(0, 200).map((r) => r.id));
-  const todayStart = startOfLocalDay(tz, now);
-
-  const topicCounts = (rows: { topic: LeadTopic }[]) => {
-    const counts = new Map<LeadTopic, number>();
-    for (const row of rows) counts.set(row.topic, (counts.get(row.topic) ?? 0) + 1);
-    return counts;
-  };
-  const topicChips = (counts: Map<LeadTopic, number>, total: number) => (
-    <div className="mt-3 flex flex-wrap gap-2 text-xs">
-      <Chip href={viewHref({ ...view, topic: null })} active={view.topic === null}>All topics ({total})</Chip>
-      {LEAD_TOPICS.filter((topic) => (counts.get(topic) ?? 0) > 0 || view.topic === topic).map((topic) => (
-        <Chip key={topic} href={viewHref({ ...view, topic })} active={view.topic === topic}>
-          {LEAD_TOPIC_LABELS[topic]} ({counts.get(topic) ?? 0})
-        </Chip>
-      ))}
-    </div>
-  );
+  const topicCounts = new Map<LeadTopic, number>();
+  for (const row of rowsForTopicCounts) topicCounts.set(row.topic, (topicCounts.get(row.topic) ?? 0) + 1);
 
   return (
     <div>
       <h1 className="text-2xl font-bold text-white">Leads</h1>
-      <div className="mt-4 flex flex-wrap gap-2">
-        <Link
-          href={viewHref({ ...view, tab: "leads" })}
-          className={`rounded-full px-4 py-1.5 text-sm ${view.tab === "leads" ? "bg-accent-400 font-semibold text-ink-950" : "bg-ink-800 text-ink-300"}`}
-        >
-          All leads ({allLeads.length})
-        </Link>
-        <Link
-          href={viewHref({ ...view, tab: "quotes" })}
-          className={`rounded-full px-4 py-1.5 text-sm ${view.tab === "quotes" ? "bg-accent-400 font-semibold text-ink-950" : "bg-ink-800 text-ink-300"}`}
-        >
-          Quote &amp; callback requests ({requestRows.length})
-          {waitingCount > 0 && (
-            <span className="ml-2 rounded-full bg-amber-500 px-2 py-0.5 text-xs font-bold text-ink-950">
-              {waitingCount} to call
-            </span>
-          )}
-        </Link>
+      <p className="mt-1 max-w-2xl text-sm text-ink-400">
+        Everyone who has asked about us, newest first. Each lead has one status. It is the same here, on the
+        lead&apos;s page and in their call log, so changing it in one place changes it everywhere. Open a lead&apos;s{" "}
+        <span className="text-ink-200">call log</span> to log a call, send a follow-up, or see what was said last.
+      </p>
+
+      <div className="mt-4 flex flex-wrap gap-2 text-xs">
+        {LEAD_FILTERS.map((filter) => {
+          const n = rowsForFilterCounts.filter((row) => matchesLeadFilter(row.queue, filter, now)).length;
+          if (n === 0 && filter !== "all" && filter !== "new" && view.filter !== filter) return null;
+          return (
+            <Chip
+              key={filter}
+              href={viewHref({ ...view, filter })}
+              active={view.filter === filter}
+              tone={filter === "new" || filter === "due" ? "alert" : "default"}
+            >
+              {LEAD_FILTER_LABELS[filter]} ({n})
+            </Chip>
+          );
+        })}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2 text-xs">
+        <Chip href={viewHref({ ...view, topic: null })} active={view.topic === null}>
+          All topics ({rowsForTopicCounts.length})
+        </Chip>
+        {LEAD_TOPICS.filter((topic) => (topicCounts.get(topic) ?? 0) > 0 || view.topic === topic).map((topic) => (
+          <Chip key={topic} href={viewHref({ ...view, topic })} active={view.topic === topic}>
+            {LEAD_TOPIC_LABELS[topic]} ({topicCounts.get(topic) ?? 0})
+          </Chip>
+        ))}
       </div>
 
-      {view.tab === "leads" && (
-        <>
-          {topicChips(topicCounts(leadRows), leadRows.length)}
-          <div className="mt-4 overflow-x-auto rounded-xl border border-ink-800">
-            <table className="w-full text-sm">
-              <thead className="bg-ink-900 text-left text-ink-400">
-                <tr>
-                  <th className="px-4 py-3">Name</th>
-                  <th className="px-4 py-3">Contact</th>
-                  <th className="px-4 py-3">Topic</th>
-                  <th className="px-4 py-3">Source</th>
-                  <th className="px-4 py-3">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleLeads.length === 0 && (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-ink-500">No leads here.</td></tr>
-                )}
-                {visibleLeads.map(({ lead: l, topic }) => {
-                  const attr = l.attribution;
-                  return (
-                    <tr key={l.id} className="border-t border-ink-800 align-top hover:bg-ink-900/40">
-                      <td className="px-4 py-3">
-                        <Link href={`/admin/leads/${l.id}`} className="font-medium text-white hover:text-accent-300 hover:underline">
-                          {l.name}
-                        </Link>
-                        {l.message && <p className="mt-1 max-w-xs truncate text-xs text-ink-500">{l.message}</p>}
-                      </td>
-                      <td className="px-4 py-3 text-ink-300">
-                        <CallLink phone={l.phone} className="block" />
-                        {l.phone && !telHref(l.phone) && <p>{l.phone}</p>}
-                        {l.email && <p>{l.email}</p>}
-                      </td>
-                      <td className="px-4 py-3"><TopicBadge topic={topic} /></td>
-                      <td className="px-4 py-3 text-ink-400">
-                        {(attr?.source as string) ?? "—"}
-                        {attr?.promo && (
-                          <span className="ml-2 rounded bg-emerald-950/40 px-1.5 py-0.5 text-xs text-emerald-300">
-                            {attr.promo.code}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <LeadStatusSelect leadId={l.id} status={l.status} linkedToCustomer={Boolean(l.convertedCustomerId)} />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-
-      {view.tab === "quotes" && (
-        <div className="mt-6">
-          <div className="flex flex-wrap gap-2 text-xs">
-            {REQUEST_FILTERS.map((filter) => {
-              const n = requestsForFilterCounts.filter((r) => matchesRequestFilter(r.quote, filter, now)).length;
-              return (
-                <Chip
-                  key={filter}
-                  href={viewHref({ ...view, filter })}
-                  active={view.filter === filter}
-                  tone={filter === "call" || filter === "due" ? "alert" : "default"}
-                >
-                  {REQUEST_FILTER_LABELS[filter]} ({n})
-                </Chip>
-              );
-            })}
-          </div>
-          {topicChips(topicCounts(requestsForTopicCounts), requestsForTopicCounts.length)}
-
-          <div className="mt-4 space-y-3">
-            {visibleRequests.length === 0 && (
-              <p className="text-ink-500">
-                {view.filter === "call" ? "Everyone has been called." : view.filter === "due" ? "Nothing is due for a follow-up." : "No requests here."}
-              </p>
-            )}
-            {visibleRequests.map((q) => {
-              const lead = q.lead;
-              const v = q.vehicleInfo;
-              const due = isFollowUpDue(q, now);
-              const uncalled = needsCall(q);
-              const vehicle =
-                [v?.year, v?.make, v?.model].filter(Boolean).join(" ") ||
-                (v?.category && v.category in VEHICLE_CATEGORY_LABELS
-                  ? VEHICLE_CATEGORY_LABELS[v.category as VehicleCategory]
-                  : "Vehicle not specified");
-              return (
-                <div
-                  key={q.id}
-                  className={`rounded-xl border bg-ink-900/40 p-4 hover:border-accent-500/50 ${
-                    uncalled ? "border-amber-500/60" : due ? "border-amber-500/40" : "border-ink-800"
-                  }`}
-                >
-                  <Link href={`/admin/leads/quotes/${q.id}`} className="block">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div>
-                        <p className="flex flex-wrap items-center gap-2 font-medium text-white">
-                          {lead?.name ?? "Unknown"}
-                          <TopicBadge topic={q.topic} />
-                        </p>
-                        <p className="text-sm text-ink-400">
-                          {vehicle}
-                          {" · "}received {day(q.createdAt)}
-                        </p>
-                      </div>
-                      <StatusBadge status={q.status} />
-                    </div>
-                    {q.conditionDescription && (
-                      <p className="mt-2 line-clamp-2 text-sm text-ink-500">{q.conditionDescription}</p>
-                    )}
-                    <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-400">
-                      <span className={uncalled ? "font-semibold text-amber-300" : ""}>
-                        {callStatusLabel(q, followUps.get(q.id) ?? 0, day)}
+      <div className="mt-4 space-y-3">
+        {visible.length === 0 && (
+          <p className="text-ink-500">
+            {view.filter === "new"
+              ? "Everyone has been called."
+              : view.filter === "due"
+                ? "Nothing is due for a follow-up."
+                : "No leads here."}
+          </p>
+        )}
+        {visible.map(({ lead, request, topic, queue }) => {
+          const isNew = lead.status === "new";
+          const due = isFollowUpDueFor(queue, now);
+          const callLog = request ? `/admin/leads/quotes/${request.id}` : null;
+          const vehicle = vehicleText(request?.vehicleInfo ?? null);
+          const source = typeof lead.attribution?.source === "string" ? lead.attribution.source : null;
+          const snippet = request?.conditionDescription ?? lead.message;
+          const phoneHref = telHref(lead.phone);
+          return (
+            <div
+              key={lead.id}
+              className={`rounded-xl border bg-ink-900/40 p-4 ${
+                isNew ? "border-amber-500/60" : due ? "border-amber-500/40" : "border-ink-800"
+              }`}
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="flex flex-wrap items-center gap-2 font-medium text-white">
+                    <Link href={callLog ?? `/admin/leads/${lead.id}`} className="hover:text-accent-300 hover:underline">
+                      {lead.name}
+                    </Link>
+                    <TopicBadge topic={topic} />
+                    {lead.attribution?.promo && (
+                      <span className="rounded bg-emerald-950/40 px-1.5 py-0.5 text-xs text-emerald-300">
+                        {lead.attribution.promo.code}
                       </span>
-                      {uncalled && <span className="text-amber-300">{waitingLabel(q.createdAt, now)}</span>}
-                      {q.nextFollowUpAt && q.status !== "closed" && !uncalled && (
-                        <span className={due ? "font-semibold text-amber-300" : ""}>
-                          {due
-                            ? q.nextFollowUpAt < todayStart
-                              ? `Follow-up overdue since ${day(q.nextFollowUpAt)}`
-                              : "Follow-up due today"
-                            : `Next follow-up ${day(q.nextFollowUpAt)}`}
-                        </span>
-                      )}
-                    </p>
-                  </Link>
-                  {/* Outside the card's link: a phone link nested in another link is invalid, and the tap must dial. */}
-                  {telHref(lead?.phone) && (
-                    <p className="mt-3 border-t border-ink-800 pt-3 text-sm">
-                      <span className="text-ink-500">Call </span>
-                      <CallLink phone={lead?.phone ?? null} />
-                    </p>
-                  )}
+                    )}
+                  </p>
+                  <p className="mt-0.5 text-sm text-ink-400">
+                    Received {day(lead.createdAt)}
+                    {vehicle && ` · ${vehicle}`}
+                    {source && ` · via ${source}`}
+                  </p>
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+                <LeadStatusSelect
+                  leadId={lead.id}
+                  status={lead.status}
+                  linkedToCustomer={Boolean(lead.convertedCustomerId)}
+                />
+              </div>
+
+              {snippet && <p className="mt-2 line-clamp-2 text-sm text-ink-500">{snippet}</p>}
+
+              {request && (
+                <p className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-400">
+                  <span className={isNew ? "font-semibold text-amber-300" : ""}>
+                    {callStatusLabel(request, followUps.get(request.id) ?? 0, day)}
+                  </span>
+                  {!isNew && request.nextFollowUpAt && !due && lead.status !== "completed" && lead.status !== "lost" && (
+                    <span>Next follow-up {day(request.nextFollowUpAt)}</span>
+                  )}
+                  {due && request.nextFollowUpAt && (
+                    <span className="font-semibold text-amber-300">
+                      {request.nextFollowUpAt < todayStart
+                        ? `Follow-up overdue since ${day(request.nextFollowUpAt)}`
+                        : "Follow-up due today"}
+                    </span>
+                  )}
+                </p>
+              )}
+
+              <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-ink-800 pt-3 text-sm">
+                {phoneHref ? (
+                  <a href={phoneHref} className="font-medium text-accent-300 hover:underline">
+                    Call {formatPhone(lead.phone)}
+                  </a>
+                ) : (
+                  lead.phone && <span className="text-ink-300">{lead.phone}</span>
+                )}
+                {lead.email && <span className="text-ink-400">{lead.email}</span>}
+                <span className="ml-auto flex flex-wrap gap-x-4 gap-y-1">
+                  {callLog && (
+                    <Link href={callLog} className="font-medium text-accent-300 hover:underline">
+                      Call log &amp; follow-ups →
+                    </Link>
+                  )}
+                  <Link href={`/admin/leads/${lead.id}`} className="text-ink-300 hover:text-accent-300 hover:underline">
+                    Lead details →
+                  </Link>
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

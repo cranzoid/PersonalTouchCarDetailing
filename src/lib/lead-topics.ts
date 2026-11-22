@@ -86,100 +86,79 @@ export function topicServicesLabel(topic: LeadTopic | undefined): string {
 }
 
 /* ------------------------------------------------------------------ */
-/* The call queue                                                      */
+/* One status for a lead and its requests                              */
 /* ------------------------------------------------------------------ */
 
-export const REQUEST_FILTERS = ["all", "call", "due", "contacted", "closed"] as const;
-export type RequestFilter = (typeof REQUEST_FILTERS)[number];
+/**
+ * The lead's status is the only status staff see. A quote or callback request
+ * keeps a status column of its own (new | reviewing | estimated | closed), but
+ * it is a mirror, rewritten from the lead's by `quoteStatusForLead` whenever the
+ * lead moves, so the Leads list and a request's call log can never disagree.
+ */
+export const LEAD_STATUSES = ["new", "contacted", "qualified", "converted", "completed", "lost"] as const;
+export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
-export const REQUEST_FILTER_LABELS: Record<RequestFilter, string> = {
+/** Finished with: nothing more to chase. */
+export function isLeadClosed(status: string): boolean {
+  return status === "completed" || status === "lost";
+}
+
+/** The request status that mirrors a lead status. */
+export function quoteStatusForLead(
+  leadStatus: string,
+  hasEstimate: boolean,
+): "new" | "reviewing" | "estimated" | "closed" {
+  if (isLeadClosed(leadStatus)) return "closed";
+  if (leadStatus === "new") return "new";
+  return hasEstimate ? "estimated" : "reviewing";
+}
+
+export const LEAD_FILTERS = ["all", "new", "due", "contacted", "qualified", "converted", "completed", "lost"] as const;
+export type LeadFilter = (typeof LEAD_FILTERS)[number];
+
+export const LEAD_FILTER_LABELS: Record<LeadFilter, string> = {
   all: "All",
-  call: "Needs a call",
+  new: "New — not called",
   due: "Follow-up due",
   contacted: "Contacted",
-  closed: "Closed",
+  qualified: "Qualified",
+  converted: "Converted",
+  completed: "Completed",
+  lost: "Lost",
 };
 
-export function parseRequestFilter(value: string | undefined): RequestFilter {
-  return (REQUEST_FILTERS as readonly string[]).includes(value ?? "") ? (value as RequestFilter) : "all";
+export function parseLeadFilter(value: string | undefined): LeadFilter {
+  return (LEAD_FILTERS as readonly string[]).includes(value ?? "") ? (value as LeadFilter) : "all";
 }
 
 export function parseTopic(value: string | undefined): LeadTopic | null {
   return (LEAD_TOPICS as readonly string[]).includes(value ?? "") ? (value as LeadTopic) : null;
 }
 
-type QueueRequest = {
-  status: string;
-  createdAt: Date;
-  lastFollowedUpAt: Date | null;
-  nextFollowUpAt: Date | null;
-};
+type ListedLead = { status: string; nextFollowUpAt: Date | null };
 
 /**
- * "Called" means a follow-up has been logged against the request, which is
- * also what moves the lead from new to contacted. The app keeps no separate
- * "seen it" marker, so opening a request does not count.
+ * A follow-up has come due on someone already spoken to. A new lead is not
+ * counted: it is waiting for its first call, which the New chip already shows.
  */
-export function needsCall(request: QueueRequest): boolean {
-  return request.status !== "closed" && request.lastFollowedUpAt === null;
+export function isFollowUpDueFor(lead: ListedLead, now: Date): boolean {
+  return (
+    lead.status !== "new" &&
+    !isLeadClosed(lead.status) &&
+    lead.nextFollowUpAt !== null &&
+    lead.nextFollowUpAt <= now
+  );
 }
 
-export function isContacted(request: QueueRequest): boolean {
-  return request.status !== "closed" && request.lastFollowedUpAt !== null;
-}
-
-export function isDue(request: QueueRequest, now: Date): boolean {
-  return request.status !== "closed" && request.nextFollowUpAt !== null && request.nextFollowUpAt <= now;
-}
-
-export function matchesRequestFilter(request: QueueRequest, filter: RequestFilter, now: Date): boolean {
-  switch (filter) {
-    case "all":
-      return true;
-    case "call":
-      return needsCall(request);
-    case "due":
-      return isDue(request, now);
-    case "contacted":
-      return isContacted(request);
-    case "closed":
-      return request.status === "closed";
-  }
-}
-
-/**
- * The order somebody works the list in: requests nobody has called first, the
- * longest-waiting at the top; then follow-ups that have come due; then the rest
- * of the contacted ones, newest first; closed last.
- */
-export function sortForCalling<T extends QueueRequest>(requests: readonly T[], now: Date): T[] {
-  const rank = (r: T) => (r.status === "closed" ? 3 : needsCall(r) ? 0 : isDue(r, now) ? 1 : 2);
-  return [...requests].sort((a, b) => {
-    const byRank = rank(a) - rank(b);
-    if (byRank !== 0) return byRank;
-    switch (rank(a)) {
-      case 0:
-        return a.createdAt.getTime() - b.createdAt.getTime();
-      case 1:
-        return (a.nextFollowUpAt?.getTime() ?? 0) - (b.nextFollowUpAt?.getTime() ?? 0);
-      default:
-        return b.createdAt.getTime() - a.createdAt.getTime();
-    }
-  });
-}
-
-const DAY_MS = 86_400_000;
-
-/** "Waiting 3 days", or "Waiting since today" for one that arrived in the last day. */
-export function waitingLabel(createdAt: Date, now: Date): string {
-  const days = Math.max(0, Math.floor((now.getTime() - createdAt.getTime()) / DAY_MS));
-  if (days === 0) return "Waiting since today";
-  return `Waiting ${days} day${days === 1 ? "" : "s"}`;
+export function matchesLeadFilter(lead: ListedLead, filter: LeadFilter, now: Date): boolean {
+  if (filter === "all") return true;
+  if (filter === "due") return isFollowUpDueFor(lead, now);
+  return lead.status === filter;
 }
 
 /** "Not called yet", or "Contacted Nov 3 · 2 follow-ups". */
 export function callStatusLabel(
-  request: Pick<QueueRequest, "status" | "lastFollowedUpAt">,
+  request: { lastFollowedUpAt: Date | null },
   followUps: number,
   formatDay: (date: Date) => string,
 ): string {

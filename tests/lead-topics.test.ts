@@ -1,24 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
   callStatusLabel,
+  isFollowUpDueFor,
   leadTopic,
-  matchesRequestFilter,
-  needsCall,
-  sortForCalling,
+  matchesLeadFilter,
+  quoteStatusForLead,
   telHref,
   topicServicesLabel,
-  waitingLabel,
 } from "../src/lib/lead-topics";
 import { followUpValuesFor } from "../src/lib/quote-follow-ups";
 
 const now = new Date("2026-11-10T15:00:00Z");
 const daysAgo = (n: number) => new Date(now.getTime() - n * 86_400_000);
 
-function request(
-  id: string,
-  over: Partial<{ status: string; createdAt: Date; lastFollowedUpAt: Date | null; nextFollowUpAt: Date | null }> = {},
-) {
-  return { id, status: "new", createdAt: daysAgo(1), lastFollowedUpAt: null, nextFollowUpAt: null, ...over };
+function lead(status: string, nextFollowUpAt: Date | null = null) {
+  return { status, nextFollowUpAt };
 }
 
 describe("leadTopic", () => {
@@ -34,57 +30,41 @@ describe("leadTopic", () => {
   });
 });
 
-describe("the call queue", () => {
-  it("counts a request as needing a call until a follow-up is logged, and never once closed", () => {
-    expect(needsCall(request("a"))).toBe(true);
-    expect(needsCall(request("b", { lastFollowedUpAt: daysAgo(1) }))).toBe(false);
-    expect(needsCall(request("c", { status: "closed" }))).toBe(false);
+describe("one status for a lead and its requests", () => {
+  it("mirrors the lead's status onto its requests", () => {
+    expect(quoteStatusForLead("new", false)).toBe("new");
+    expect(quoteStatusForLead("contacted", false)).toBe("reviewing");
+    expect(quoteStatusForLead("qualified", true)).toBe("estimated");
+    expect(quoteStatusForLead("converted", false)).toBe("reviewing");
+    expect(quoteStatusForLead("completed", true)).toBe("closed");
+    expect(quoteStatusForLead("lost", false)).toBe("closed");
   });
 
-  it("puts uncalled requests first, longest-waiting on top, then due follow-ups, then the rest, closed last", () => {
-    const list = [
-      request("closed", { status: "closed", createdAt: daysAgo(9) }),
-      request("contacted-new", { createdAt: daysAgo(2), lastFollowedUpAt: daysAgo(1), nextFollowUpAt: daysAgo(-2) }),
-      request("uncalled-newer", { createdAt: daysAgo(1) }),
-      request("due", { createdAt: daysAgo(6), lastFollowedUpAt: daysAgo(3), nextFollowUpAt: daysAgo(0.5) }),
-      request("uncalled-oldest", { createdAt: daysAgo(5) }),
-    ];
-    expect(sortForCalling(list, now).map((r) => r.id)).toEqual([
-      "uncalled-oldest",
-      "uncalled-newer",
-      "due",
-      "contacted-new",
-      "closed",
-    ]);
+  it("counts a follow-up as due only on someone already contacted and not finished with", () => {
+    expect(isFollowUpDueFor(lead("contacted", daysAgo(1)), now)).toBe(true);
+    expect(isFollowUpDueFor(lead("contacted", daysAgo(-1)), now)).toBe(false);
+    expect(isFollowUpDueFor(lead("contacted"), now)).toBe(false);
+    // A new lead is waiting for its first call, which the New chip shows.
+    expect(isFollowUpDueFor(lead("new", daysAgo(1)), now)).toBe(false);
+    expect(isFollowUpDueFor(lead("lost", daysAgo(1)), now)).toBe(false);
+    expect(isFollowUpDueFor(lead("completed", daysAgo(1)), now)).toBe(false);
   });
 
   it("filters the way the chips are labelled", () => {
-    const uncalled = request("u", { nextFollowUpAt: daysAgo(1) });
-    const called = request("c", { lastFollowedUpAt: daysAgo(2), nextFollowUpAt: daysAgo(-1) });
-    const closed = request("x", { status: "closed", lastFollowedUpAt: daysAgo(2) });
-    expect(matchesRequestFilter(uncalled, "call", now)).toBe(true);
-    expect(matchesRequestFilter(called, "call", now)).toBe(false);
-    expect(matchesRequestFilter(uncalled, "due", now)).toBe(true);
-    expect(matchesRequestFilter(called, "due", now)).toBe(false);
-    expect(matchesRequestFilter(called, "contacted", now)).toBe(true);
-    expect(matchesRequestFilter(closed, "contacted", now)).toBe(false);
-    expect(matchesRequestFilter(closed, "closed", now)).toBe(true);
-    expect(matchesRequestFilter(closed, "all", now)).toBe(true);
+    expect(matchesLeadFilter(lead("new"), "new", now)).toBe(true);
+    expect(matchesLeadFilter(lead("contacted"), "new", now)).toBe(false);
+    expect(matchesLeadFilter(lead("contacted", daysAgo(1)), "due", now)).toBe(true);
+    expect(matchesLeadFilter(lead("lost"), "lost", now)).toBe(true);
+    expect(matchesLeadFilter(lead("lost"), "all", now)).toBe(true);
   });
 });
 
 describe("labels", () => {
-  it("says how long a request has waited", () => {
-    expect(waitingLabel(daysAgo(3), now)).toBe("Waiting 3 days");
-    expect(waitingLabel(daysAgo(1), now)).toBe("Waiting 1 day");
-    expect(waitingLabel(daysAgo(0.2), now)).toBe("Waiting since today");
-  });
-
   it("says whether anyone has called", () => {
     const day = (d: Date) => (d.getTime() === daysAgo(7).getTime() ? "Nov 3" : "?");
-    expect(callStatusLabel({ status: "new", lastFollowedUpAt: null }, 0, day)).toBe("Not called yet");
-    expect(callStatusLabel({ status: "new", lastFollowedUpAt: daysAgo(7) }, 2, day)).toBe("Contacted Nov 3 · 2 follow-ups");
-    expect(callStatusLabel({ status: "new", lastFollowedUpAt: daysAgo(7) }, 1, day)).toBe("Contacted Nov 3 · 1 follow-up");
+    expect(callStatusLabel({ lastFollowedUpAt: null }, 0, day)).toBe("Not called yet");
+    expect(callStatusLabel({ lastFollowedUpAt: daysAgo(7) }, 2, day)).toBe("Contacted Nov 3 · 2 follow-ups");
+    expect(callStatusLabel({ lastFollowedUpAt: daysAgo(7) }, 1, day)).toBe("Contacted Nov 3 · 1 follow-up");
   });
 
   it("builds a dialable link, and none for a number too short to dial", () => {
