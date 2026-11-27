@@ -1905,3 +1905,26 @@ reviewing / estimated / closed) that never agreed.
 - **New appointment** has "Customer not in the list? Add them now" (the same
   round trip as invoices) and an "+ Add vehicle" dialog.
 - No migration.
+
+## 57. A discount can be changed on an unpaid invoice
+
+2026-11-28. A ceramic coating booking was checked in and invoiced, and then a
+discount was agreed. An invoice raised from a booking only carries the discount
+locked at booking, and there was no way to change it. Cancelling and typing a
+manual invoice drops the job link and the deposit.
+
+- **Invoice page → Discount**: dollars or percent, optional reason, or remove.
+  It replaces the current discount; it does not add to it.
+- **Allowed while no payment is recorded on the invoice.** A booking deposit
+  does not block it (the tax-treatment control does count a deposit as paid).
+- HST is recomputed from the stored subtotal and the invoice's own rate. A
+  percentage tip is recomputed; a typed tip is left alone.
+- The deposit is re-applied up to the new total; any excess shows as owed back.
+- An open online card session for the old total is closed first. A terminal or
+  other card payment in progress refuses the change.
+- A sent invoice is not re-sent automatically.
+- The booking itself is not changed. Cancelling the invoice and re-invoicing,
+  or revising the appointment while the invoice is a draft, goes back to the
+  booking's discount.
+- No migration.
+

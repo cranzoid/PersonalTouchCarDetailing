@@ -315,6 +315,13 @@ export default async function InvoiceDetailPage({ params }: { params: Promise<{ 
         tipCents={invoice.tipCents}
         tipBasisBp={invoice.tipBasisBp}
         tipBaseCents={tipBaseCents(invoice.subtotalCents, invoice.discountCents)}
+        canDiscount={
+          ["draft", "sent", "overdue", "partially_paid"].includes(invoice.status) &&
+          !payments.some((p) => p.status === "succeeded")
+        }
+        subtotalCents={invoice.subtotalCents}
+        discountCents={invoice.discountCents}
+        discountReason={invoice.discountReason}
       />
     </div>
   );

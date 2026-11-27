@@ -1624,6 +1624,177 @@ export async function setInvoiceTaxExemptAction(raw: unknown): Promise<ActionRes
 }
 
 /* ------------------------------------------------------------------ */
+/* Discount on an existing invoice                                     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Sets, changes or removes the discount on an invoice nobody has paid yet.
+ *
+ * A booking raises its invoice with whatever discount was locked when the
+ * customer booked, and the counter often agrees one after that. Cancelling and
+ * typing a manual invoice instead loses the job link and the deposit.
+ *
+ * "Paid" here means a payment recorded against THIS invoice. A booking deposit
+ * lives on the appointment and does not block the change.
+ */
+export async function setInvoiceDiscountAction(raw: unknown): Promise<ActionResult> {
+  try {
+    const staff = await requireStaff("manage_invoices");
+    const parsed = z
+      .object({
+        invoiceId: z.string().min(1),
+        // Exactly one of the two. Zero removes the discount.
+        discountCents: z.number().int().min(0).max(100_000_000).optional(),
+        discountPercentBp: z.number().int().min(0).max(10000).optional(),
+        reason: z.string().trim().max(200).optional(),
+      })
+      .safeParse(raw);
+    if (!parsed.success) return { ok: false, error: "Please check the discount" };
+    const input = parsed.data;
+    if ((input.discountCents === undefined) === (input.discountPercentBp === undefined)) {
+      return { ok: false, error: "Give the discount either as a percentage or as an amount" };
+    }
+    const settings = await getSettings();
+
+    // A card payment started for the old total must not outlive it. Ask Helcim
+    // first, so one that has already gone through is recorded (and then blocks
+    // the change below) rather than being thrown away.
+    const pending = await db()
+      .selectDistinct({ checkoutId: schema.payments.checkoutId })
+      .from(schema.payments)
+      .where(and(eq(schema.payments.invoiceId, input.invoiceId), eq(schema.payments.status, "pending")));
+    for (const { checkoutId } of pending) {
+      if (checkoutId) await reconcileCheckout(checkoutId);
+    }
+
+    const result = await db().transaction(async (tx): Promise<ActionResult> => {
+      const rows = await tx.select().from(schema.invoices).where(eq(schema.invoices.id, input.invoiceId)).for("update");
+      const invoice = rows[0];
+      if (!invoice) return { ok: false, error: "Invoice not found" };
+      if (!["draft", "sent", "overdue", "partially_paid"].includes(invoice.status)) {
+        return { ok: false, error: `A ${invoice.status.replaceAll("_", " ")} invoice cannot have its discount changed` };
+      }
+      const payments = await tx.select().from(schema.payments).where(eq(schema.payments.invoiceId, invoice.id));
+      if (payments.some((p) => p.status === "succeeded")) {
+        return { ok: false, error: "This invoice already has a payment, so its discount cannot be changed" };
+      }
+
+      const discountCents =
+        input.discountPercentBp !== undefined
+          ? percentCents(invoice.subtotalCents, input.discountPercentBp)
+          : input.discountCents!;
+      if (discountCents > invoice.subtotalCents) {
+        return {
+          ok: false,
+          error: `The discount cannot be more than the subtotal (${formatCents(invoice.subtotalCents, settings.currency)})`,
+        };
+      }
+      const discountReason = discountCents > 0 ? input.reason || null : null;
+      if (discountCents === invoice.discountCents && discountReason === invoice.discountReason) {
+        return { ok: true };
+      }
+
+      // A percentage tip still has to describe the work it is a percentage of.
+      // A typed tip is money the customer chose and is left alone.
+      const tipCents = invoice.tipBasisBp
+        ? tipCentsFromBasisPoints(invoice.subtotalCents, discountCents, invoice.tipBasisBp)
+        : invoice.tipCents;
+      // The stored subtotal and rate, not the line items or today's settings:
+      // only the discount is changing.
+      const totals = computeInvoiceTotals(
+        [{ quantity: 1, unitPriceCents: invoice.subtotalCents }],
+        discountCents,
+        invoice.taxRateBp,
+        tipCents,
+      );
+
+      const openCheckouts = payments.flatMap((p) => (p.status === "pending" && p.checkoutId ? [p.checkoutId] : []));
+      if (openCheckouts.length > 0) {
+        const holders = await tx
+          .select()
+          .from(schema.paymentCheckouts)
+          .where(and(inArray(schema.paymentCheckouts.id, openCheckouts), eq(schema.paymentCheckouts.status, "open")))
+          .for("update");
+        if (holders.some((h) => h.channel !== "online" || h.kind !== "invoices")) {
+          return {
+            ok: false,
+            error: "A card payment for this invoice is in progress. Finish or stop it, then change the discount.",
+          };
+        }
+        for (const holder of holders) {
+          await closeCheckout(tx, holder.id, "expired", "The invoice total changed before it was paid");
+        }
+      }
+
+      // Re-applied from the deposit the appointments still hold, the same way
+      // invoicing first applied it. Anything the smaller total cannot absorb
+      // shows on the invoice page as owed back.
+      const linked = await tx
+        .select({ depositPaidCents: schema.appointments.depositPaidCents })
+        .from(schema.invoiceJobs)
+        .innerJoin(schema.jobs, eq(schema.jobs.id, schema.invoiceJobs.jobId))
+        .innerJoin(schema.appointments, eq(schema.appointments.id, schema.jobs.appointmentId))
+        .where(eq(schema.invoiceJobs.invoiceId, invoice.id));
+      const depositHeldCents = linked.length
+        ? linked.reduce((sum, a) => sum + a.depositPaidCents, 0)
+        : invoice.depositAppliedCents;
+      const depositAppliedCents = Math.min(depositHeldCents, totals.totalCents);
+
+      await tx
+        .update(schema.invoices)
+        .set({
+          discountCents: totals.discountCents,
+          discountReason,
+          taxCents: totals.taxCents,
+          tipCents: totals.tipCents,
+          totalCents: totals.totalCents,
+          depositAppliedCents,
+          // The note invoicing writes ("X applied at booking.") stops being
+          // true once less than that discount is being given.
+          notes:
+            totals.discountCents < invoice.discountCents && invoice.notes?.endsWith(" applied at booking.")
+              ? null
+              : invoice.notes,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.invoices.id, invoice.id));
+
+      // Only when the deposit now covers an issued invoice outright is there a
+      // status to move; nothing else about what has been paid has changed.
+      if (invoice.status !== "draft" && totals.totalCents > 0 && depositAppliedCents >= totals.totalCents) {
+        await recalculateInvoiceStatus(tx, invoice.id);
+      }
+
+      await audit(tx, {
+        actorType: "staff",
+        actorId: staff.id,
+        action: "invoice.discount_changed",
+        entityType: "invoice",
+        entityId: invoice.id,
+        before: {
+          discountCents: invoice.discountCents,
+          discountReason: invoice.discountReason,
+          totalCents: invoice.totalCents,
+        },
+        after: { discountCents: totals.discountCents, discountReason, totalCents: totals.totalCents },
+        reason: input.reason || undefined,
+      });
+      return { ok: true };
+    });
+
+    if (result.ok) {
+      revalidatePath("/admin/invoices");
+      revalidatePath(`/admin/invoices/${input.invoiceId}`);
+    }
+    return result;
+  } catch (err) {
+    if (err instanceof AuthError) return { ok: false, error: err.message };
+    console.error("setInvoiceDiscountAction failed", err);
+    return { ok: false, error: "Something went wrong changing the discount" };
+  }
+}
+
+/* ------------------------------------------------------------------ */
 /* Tips                                                                */
 /* ------------------------------------------------------------------ */
 

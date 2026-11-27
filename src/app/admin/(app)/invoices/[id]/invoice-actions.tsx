@@ -11,6 +11,7 @@ import {
   issueRefundAction,
   cancelInvoiceAction,
   setInvoiceTaxExemptAction,
+  setInvoiceDiscountAction,
   setInvoiceTipAction,
 } from "../actions";
 import { TerminalCollect } from "./terminal-collect";
@@ -50,6 +51,10 @@ export function InvoiceActions({
   tipCents,
   tipBasisBp,
   tipBaseCents,
+  canDiscount,
+  subtotalCents,
+  discountCents,
+  discountReason,
 }: {
   invoiceId: string;
   /**
@@ -85,6 +90,11 @@ export function InvoiceActions({
    * action will compute, rather than a second derivation that can drift.
    */
   tipBaseCents: number;
+  /** Unpaid and not cancelled. A booking deposit does not count as paid. */
+  canDiscount: boolean;
+  subtotalCents: number;
+  discountCents: number;
+  discountReason: string | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -121,6 +131,13 @@ export function InvoiceActions({
   const [showTax, setShowTax] = useState(false);
   const [taxReason, setTaxReason] = useState("");
   const [tipAmount, setTipAmount] = useState("");
+  const [discountMode, setDiscountMode] = useState<"amount" | "percent">("amount");
+  const [discountValue, setDiscountValue] = useState("");
+  const [discountNote, setDiscountNote] = useState(discountReason ?? "");
+  const discountEntered = Math.round(Number(discountValue || 0) * 100);
+  // A preview only; the server works the figure out again from its own subtotal.
+  const discountPreviewCents =
+    discountMode === "percent" ? Math.round((subtotalCents * discountEntered) / 10000) : discountEntered;
 
   const canSend = ["draft", "sent", "partially_paid", "overdue"].includes(status);
   const canTakePayment = balanceCents > 0 && !["cancelled", "refunded"].includes(status);
@@ -145,6 +162,29 @@ export function InvoiceActions({
     if (!res.ok) return setError(res.error);
     setShowTax(false);
     setTaxReason("");
+    router.refresh();
+  }
+
+  async function changeDiscount(remove: boolean) {
+    if (!remove && !(discountEntered > 0)) {
+      setError("Enter a discount");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    const res = await setInvoiceDiscountAction({
+      invoiceId,
+      ...(remove
+        ? { discountCents: 0 }
+        : discountMode === "percent"
+          ? { discountPercentBp: discountEntered }
+          : { discountCents: discountEntered }),
+      reason: remove ? undefined : discountNote,
+    });
+    setBusy(false);
+    if (!res.ok) return setError(res.error);
+    setDiscountValue("");
+    if (remove) setDiscountNote("");
     router.refresh();
   }
 
@@ -255,7 +295,7 @@ export function InvoiceActions({
 
   const input = "rounded-lg border border-ink-600 bg-ink-950 px-3 py-2 text-sm text-white";
 
-  if (!canSend && !canTakePayment && !canRefund && !canCancel) {
+  if (!canSend && !canTakePayment && !canRefund && !canCancel && !canDiscount) {
     return (
       <section className="mt-8 rounded-xl border border-ink-800 p-5">
         <h2 className="text-xs font-semibold uppercase tracking-wider text-ink-400">Actions</h2>
@@ -332,6 +372,78 @@ export function InvoiceActions({
               )}
               <p className="mt-1 break-all font-mono text-emerald-300">{link}</p>
             </div>
+          )}
+        </div>
+      )}
+
+      {canDiscount && (
+        <div className="border-t border-ink-800 pt-5">
+          <p className="text-sm font-medium text-white">Discount</p>
+          <p className="mt-1 text-xs text-ink-500">
+            {discountCents > 0
+              ? `${formatCents(discountCents, currency)} off now. A new discount replaces it, so enter the full amount to take off.`
+              : `Comes off before ${taxLabel}.`}
+            {status !== "draft" && " Re-send the invoice afterwards so the customer sees the new total."}
+          </p>
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <label className="block text-xs text-ink-400">
+              {discountMode === "percent" ? "Percent off" : "Amount off"}
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                className={`${input} mt-1 block w-32`}
+                value={discountValue}
+                onChange={(e) => setDiscountValue(e.target.value)}
+                placeholder={discountMode === "percent" ? "10" : "25.00"}
+              />
+            </label>
+            <div className="flex overflow-hidden rounded-lg border border-ink-600">
+              {(["amount", "percent"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  aria-pressed={discountMode === mode}
+                  onClick={() => setDiscountMode(mode)}
+                  className={`px-3 py-2 text-sm ${
+                    discountMode === mode ? "bg-accent-400 font-semibold text-ink-950" : "text-ink-300"
+                  }`}
+                >
+                  {mode === "amount" ? "$" : "%"}
+                </button>
+              ))}
+            </div>
+            <label className="block grow text-xs text-ink-400">
+              Why? (optional, shown on the invoice)
+              <input
+                className={`${input} mt-1 block w-full`}
+                maxLength={200}
+                value={discountNote}
+                onChange={(e) => setDiscountNote(e.target.value)}
+                placeholder="e.g. Repeat customer"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => void changeDiscount(false)}
+              disabled={busy || discountValue.trim() === ""}
+              className="rounded-lg border border-ink-600 px-4 py-2 text-sm font-medium text-ink-200 hover:bg-ink-800 disabled:opacity-40"
+            >
+              Apply discount
+            </button>
+            {discountCents > 0 && (
+              <button
+                type="button"
+                onClick={() => void changeDiscount(true)}
+                disabled={busy}
+                className="rounded-lg border border-ink-700 px-4 py-2 text-sm font-medium text-ink-400 hover:bg-ink-800 disabled:opacity-40"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+          {discountPreviewCents > 0 && (
+            <p className="mt-2 text-xs text-ink-500">= {formatCents(discountPreviewCents, currency)} off the subtotal</p>
           )}
         </div>
       )}
